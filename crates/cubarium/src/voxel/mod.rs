@@ -526,6 +526,7 @@ pub enum CordShapeConfig {
 /// flower_cycle = true  # each flower's glow also cycles on and off on its own phase (Wrysk, 2026-10-11)
 /// flower_cycle_s = 90.0  # flower_cycle: seconds from on to off and on again
 /// colour_fade_s = 4.0  # seconds a plant cell's colour or vine tile takes to change (0: at once)
+/// sky_fade_s = 1.0     # the app's views: seconds the sky's shading eases in over a first picture drawn before it (0: at once)
 /// # FOG-MOTION (2026-10-10, Wrysk picked "deep"): "fixed", "breathing", "flowing", "deep"
 /// fog_motion = "deep"  # how the ground fog moves ("fixed": the old look; costs the same)
 /// fog_breath = 0.5     # breathing/flowing/deep: a bank's density swings this share either way
@@ -703,6 +704,12 @@ pub struct LightConfig {
     /// style fade moves at the pack (20 Hz), a vine tile fade every frame on the lit tier
     /// and at the tick on the flat one. `0` switches at once (the steps as they were).
     pub colour_fade_s: f32,
+    /// Seconds of the presenter's clock the sky's occlusion (the sky plane) takes to ease
+    /// in over a picture the app's views drew before it was baked: a new-world preview's
+    /// fast picture, a new world's first frames. The plane is lifted toward the open sky
+    /// those were drawn under and let down over this time. `0` switches at once. The
+    /// desktop window and the panel hold their first frame for the plane and never ease.
+    pub sky_fade_s: f32,
     /// How the ground fog moves (FOG-MOTION, 2026-10-10: **a trial** for Wrysk to pick
     /// from video): `"fixed"` (its pattern evolving and drifting with the clouds, as it
     /// was), `"breathing"` (and each fog bank's density swells and thins slowly, every bank
@@ -786,6 +793,7 @@ impl Default for LightConfig {
             flower_cycle: true,
             flower_cycle_s: 90.0,
             colour_fade_s: 4.0,
+            sky_fade_s: 1.0,
             fog_motion: FogMotionKind::Deep,
             fog_breath: cubarium_gpu::weather::FOG_BREATH_DEFAULT,
             fog_breath_s: cubarium_gpu::weather::FOG_BREATH_S_DEFAULT,
@@ -2176,6 +2184,7 @@ fn open_out(args: &Voxel, cfg: &VoxelConfig, proj: Projection, speed: f64) -> Re
                     models: load_models(cfg),
                     textures_under: None,
                     specimens: Vec::new(),
+                    ..Default::default()
                 },
             )?;
             if args.gpu_web_rate > 0.0 {

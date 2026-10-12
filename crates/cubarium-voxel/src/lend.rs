@@ -26,6 +26,8 @@ pub struct WaterLend {
     /// hold free water in) and at this one.
     wet_then: Vec<u128>,
     wet_now: Vec<u128>,
+    /// Union of active rows per word, reused by tall-world lends.
+    any: Vec<u128>,
     /// Their union for the restore, kept warm instead of allocated every tick.
     rows: Vec<u128>,
     /// Per plane (`y`), the porous runs `(start, len)` within it, and the terrain version
@@ -78,9 +80,7 @@ impl World {
         // The lend: partial only one tick after the last, on unchanged terrain, with row
         // masks this tick and last.
         let key = (live.tick, live.terrain_version);
-        let follows = lend
-            .last
-            .is_some_and(|(t, v)| t + 1 == key.0 && v == key.1);
+        let follows = lend.last.is_some_and(|(t, v)| t + 1 == key.0 && v == key.1);
         std::mem::swap(&mut lend.wet_then, &mut lend.wet_now);
         lend.wet_now.clear();
         match live.wet.columns() {
@@ -116,20 +116,36 @@ impl World {
         }
         // Free water: the cells wet then or now.
         lend.rows.clear();
-        lend.rows.extend(
-            lend.wet_then
-                .iter()
-                .zip(&lend.wet_now)
-                .map(|(a, b)| a | b),
-        );
+        lend.rows
+            .extend(lend.wet_then.iter().zip(&lend.wet_now).map(|(a, b)| a | b));
         let rows = &lend.rows;
-        let any = rows.iter().fold(0u128, |a, r| a | r);
+        let words = self.config.height as usize;
+        let words = words.div_ceil(crate::world::MASK_ROWS);
+        let any_word = if words == 1 {
+            rows.iter().fold(0u128, |a, r| a | r)
+        } else {
+            0
+        };
+        // Short worlds keep the allocation-free one-word path.
+        let any = &mut lend.any;
+        any.clear();
+        if words > 1 {
+            any.resize(words, 0u128);
+            for column in rows.chunks_exact(words) {
+                for (a, &word) in any.iter_mut().zip(column) {
+                    *a |= word;
+                }
+            }
+        }
         let free = |y: usize, d: &mut [f64], s: &[f64]| {
-            if (any >> y) & 1 == 0 {
+            let k = y / crate::world::MASK_ROWS;
+            let bit = y % crate::world::MASK_ROWS;
+            let word = if words == 1 { any_word } else { any[k] };
+            if (word >> bit) & 1 == 0 {
                 return;
             }
-            for (c, r) in rows.iter().enumerate() {
-                if (r >> y) & 1 != 0 {
+            for (c, r) in rows.chunks_exact(words).enumerate() {
+                if (r[k] >> bit) & 1 != 0 {
                     d[c] = s[c];
                 }
             }

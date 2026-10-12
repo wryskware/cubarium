@@ -14,9 +14,11 @@ const ITEMS := [["resume", "Resume"], ["save", "Save"], ["load", "Load"], ["new"
 ## The shell (main.gd); null in the editor, which keeps the sample.
 var shell: Node
 var buttons := {}
+var startup := false
 
 @onready var _world: Control = $World
 @onready var _title: NeonTitle = $Center/Page/Body/Margin/Stack/Title
+@onready var _body: Control = $Center/Page/Body
 @onready var _items: Control = $Center/Page/Body/Margin/Stack/Items
 
 
@@ -32,9 +34,19 @@ func _ready() -> void:
 	_world.visible = false
 
 
-## Show it. Without a running world, Resume, Save, Field guide and Dev metrics are off.
-func open(has_world: bool) -> void:
-	buttons["resume"].disabled = not has_world
+## The title hub offers Continue, Load, New world, Settings and Quit; a running world
+## keeps the ordinary pause hub and Resume.
+func open(has_world: bool, continue_slot := "") -> void:
+	startup = not has_world
+	_body.offset_left = -430.0 if startup else -286.0
+	_body.offset_right = 430.0 if startup else 286.0
+	_body.offset_top = -340.0 if startup else -390.0
+	_body.offset_bottom = 340.0 if startup else 390.0
+	buttons["resume"].get_node("Content/Label").text = " Resume " if has_world else " Continue "
+	buttons["resume"].disabled = not has_world and continue_slot == ""
+	for item in ["save", "guide", "metrics"]:
+		buttons[item].visible = has_world
+	_world.visible = not has_world
 	buttons["save"].disabled = not has_world
 	buttons["metrics"].disabled = not has_world
 	buttons["guide"].disabled = not has_world
@@ -46,6 +58,6 @@ func open(has_world: bool) -> void:
 func focus_first() -> void:
 	for item in ITEMS:
 		var b: BaseButton = buttons[item[0]]
-		if not b.disabled:
+		if b.visible and not b.disabled:
 			b.grab_focus()
 			return

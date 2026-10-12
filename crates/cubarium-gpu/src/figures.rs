@@ -1635,7 +1635,9 @@ pub(crate) fn pipeline(
         .layout(layout)
         .render_pass(pass)
         .subpass(0)];
-    let made = unsafe { d.create_graphics_pipelines(vk::PipelineCache::null(), &info, None) };
+    let made = crate::render::compile_turn(|| unsafe {
+        d.create_graphics_pipelines(vk::PipelineCache::null(), &info, None)
+    });
     match made {
         Ok(p) => Ok(p[0]),
         Err((_, e)) => bail!("vkCreateGraphicsPipelines (model pass): {e}"),

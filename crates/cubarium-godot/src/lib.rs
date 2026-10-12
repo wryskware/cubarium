@@ -148,7 +148,13 @@ impl CubariumSession {
     fn regenerate_candidates(&self, spec: Variant, seeds: VarArray) -> GString {
         let seeds: Result<Vec<Option<u64>>, String> = seeds
             .iter_shared()
-            .map(|v| if v.is_nil() { Ok(None) } else { seed_of(&to_json(&v)).map(Some) })
+            .map(|v| {
+                if v.is_nil() {
+                    Ok(None)
+                } else {
+                    seed_of(&to_json(&v)).map(Some)
+                }
+            })
             .collect();
         let result = seeds.and_then(|seeds| {
             world_spec(&spec).and_then(|s| self.session.generate_candidates_seeded(&s, &seeds))
@@ -227,6 +233,50 @@ impl CubariumSession {
         error_string(result)
     }
 
+    /// Found with a persistent autosave home attached during installation.
+    #[func]
+    fn promote_into(&self, index: i64, home: GString) -> GString {
+        let result = usize::try_from(index)
+            .map_err(|_| format!("no candidate {index}"))
+            .and_then(|i| {
+                self.session
+                    .promote_into(i, Some(PathBuf::from(home.to_string())))
+            });
+        error_string(result)
+    }
+
+    /// Load a manual snapshot and attach its world's autosave home at installation.
+    #[func]
+    fn load_with_home(&self, path: GString, home: GString) {
+        self.session.load_with_home(
+            &PathBuf::from(path.to_string()),
+            &PathBuf::from(home.to_string()),
+        );
+    }
+
+    #[func]
+    fn home(&self) -> GString {
+        self.session
+            .home()
+            .map_or_else(GString::new, |p| GString::from(p.display().to_string().as_str()))
+    }
+
+    #[func]
+    fn attach_home(&self, path: GString) {
+        self.session.attach_home(&PathBuf::from(path.to_string()));
+    }
+
+    /// Commit the attached autosave off the app thread; outcome follows disk replacement.
+    #[func]
+    fn autosave(&self) -> GString {
+        error_string(world_save::request(self.session.stopper()))
+    }
+
+    #[func]
+    fn take_save_notices(&self) -> Variant {
+        to_variant(&serde_json::to_value(world_save::take_notices()).unwrap_or(Value::Null))
+    }
+
     /// Load the save directory at `path` in place of the running world. Returns at once:
     /// `status().generation` moves when it has loaded, and a refusal (a save from another
     /// version, say) comes as a `load_failed` notice.
@@ -239,7 +289,7 @@ impl CubariumSession {
     /// once; the outcome comes as a `saved` or `save_failed` notice.
     #[func]
     fn save(&self, path: GString) {
-        self.session.save(&PathBuf::from(path.to_string()));
+        self.session.save_snapshot(&PathBuf::from(path.to_string()));
     }
 
     /// Stop and drop the running world.
@@ -472,10 +522,12 @@ fn world_spec(spec: &Variant) -> Result<WorldSpec, String> {
 /// negative int as the unsigned value with the same bits (`String.num_uint64` of it).
 fn seed_of(v: &Value) -> Result<u64, String> {
     match v {
-        Value::String(s) => s
-            .trim()
-            .parse::<u64>()
-            .map_err(|_| format!("a seed is a whole number from 0 to {}, not \"{s}\"", u64::MAX)),
+        Value::String(s) => s.trim().parse::<u64>().map_err(|_| {
+            format!(
+                "a seed is a whole number from 0 to {}, not \"{s}\"",
+                u64::MAX
+            )
+        }),
         Value::Number(n) => n
             .as_u64()
             .or_else(|| n.as_i64().map(|i| i as u64))
@@ -531,8 +583,15 @@ fn to_json(v: &Variant) -> Value {
         VariantType::BOOL => Value::Bool(v.to::<bool>()),
         VariantType::INT => Value::from(v.to::<i64>()),
         VariantType::FLOAT => Value::from(v.to::<f64>()),
-        VariantType::STRING | VariantType::STRING_NAME | VariantType::NODE_PATH => Value::String(v.to_string()),
-        VariantType::ARRAY => Value::Array(v.to::<VarArray>().iter_shared().map(|x| to_json(&x)).collect()),
+        VariantType::STRING | VariantType::STRING_NAME | VariantType::NODE_PATH => {
+            Value::String(v.to_string())
+        }
+        VariantType::ARRAY => Value::Array(
+            v.to::<VarArray>()
+                .iter_shared()
+                .map(|x| to_json(&x))
+                .collect(),
+        ),
         VariantType::DICTIONARY => Value::Object(
             v.to::<VarDictionary>()
                 .iter_shared()

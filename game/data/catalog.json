@@ -2,19 +2,55 @@
   "_about": "The new-world picker's catalog: what each choice is called and says. Sizes map to a config file (relative to the repository root) and its [width, height, depth]; `terrain` and `climate` name the preset that config already uses, so picking it sends nothing over the file's own tables. Terrain and climate entries are shown only when the session's `presets` query lists that name. Descriptions come from the presets' own doc comments.",
   "sizes": [
     {
-      "id": "terrarium",
-      "label": "Terrarium",
-      "size": [256, 128, 48],
+      "id": "widescreen",
+      "label": "16:9",
+      "size": [
+        288,
+        138,
+        48
+      ],
       "config": "config/desktop/terrarium.toml",
       "terrain": "terrarium",
       "climate": "tropical_jungle",
       "candidates": 4,
-      "description": "256 × 128 × 48 at 0.125 m: 32 m around, 16 m tall, 6 m deep."
+      "description": "288 \u00d7 138 \u00d7 48 cells. About 16:9 at the usual 30\u00b0 viewing angle."
+    },
+    {
+      "id": "widescreen-deep",
+      "label": "16:9 deep",
+      "size": [
+        384,
+        168,
+        96
+      ],
+      "config": "config/desktop/terrarium-d96.toml",
+      "terrain": "terrarium",
+      "climate": "tropical_jungle",
+      "candidates": 3,
+      "description": "384 \u00d7 168 \u00d7 96 cells. About 16:9, with 12 m of depth."
+    },
+    {
+      "id": "terrarium",
+      "label": "Terrarium",
+      "size": [
+        256,
+        128,
+        48
+      ],
+      "config": "config/desktop/terrarium.toml",
+      "terrain": "terrarium",
+      "climate": "tropical_jungle",
+      "candidates": 4,
+      "description": "256 \u00d7 128 \u00d7 48 at 0.125 m: 32 m around, 16 m tall, 6 m deep."
     },
     {
       "id": "deep-1.5",
-      "label": "Deep 1.5×",
-      "size": [256, 128, 72],
+      "label": "Deep 1.5\u00d7",
+      "size": [
+        256,
+        128,
+        72
+      ],
       "config": "config/desktop/terrarium-d72.toml",
       "terrain": "terrarium",
       "climate": "tropical_jungle",
@@ -23,8 +59,12 @@
     },
     {
       "id": "deep-2",
-      "label": "Deep 2×",
-      "size": [256, 128, 96],
+      "label": "Deep 2\u00d7",
+      "size": [
+        256,
+        128,
+        96
+      ],
       "config": "config/desktop/terrarium-d96.toml",
       "terrain": "terrarium",
       "climate": "tropical_jungle",
@@ -34,12 +74,31 @@
     {
       "id": "wide",
       "label": "Wide",
-      "size": [640, 128, 96],
+      "size": [
+        640,
+        128,
+        96
+      ],
       "config": "config/desktop/terrarium-wide.toml",
       "terrain": "terrarium",
       "climate": "tropical_jungle",
       "candidates": 3,
-      "description": "640 × 128 × 96: 80 m around and 12 m deep, a 1.5× lake. Founding takes minutes."
+      "description": "640 \u00d7 128 \u00d7 96: 80 m around and 12 m deep, a 1.5\u00d7 lake. Founding takes minutes."
+    },
+    {
+      "id": "custom",
+      "label": "Custom",
+      "size": [
+        288,
+        138,
+        48
+      ],
+      "custom": true,
+      "config": "config/desktop/terrarium.toml",
+      "terrain": "terrarium",
+      "climate": "tropical_jungle",
+      "candidates": 3,
+      "description": "Choose width, height and depth in cells."
     }
   ],
   "terrain": [
@@ -51,7 +110,7 @@
     {
       "name": "terrarium-small",
       "label": "Small terrarium",
-      "description": "The panel's terrarium, written for a 160 × 72 × 24 ring: lower and tighter."
+      "description": "The panel's terrarium, written for a 160 \u00d7 72 \u00d7 24 ring: lower and tighter."
     },
     {
       "name": "small",

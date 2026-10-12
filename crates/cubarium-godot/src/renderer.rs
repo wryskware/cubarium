@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use cubarium::sink::gpu::voxel::hosted::{Hosted, HostedOptions};
+use cubarium::sink::gpu::voxel::hosted::{Hosted, HostedOptions, StillLighting};
 use cubarium::voxel::figure::{FigureMotion, Movement};
 use godot::classes::RenderingServer;
 use godot::prelude::*;
@@ -80,16 +80,33 @@ impl WorldRenderer {
         self.show_static(session, index, false);
     }
 
-    /// `show_candidate` for a thumbnail: staged in its turn, one at a time across the app,
-    /// first asked first drawn (each one's sky plane takes every core but one).
+    /// `show_candidate` for a thumbnail: staged in its turn, two at a time across the app,
+    /// first asked first drawn; each gives its turn up once its first picture is up.
     #[func]
     fn show_thumbnail(&mut self, session: Gd<CubariumSession>, index: i64) {
         self.show_static(session, index, true);
     }
 
+    /// How candidates shown from now on are lit: "fast" (the fast tier's first picture is
+    /// the last) or "refined" (the default: the exact sky shading follows and eases in).
+    /// Returns "" or why not.
+    #[func]
+    fn set_still_lighting(&self, lighting: GString) -> GString {
+        let l = match lighting.to_string().as_str() {
+            "fast" => StillLighting::Fast,
+            "refined" => StillLighting::Refined,
+            other => return GString::from(format!("no still lighting \"{other}\" (fast, refined)").as_str()),
+        };
+        if let Some(h) = &self.hosted {
+            h.set_still_lighting(l);
+        }
+        GString::new()
+    }
+
     /// The newest frame since the last take: `rgba` (the raster, sRGB RGBA8 bytes for
     /// `Image.create_from_data`), `width`, `height`, `view_x` (the raster columns it is
-    /// turned round the ring), `tick`, `generation`; or null.
+    /// turned round the ring), `tick`, `generation`, `lighting_ready` (the final lighting,
+    /// eased in), `settled` (a still world: nothing more is coming); or null.
     #[func]
     fn take_frame(&self) -> Variant {
         let Some(h) = &self.hosted else { return Variant::nil() };
@@ -106,6 +123,8 @@ impl WorldRenderer {
         d.set("ring_width", frame.ring_width as i64); d.set("full_height", frame.full_height as i64);
         d.set("tick", &(frame.tick as i64).to_variant());
         d.set("generation", &(frame.generation as i64).to_variant());
+        d.set("lighting_ready", frame.lighting_ready);
+        d.set("settled", frame.settled);
         h.recycle(frame);
         d.to_variant()
     }
@@ -201,8 +220,8 @@ impl WorldRenderer {
     /// What the presenter has spent: `frames`, and cumulative milliseconds `record_ms` (CPU),
     /// `gpu_ms`, `copy_ms` (the read-back copy), `pack_ms` over `packs` (on the pack thread),
     /// `snapshot_ms` over `snapshots` (the loop's copy for the pack); `packs_refused`,
-    /// `displaced` (frames posted over an untaken one), `unlit` (a still world drawn before its
-    /// sky plane arrived); `upload_bytes` and `uploads` (the current world's recorded image
+    /// `displaced` (frames posted over an untaken one), `unlit` (the picture shown before its
+    /// sky shading has been baked and eased in); `upload_bytes` and `uploads` (the current world's recorded image
     /// bytes and staged batches, including empty batches).
     #[func]
     fn stats(&self) -> VarDictionary {

@@ -48,7 +48,7 @@ pub const ROOM_EPS: f64 = 1e-12;
 /// How many local passes carry head through submerged water in one substep. Placeholder.
 pub const HEAD_PASSES: u32 = 4;
 
-/// The tallest world the per-column row masks cover.
+/// Rows per mask word; tall columns use several contiguous words.
 pub const MASK_ROWS: usize = 128;
 
 // ---------------------------------------------------------------- store arithmetic
@@ -91,6 +91,22 @@ pub struct Grid {
 pub const NONE: usize = usize::MAX;
 
 impl Grid {
+    /// Words per column. A short world keeps the original one-word layout.
+    #[inline]
+    pub fn mask_words(&self) -> usize {
+        self.height.div_ceil(MASK_ROWS)
+    }
+
+    #[inline]
+    pub fn column<'a>(&self, masks: &'a [u128], col: usize) -> &'a [u128] {
+        let words = self.mask_words();
+        &masks[col * words..(col + 1) * words]
+    }
+
+    #[inline]
+    pub fn mask_index(&self, col: usize, y: usize) -> usize {
+        col * self.mask_words() + y / MASK_ROWS
+    }
     #[inline]
     pub fn plane(&self) -> usize {
         self.width * self.depth
@@ -118,6 +134,80 @@ impl Grid {
     }
 }
 
+/// How a mask array lays out its columns' words. The drivers pick one per call — [`One`]
+/// when the world is at most [`MASK_ROWS`] tall, [`Stride`] otherwise — and every
+/// per-column rule is generic over it, so one body of code serves both and the one-word
+/// build folds its indexing and word loops away (a world of at most 128 rows runs the
+/// single-`u128` code it ran before multi-word columns).
+pub trait Layout: Copy + Send + Sync {
+    /// Words per column.
+    fn words(self) -> usize;
+
+    /// One column's words.
+    #[inline(always)]
+    fn column(self, masks: &[u128], col: usize) -> &[u128] {
+        let w = self.words();
+        &masks[col * w..(col + 1) * w]
+    }
+
+    /// Whether row `y` is set in one column's words ([`Layout::column`]). A row beyond
+    /// the top word reads unset.
+    #[inline(always)]
+    fn has(self, words: &[u128], y: usize) -> bool {
+        has_row(words, y)
+    }
+
+    /// The index in a mask array of the word holding row `y` of column `col`.
+    #[inline(always)]
+    fn index(self, col: usize, y: usize) -> usize {
+        col * self.words() + y / MASK_ROWS
+    }
+}
+
+/// One word per column: a world at most [`MASK_ROWS`] tall.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct One;
+
+impl Layout for One {
+    #[inline(always)]
+    fn words(self) -> usize {
+        1
+    }
+    #[inline(always)]
+    fn has(self, words: &[u128], y: usize) -> bool {
+        // Every caller asks about a row of the world, so `y < MASK_ROWS` here.
+        debug_assert!(y < MASK_ROWS);
+        (words[0] >> y) & 1 != 0
+    }
+}
+
+/// Several contiguous words per column (`height.div_ceil(MASK_ROWS)`): a taller world.
+#[derive(Clone, Copy, Debug)]
+pub struct Stride(pub usize);
+
+impl Layout for Stride {
+    #[inline(always)]
+    fn words(self) -> usize {
+        self.0
+    }
+}
+
+/// Query a row in one column's words, including a row beyond the world top.
+#[inline]
+pub fn has_row(words: &[u128], y: usize) -> bool {
+    words
+        .get(y / MASK_ROWS)
+        .is_some_and(|m| (m >> (y % MASK_ROWS)) & 1 != 0)
+}
+
+/// Set rows of one column, lowest first, without scanning its dry rows.
+pub fn mask_rows(words: &[u128]) -> impl Iterator<Item = usize> + '_ {
+    words
+        .iter()
+        .enumerate()
+        .flat_map(|(k, &word)| column::Rows(word).map(move |y| k * MASK_ROWS + y))
+}
+
 /// Rows `y .. y + len` of a row mask.
 #[inline]
 pub fn run_bits(y: usize, len: usize) -> u128 {
@@ -137,10 +227,13 @@ pub fn is_full(free: f64) -> bool {
 // ---------------------------------------------------------------- the exchange
 
 /// What the exchange reads: the water and geometry at the start of the substep. Cells in
-/// the world's index order, masks per column (bit `y` is row `y`).
+/// the world's index order. Masks keep `grid.mask_words()` contiguous words per column,
+/// laid out as `layout` says; word `y / MASK_ROWS`, bit `y % MASK_ROWS` identifies row `y`.
 #[derive(Clone, Copy)]
-pub struct Field<'a> {
+pub struct Field<'a, L = Stride> {
     pub grid: Grid,
+    /// The masks' layout: [`One`] for a world at most [`MASK_ROWS`] tall.
+    pub layout: L,
     pub free: &'a [f64],
     /// Non-solid rows.
     pub void: &'a [u128],
@@ -186,7 +279,13 @@ fn cap_flux(cap: f64, q: f64) -> f64 {
 /// stack and displaced slivers up the neighbour's column (the census at 382ef3a: 78 % of
 /// a shower's active wet cells, 96 % of its proposals).
 #[inline]
-pub fn column_heads(grid: Grid, col: usize, wet: u128, free: &[f64], mut head: impl FnMut(usize, f64)) -> u128 {
+pub fn column_heads(
+    grid: Grid,
+    col: usize,
+    wet: u128,
+    free: &[f64],
+    mut head: impl FnMut(usize, f64),
+) -> u128 {
     let plane = grid.plane();
     let mut full = 0u128;
     let mut m = wet;
@@ -218,13 +317,50 @@ pub fn column_heads(grid: Grid, col: usize, wet: u128, free: &[f64], mut head: i
     full
 }
 
+/// Phase A over all words of a column. Wet runs continue through word boundaries.
+#[inline]
+pub fn column_heads_words<L: Layout>(
+    grid: Grid,
+    layout: L,
+    col: usize,
+    wet: &[u128],
+    full: &mut [u128],
+    free: &[f64],
+    mut head: impl FnMut(usize, f64),
+) {
+    if layout.words() == 1 {
+        full[0] = column_heads(grid, col, wet[0], free, head);
+        return;
+    }
+    full.fill(0);
+    let plane = grid.plane();
+    let mut rows = mask_rows(wet).peekable();
+    while let Some(bottom) = rows.next() {
+        let mut top = bottom;
+        while rows.peek() == Some(&(top + 1)) {
+            top = rows.next().expect("peeked row");
+        }
+        let mut surface = top as f64 + free[top * plane + col];
+        for y in (bottom..=top).rev() {
+            let i = y * plane + col;
+            if is_full(free[i]) {
+                full[y / MASK_ROWS] |= 1u128 << (y % MASK_ROWS);
+            } else {
+                surface = y as f64 + free[i];
+            }
+            head(i, surface);
+        }
+    }
+}
+
 /// **One pass of head through submerged water**, one column: every **full** wet cell
 /// takes the highest driving head among itself and its wet horizontal neighbours on its
 /// row, read from `drive_in`. `out(cell, drive)` for the full cells only (the others keep
 /// their head, which the caller has in both buffers). Returns whether any drive rose.
 #[inline]
-pub fn column_drive_pass(
+pub fn column_drive_pass<L: Layout>(
     grid: Grid,
+    layout: L,
     col: usize,
     wet: &[u128],
     full: &[u128],
@@ -234,27 +370,30 @@ pub fn column_drive_pass(
     let plane = grid.plane();
     let nb = grid.neighbours(col);
     let mut raised = false;
-    let mut m = full[col];
-    while m != 0 {
-        let y = m.trailing_zeros() as usize;
-        m &= m - 1;
-        let base = y * plane;
-        let i = base + col;
-        let own = drive_in[i];
-        let mut h = own;
-        for &n in &nb {
-            if n == NONE || (wet[n] >> y) & 1 == 0 {
-                continue;
+    let own_full = layout.column(full, col);
+    for k in 0..layout.words() {
+        let mut m = own_full[k];
+        while m != 0 {
+            let y = k * MASK_ROWS + m.trailing_zeros() as usize;
+            m &= m - 1;
+            let base = y * plane;
+            let i = base + col;
+            let own = drive_in[i];
+            let mut h = own;
+            for &n in &nb {
+                if n == NONE || !layout.has(layout.column(wet, n), y) {
+                    continue;
+                }
+                let d = drive_in[base + n];
+                if d > h {
+                    h = d;
+                }
             }
-            let d = drive_in[base + n];
-            if d > h {
-                h = d;
+            if h > own {
+                raised = true;
             }
+            out(i, h);
         }
-        if h > own {
-            raised = true;
-        }
-        out(i, h);
     }
     raised
 }
@@ -276,21 +415,56 @@ struct RowOffers {
 /// skips rows that count as full ([`is_full`]); from there every positive sliver of room
 /// takes what is left. `take(row, amount)` for each part; returns the total placed.
 #[inline]
-pub fn walk(f: &Field, n: usize, y: usize, q: f64, mut take: impl FnMut(usize, f64)) -> f64 {
-    let run_len = (f.void[n] >> y).trailing_ones() as usize;
-    if run_len == 0 {
-        return 0.0;
+pub fn walk<L: Layout>(
+    f: &Field<L>,
+    n: usize,
+    y: usize,
+    q: f64,
+    mut take: impl FnMut(usize, f64),
+) -> f64 {
+    let void = f.layout.column(f.void, n);
+    let full = f.layout.column(f.full, n);
+    // One word: the packed-word walk, the short world's whole path.
+    if f.layout.words() == 1 {
+        let run_len = (void[0] >> y).trailing_ones() as usize;
+        if run_len == 0 {
+            return 0.0;
+        }
+        let available = run_bits(y, run_len) & !full[0];
+        if available == 0 {
+            return 0.0;
+        }
+        let plane = f.grid.plane();
+        let top = y + run_len - 1;
+        let mut at = available.trailing_zeros() as usize;
+        let (mut left, mut placed) = (q, 0.0);
+        while left > 0.0 && at <= top {
+            let room = (1.0 - f.free[at * plane + n]).max(0.0);
+            if room > 0.0 {
+                let t = left.min(room);
+                take(at, t);
+                placed += t;
+                left -= t;
+            }
+            at += 1;
+        }
+        return placed;
     }
-    let available = run_bits(y, run_len) & !f.full[n];
-    if available == 0 {
+    if !has_row(void, y) {
         return 0.0;
     }
     let plane = f.grid.plane();
-    let top = y + run_len - 1;
-    let mut at = available.trailing_zeros() as usize;
+    let mut at = y;
+    // Skip packed full rows word at a time, including a full word above `y`.
+    while at < f.grid.height && has_row(void, at) && has_row(full, at) {
+        let k = at / MASK_ROWS;
+        let shift = at % MASK_ROWS;
+        let run = ((void[k] & full[k]) >> shift).trailing_ones() as usize;
+        at += run;
+    }
     let mut left = q;
     let mut placed = 0.0;
-    while left > 0.0 && at <= top {
+    while left > 0.0 && at < f.grid.height && has_row(void, at) {
         let room = (1.0 - f.free[at * plane + n]).max(0.0);
         if room > 0.0 {
             let t = left.min(room);
@@ -304,7 +478,13 @@ pub fn walk(f: &Field, n: usize, y: usize, q: f64, mut take: impl FnMut(usize, f
 }
 
 #[inline]
-fn row_offers(f: &Field, p: &Params, col: usize, nb: &[usize; 4], y: usize) -> RowOffers {
+fn row_offers<L: Layout>(
+    f: &Field<L>,
+    p: &Params,
+    col: usize,
+    nb: &[usize; 4],
+    y: usize,
+) -> RowOffers {
     let plane = f.grid.plane();
     let i = y * plane + col;
     let have = f.free[i];
@@ -315,10 +495,10 @@ fn row_offers(f: &Field, p: &Params, col: usize, nb: &[usize; 4], y: usize) -> R
     if have >= p.min_spread {
         for face in 0..4 {
             let n = nb[face];
-            if n == NONE || (f.void[n] >> y) & 1 == 0 {
+            if n == NONE || !f.layout.has(f.layout.column(f.void, n), y) {
                 continue;
             }
-            let there = if (f.wet[n] >> y) & 1 != 0 {
+            let there = if f.layout.has(f.layout.column(f.wet, n), y) {
                 f.head[y * plane + n]
             } else {
                 y as f64
@@ -334,10 +514,10 @@ fn row_offers(f: &Field, p: &Params, col: usize, nb: &[usize; 4], y: usize) -> R
     }
     // Straight down into the cell's own room below. There is no upward push: a column
     // rises because water arriving at it is displaced up its run.
-    if y > 0 && (f.void[col] >> (y - 1)) & 1 != 0 {
+    if y > 0 && f.layout.has(f.layout.column(f.void, col), y - 1) {
         let below = i - plane;
         let room = (1.0 - f.free[below]).max(0.0);
-        let there = if (f.wet[col] >> (y - 1)) & 1 != 0 {
+        let there = if f.layout.has(f.layout.column(f.wet, col), y - 1) {
             f.head[below]
         } else {
             (y - 1) as f64
@@ -359,22 +539,41 @@ fn row_offers(f: &Field, p: &Params, col: usize, nb: &[usize; 4], y: usize) -> R
 /// of faces the stack offers across, and the giver's own stock.
 /// `emit(from_row, to_col, to_row, q)`, `q` in cell units, only for `q > 0`.
 #[inline]
-pub fn column_edges(f: &Field, p: &Params, col: usize, mut emit: impl FnMut(usize, usize, usize, f64)) {
+pub fn column_edges<L: Layout>(
+    f: &Field<L>,
+    p: &Params,
+    col: usize,
+    mut emit: impl FnMut(usize, usize, usize, f64),
+) {
     let plane = f.grid.plane();
     let nb = f.grid.neighbours(col);
-    let wet = f.wet[col];
-    let mut m = wet;
-    while m != 0 {
+    let wet = f.layout.column(f.wet, col);
+    let mut k = 0;
+    let mut m = wet[0];
+    loop {
+        while m == 0 {
+            k += 1;
+            if k == f.layout.words() {
+                return;
+            }
+            m = wet[k];
+        }
         // One stack: from its lowest row, up while the next row is wet and shares the head.
-        let s0 = m.trailing_zeros() as usize;
+        let s0 = k * MASK_ROWS + m.trailing_zeros() as usize;
         let mut s1 = s0;
-        while s1 + 1 < MASK_ROWS
-            && (wet >> (s1 + 1)) & 1 != 0
+        while s1 + 1 < f.grid.height
+            && f.layout.has(wet, s1 + 1)
             && f.head[(s1 + 1) * plane + col] == f.head[s1 * plane + col]
         {
             s1 += 1;
         }
-        m &= !run_bits(s0, s1 - s0 + 1);
+        k = s1 / MASK_ROWS;
+        let next = s1 % MASK_ROWS + 1;
+        m = if next == MASK_ROWS {
+            0
+        } else {
+            wet[k] >> next << next
+        };
 
         // The stack's totals per face, and whether its bottom cell offers down out of it.
         // Each row's offers are kept for the emitting pass while the stack is short, and
@@ -478,7 +677,13 @@ pub fn moved(q: f64, proposed_to: f64, free_to: f64) -> f64 {
 /// Phase C's **credits**, one column: every touched row's proposals times its
 /// acceptance, `out(cell, credit)`.
 #[inline]
-pub fn column_credits(f: &Field, col: usize, touched: u128, proposed: &[f64], mut out: impl FnMut(usize, f64)) {
+pub fn column_credits<L: Layout>(
+    f: &Field<L>,
+    col: usize,
+    touched: u128,
+    proposed: &[f64],
+    mut out: impl FnMut(usize, f64),
+) {
     let plane = f.grid.plane();
     let mut m = touched;
     while m != 0 {
@@ -492,17 +697,67 @@ pub fn column_credits(f: &Field, col: usize, touched: u128, proposed: &[f64], mu
     }
 }
 
+/// Phase C credits over all of a column's words.
+#[inline]
+pub fn column_credits_words<L: Layout>(
+    f: &Field<L>,
+    col: usize,
+    touched: &[u128],
+    proposed: &[f64],
+    mut out: impl FnMut(usize, f64),
+) {
+    if f.layout.words() == 1 {
+        column_credits(f, col, touched[0], proposed, out);
+        return;
+    }
+    for y in mask_rows(touched) {
+        let i = y * f.grid.plane() + col;
+        let pr = proposed[i];
+        if pr > 0.0 {
+            out(i, pr * accept(pr, f.free[i]));
+        }
+    }
+}
+
 /// **Phase C**, one column: the net change of its cells. `out(cell, d)` is called with
 /// every **credit** ([`column_credits`]) and every **debit** — each of the column's own
 /// proposals, recomputed, times its destination's acceptance; the caller sums them per
 /// cell. `touched` is the column's rows that were proposed into; `proposed` the
 /// proposals, in the world's index order. A driver that kept phase B's proposals debits
-/// them with [`moved`] instead of recomputing them.
+/// them with [`moved`] instead of recomputing them. A one-word world's; taller ones use
+/// [`column_delta_words`].
 #[inline]
-pub fn column_delta(f: &Field, p: &Params, col: usize, touched: u128, proposed: &[f64], mut out: impl FnMut(usize, f64)) {
+pub fn column_delta(
+    f: &Field<One>,
+    p: &Params,
+    col: usize,
+    touched: u128,
+    proposed: &[f64],
+    mut out: impl FnMut(usize, f64),
+) {
+    column_delta_words(
+        f,
+        p,
+        col,
+        core::slice::from_ref(&touched),
+        proposed,
+        &mut out,
+    );
+}
+
+/// Phase C's net change over every word of a column.
+#[inline]
+pub fn column_delta_words<L: Layout>(
+    f: &Field<L>,
+    p: &Params,
+    col: usize,
+    touched: &[u128],
+    proposed: &[f64],
+    mut out: impl FnMut(usize, f64),
+) {
     let plane = f.grid.plane();
-    column_credits(f, col, touched, proposed, &mut out);
-    if f.wet[col] == 0 {
+    column_credits_words(f, col, touched, proposed, &mut out);
+    if f.layout.column(f.wet, col).iter().all(|&m| m == 0) {
         return;
     }
     column_edges(f, p, col, |from, to_col, to_row, q| {

@@ -37,6 +37,8 @@ pub(crate) struct CellSet {
     cols: Vec<u128>,
     /// Columns per row when the set keeps row masks; zero for list storage.
     plane: usize,
+    /// Words per column, preserving one word for heights up to 128.
+    words: usize,
     /// The number of cells the set covers.
     n: usize,
     /// Mask storage: how many members.
@@ -53,6 +55,7 @@ impl Default for CellSet {
             slot: Vec::new(),
             cols: Vec::new(),
             plane: 0,
+            words: 0,
             n: 0,
             count: 0,
             dirty: true,
@@ -87,25 +90,28 @@ impl CellSet {
     }
 
     /// Start again over `n` cells as a member list. The caller fills it.
+    #[cfg(test)]
     pub(crate) fn reset(&mut self, n: usize) {
         self.cells.clear();
         self.slot.clear();
         self.slot.resize(n, 0);
         self.cols = Vec::new();
         self.plane = 0;
+        self.words = 0;
         self.n = n;
         self.count = 0;
         self.dirty = false;
     }
 
     /// Start again over `n` cells as per-column row masks of a world with `plane` columns
-    /// (at most 128 rows). The caller fills it.
+    /// with contiguous words for each column. The caller fills it.
     pub(crate) fn reset_columns(&mut self, n: usize, plane: usize) {
-        debug_assert!(plane > 0 && n.div_ceil(plane) <= 128);
+        debug_assert!(plane > 0);
         self.cells = Vec::new();
         self.slot = Vec::new();
         self.cols.clear();
-        self.cols.resize(plane, 0);
+        self.words = n.div_ceil(plane).div_ceil(crate::world::MASK_ROWS);
+        self.cols.resize(plane * self.words, 0);
         self.plane = plane;
         self.n = n;
         self.count = 0;
@@ -135,9 +141,10 @@ impl CellSet {
     /// Row `y` of column `col`, for a set keeping row masks.
     #[inline]
     pub(crate) fn insert_at(&mut self, y: usize, col: usize) {
-        let bit = 1u128 << y;
-        if self.cols[col] & bit == 0 {
-            self.cols[col] |= bit;
+        let at = col * self.words + y / crate::world::MASK_ROWS;
+        let bit = 1u128 << (y % crate::world::MASK_ROWS);
+        if self.cols[at] & bit == 0 {
+            self.cols[at] |= bit;
             self.count += 1;
         }
     }
@@ -147,7 +154,9 @@ impl CellSet {
             return false;
         }
         if self.plane != 0 {
-            return (self.cols[i % self.plane] >> (i / self.plane)) & 1 != 0;
+            let y = i / self.plane;
+            let at = (i % self.plane) * self.words + y / crate::world::MASK_ROWS;
+            return (self.cols[at] >> (y % crate::world::MASK_ROWS)) & 1 != 0;
         }
         self.slot[i] != 0
     }
@@ -172,9 +181,11 @@ impl CellSet {
             return;
         }
         if self.plane != 0 {
-            let (col, bit) = (i % self.plane, 1u128 << (i / self.plane));
-            if self.cols[col] & bit != 0 {
-                self.cols[col] &= !bit;
+            let y = i / self.plane;
+            let at = (i % self.plane) * self.words + y / crate::world::MASK_ROWS;
+            let bit = 1u128 << (y % crate::world::MASK_ROWS);
+            if self.cols[at] & bit != 0 {
+                self.cols[at] &= !bit;
                 self.count -= 1;
             }
             return;
@@ -225,15 +236,21 @@ impl CellSet {
         out.clear();
         if self.plane != 0 {
             let rows = self.n.div_ceil(self.plane);
-            let any = self.cols.iter().fold(0u128, |a, &m| a | m);
-            for y in 0..rows {
-                if (any >> y) & 1 == 0 {
-                    continue;
-                }
-                let base = y * self.plane;
-                for (col, &m) in self.cols.iter().enumerate() {
-                    if (m >> y) & 1 != 0 {
-                        out.push(base + col);
+            for k in 0..self.words {
+                let any = self
+                    .cols
+                    .chunks_exact(self.words)
+                    .fold(0u128, |a, m| a | m[k]);
+                for bit in 0..crate::world::MASK_ROWS.min(rows - k * crate::world::MASK_ROWS) {
+                    if (any >> bit) & 1 == 0 {
+                        continue;
+                    }
+                    let y = k * crate::world::MASK_ROWS + bit;
+                    let base = y * self.plane;
+                    for (col, m) in self.cols.chunks_exact(self.words).enumerate() {
+                        if (m[k] >> bit) & 1 != 0 && base + col < self.n {
+                            out.push(base + col);
+                        }
                     }
                 }
             }
@@ -304,10 +321,44 @@ mod tests {
         }
         assert_eq!(masks.len(), list.len());
         assert_eq!(masks.members(), list.members());
-        assert_eq!(masks.members(), [0, 6, 7, 63 * 7 + 2, 64 * 7 + 2, 127 * 7 + 6]);
+        assert_eq!(
+            masks.members(),
+            [0, 6, 7, 63 * 7 + 2, 64 * 7 + 2, 127 * 7 + 6]
+        );
         assert!(masks.contains(127 * 7 + 6) && !masks.contains(300));
         assert_eq!(masks, list);
         masks.insert(8);
         assert_ne!(masks, list);
+    }
+
+    #[test]
+    fn multiple_words_keep_boundary_rows_in_index_order() {
+        for height in [129, 138, 168, 256, 259] {
+            let (plane, n) = (3, 3 * height);
+            let (mut list, mut masks) = (CellSet::default(), CellSet::default());
+            list.reset(n);
+            masks.reset_columns(n, plane);
+            for y in [0, 126, 127, 128, 129, 254, 255, 256, height - 1] {
+                if y >= height {
+                    continue;
+                }
+                for col in 0..plane {
+                    list.insert(y * plane + col);
+                    masks.insert(y * plane + col);
+                }
+            }
+            for i in [127 * plane + 1, 128 * plane + 2, n - 1] {
+                list.remove(i);
+                masks.remove(i);
+            }
+            assert_eq!(masks.len(), list.len());
+            assert_eq!(masks.members(), list.members());
+            assert_eq!(masks, list);
+            assert!((0..n).all(|i| masks.contains(i) == list.contains(i)));
+            assert_eq!(
+                masks.columns().unwrap().len(),
+                plane * height.div_ceil(crate::world::MASK_ROWS)
+            );
+        }
     }
 }

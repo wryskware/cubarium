@@ -117,6 +117,7 @@ fn the_gpu_draws_the_same_small_world_as_the_cpu_presenter() {
             models: None,
             textures_under: None,
             specimens: Vec::new(),
+            pipelines: Default::default(),
         },
     ) {
         Ok(sink) => sink,

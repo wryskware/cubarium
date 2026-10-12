@@ -479,6 +479,7 @@ layout_mode = 2
 size_flags_vertical = 3
 mouse_filter = 2
 script = ExtResource("10_pclhd")
+follow_scroll = true
 
 [node name="EntryScroll" type="ScrollContainer" parent="Columns/Entry/EntryRow/TextColumn/EntryFade" unique_id=1563700807]
 layout_mode = 0

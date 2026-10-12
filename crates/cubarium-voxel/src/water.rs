@@ -104,7 +104,7 @@
 //! cell's head is its own floor, so water runs into an empty neighbour and off a ledge; a
 //! deep column's bottom cell carries its whole column's head, so it pushes hard sideways;
 //! and a **full** cell carries the
-//! highest head that reaches it across its horizontal faces ([`HEAD_PASSES`] local passes
+//! highest head that reaches it across its horizontal faces ([`cubarium_rules::water::HEAD_PASSES`] local passes
 //! per substep), which is how the weight of one column arrives at the foot of another
 //! through a flooded passage.
 //!
@@ -165,19 +165,23 @@
 //!   quantization term: the ledger residual `stored - initial_stored - net_in` is the
 //!   raw conservation error and nothing corrects it.
 
-
-use cubarium_rules::water::column::{self, Cells, Ground, Sets, Table};
+use cubarium_rules::water::column::{Ground, Table};
 use cubarium_rules::water::host::{self, Exec, Water};
 
 use crate::material::REFERENCE_VOXEL_M;
-use crate::world::{MASK_ROWS, VoidRun};
+use crate::world::MASK_ROWS;
+#[cfg(test)]
+use crate::world::VoidRun;
 use crate::{Command, Config, DT, Material, World};
 
 // `FLOW_PER_SUBSTEP` (0.5, the fraction of a head difference that crosses one face in
 // one substep), `ROOM_EPS` and `HEAD_PASSES` (4) are the exchange's own numbers and live
 // with its rule in `cubarium_rules::water` (the single-source trial). Both are
 // **placeholders** (`design/backlog.md`).
-use cubarium_rules::water::{FLOW_PER_SUBSTEP, HEAD_PASSES, ROOM_EPS};
+#[cfg(any(test, feature = "profile"))]
+use cubarium_rules::water::HEAD_PASSES;
+#[cfg(test)]
+use cubarium_rules::water::{FLOW_PER_SUBSTEP, ROOM_EPS};
 
 /// **Minimum spreading depth** (package C, agreed by Wrysk 2026-09-22): free water
 /// shallower than this — metres of depth in its own cell, so `free < MIN_SPREAD_DEPTH_M /
@@ -236,7 +240,10 @@ fn voxel(w: &World) -> f64 {
 /// per area (`rain_m_per_s · DT · cell_area()`) and are untouched.
 #[inline]
 fn pore_flux_m3(m: Material, c: &Config, dt: f64) -> f64 {
-    c.materials.permeability_per_s(m) * dt * c.materials.pore_capacity(m) * (c.cell_area() * REFERENCE_VOXEL_M)
+    c.materials.permeability_per_s(m)
+        * dt
+        * c.materials.pore_capacity(m)
+        * (c.cell_area() * REFERENCE_VOXEL_M)
 }
 
 fn free_m3(w: &World, i: usize) -> f64 {
@@ -433,16 +440,26 @@ fn sky_tops(w: &mut World) -> Vec<u32> {
     let floor = &w.void_runs.sky_floor;
     if let Some(masks) = w.wet.columns() {
         // The highest wet row at or above the sky floor.
+        let words = (w.config.height as usize).div_ceil(MASK_ROWS);
         return masks
-            .iter()
+            .chunks_exact(words)
             .zip(floor)
-            .map(|(&m, &f)| {
-                let open = if f as usize >= MASK_ROWS { 0 } else { m >> f << f };
-                if open == 0 {
-                    u32::MAX
-                } else {
-                    127 - open.leading_zeros()
+            .map(|(column, &floor)| {
+                for (k, &word) in column.iter().enumerate().rev() {
+                    let base = k * MASK_ROWS;
+                    let floor = floor as usize;
+                    let open = if floor >= base + MASK_ROWS {
+                        0
+                    } else if floor > base {
+                        word >> (floor - base) << (floor - base)
+                    } else {
+                        word
+                    };
+                    if open != 0 {
+                        return (base + MASK_ROWS - 1 - open.leading_zeros() as usize) as u32;
+                    }
                 }
+                u32::MAX
             })
             .collect();
     }
@@ -808,32 +825,8 @@ fn with_exec<R>(plane: usize, threads: usize, f: impl FnOnce(Exec<'_>) -> R) -> 
     f(Exec::serial())
 }
 
-/// A tall world's sets as the column rules keep them: member lists.
-struct ListSets<'a> {
-    wet: &'a mut crate::sparse::CellSet,
-    damp: &'a mut crate::sparse::CellSet,
-    drainable: &'a mut crate::sparse::CellSet,
-}
-
-impl Sets for ListSets<'_> {
-    fn wet(&mut self, i: usize, _: usize, member: bool) {
-        self.wet.set(i, member);
-    }
-    fn damp(&mut self, i: usize, _: usize, member: bool) {
-        self.damp.set(i, member);
-    }
-    fn drainable(&mut self, i: usize, _: usize, member: bool) {
-        self.drainable.set(i, member);
-    }
-}
-
-/// Run one column phase over the world, its flux over `dt` (the substep for
-/// infiltration, the tick for the others). Returns what the aquifer gained (drainage) or
-/// gave up (the water table), m³; the caller books it.
-///
-/// Up to [`MASK_ROWS`] rows the sets are row masks and the phase runs through
-/// `cubarium_rules::water::host` on `threads` ([`with_exec`]). Taller worlds keep member
-/// lists and run the same per-column rules serially, column by column.
+/// The column-mask phases run through `cubarium_rules::water::host` on `threads`
+/// ([`with_exec`]), with contiguous words for every column at every height.
 fn column_phase(w: &mut World, threads: usize, phase: ColumnPhase, dt: f64) -> f64 {
     ensure_sets(w);
     let grid = cubarium_rules::water::Grid {
@@ -859,110 +852,35 @@ fn column_phase(w: &mut World, threads: usize, phase: ColumnPhase, dt: f64) -> f
     let material: &[Material] = material;
     let ground = |i: usize| table[material[i] as usize];
 
-    if height <= MASK_ROWS {
-        let (deltas, volume) = with_exec(plane, threads, |exec| {
-            let water = Water {
-                grid,
-                voxel,
-                free,
-                pore,
-                wet: wet.columns_mut().expect("a short world's sets are row masks"),
-                damp: damp.columns_mut().expect("a short world's sets are row masks"),
-                drainable: drainable
-                    .columns_mut()
-                    .expect("a short world's sets are row masks"),
-            };
-            match phase {
-                ColumnPhase::Fall => (host::fall(exec, water, &ground), 0.0),
-                ColumnPhase::Infiltrate => (host::infiltrate(exec, water, &ground), 0.0),
-                ColumnPhase::Drain => host::drain(exec, water, &ground, voxel_m, level),
-                ColumnPhase::WaterTable => host::water_table(
-                    exec,
-                    water,
-                    &ground,
-                    Table::new(level, voxel_m, height),
-                    charged,
-                ),
-            }
-        });
-        wet.adjust(deltas[0]);
-        damp.adjust(deltas[1]);
-        drainable.adjust(deltas[2]);
-        return volume;
-    }
-
-    // Taller than a row mask: member lists, serially.
-    let (free, pore): (&mut [f64], &mut [f64]) = (free, pore);
-    if phase == ColumnPhase::WaterTable {
-        // Index order, which is how the rule shares a scarce stock.
-        let t = Table::new(level, voxel_m, height);
-        let mut sets = ListSets {
-            wet,
-            damp,
-            drainable,
-        };
-        let mut c = Cells {
+    let (deltas, volume) = with_exec(plane, threads, |exec| {
+        let water = Water {
+            grid,
+            voxel,
             free,
             pore,
-            sets: &mut sets,
-            voxel,
-            plane,
+            wet: wet.columns_mut().expect("water sets use column masks"),
+            damp: damp.columns_mut().expect("water sets use column masks"),
+            drainable: drainable
+                .columns_mut()
+                .expect("water sets use column masks"),
         };
-        let mut taken = 0.0;
-        for y in 0..t.band {
-            if !t.submerged(y) {
-                continue;
-            }
-            for col in 0..plane {
-                let i = y * plane + col;
-                taken += column::saturate(&mut c, (i, y, ground(i)), charged - taken);
-            }
-        }
-        for y in 1..t.seep_top {
-            let (level, top_row) = (t.level(y), y + 1 == height);
-            for col in 0..plane {
-                let i = y * plane + col;
-                taken += column::seep(&mut c, i, y, level, top_row, &ground, charged - taken);
-            }
-        }
-        return taken;
-    }
-    let mut rows = Vec::new();
-    let mut gained = 0.0;
-    for col in 0..plane {
-        let snapshot: &crate::sparse::CellSet = if phase == ColumnPhase::Drain {
-            drainable
-        } else {
-            wet
-        };
-        rows.clear();
-        rows.extend((0..height).filter(|&y| snapshot.contains(y * plane + col)));
-        if rows.is_empty() {
-            continue;
-        }
-        let mut sets = ListSets {
-            wet: &mut *wet,
-            damp: &mut *damp,
-            drainable: &mut *drainable,
-        };
-        let mut c = Cells {
-            free: &mut *free,
-            pore: &mut *pore,
-            sets: &mut sets,
-            voxel,
-            plane,
-        };
-        let rows = rows.iter().copied();
         match phase {
-            ColumnPhase::Fall => column::fall(&mut c, col, rows, &ground),
-            ColumnPhase::Infiltrate => column::infiltrate(&mut c, col, rows, &ground),
-            ColumnPhase::Drain => {
-                gained += column::drain(&mut c, col, rows, &ground, voxel_m, level);
-            }
-            ColumnPhase::WaterTable => unreachable!("walked in index order above"),
+            ColumnPhase::Fall => (host::fall(exec, water, &ground), 0.0),
+            ColumnPhase::Infiltrate => (host::infiltrate(exec, water, &ground), 0.0),
+            ColumnPhase::Drain => host::drain(exec, water, &ground, voxel_m, level),
+            ColumnPhase::WaterTable => host::water_table(
+                exec,
+                water,
+                &ground,
+                Table::new(level, voxel_m, height),
+                charged,
+            ),
         }
-    }
-    gained
+    });
+    wet.adjust(deltas[0]);
+    damp.adjust(deltas[1]);
+    drainable.adjust(deltas[2]);
+    volume
 }
 
 /// Whether the centre of row `y` lies at or below the water table `table`, in metres
@@ -1041,13 +959,14 @@ pub fn water_table(w: &mut World, threads: usize) {
 /// buffers front to back. The column-major layout that existed to hand a parallel scan
 /// disjoint spans is gone with that scan (package PA, 2026-09-22: the pool sat on the
 /// board's little cores at an IPC of 0.1 and the scan was 1.7 ms of the tick).
+#[cfg(test)]
 #[derive(Default)]
 struct Scratch {
     /// A wet cell's head, in cell units: the surface of the full stack it sits at the foot
     /// of (package H, [`scan_column`]) — its own `y + free` if it is not full. Valid
     /// for the wet cells of this substep's active columns.
     head: Vec<f64>,
-    /// Dense fallback only (worlds taller than [`MASK_ROWS`]): for every non-solid cell of
+    /// Dense reference only: for every non-solid cell of
     /// an active column, the lowest cell **at or above** it, inside its own void run, that
     /// still has room — where a push against this cell actually displaces water to.
     /// `u32::MAX` when the run is full to its ceiling. The value is a world cell index.
@@ -1111,6 +1030,7 @@ struct Scratch {
     moved_stamp: Vec<u32>,
 }
 
+#[cfg(test)]
 impl Scratch {
     fn ensure(&mut self, n: usize, plane: usize, width: usize, depth: usize) {
         if self.head.len() != n {
@@ -1156,7 +1076,10 @@ impl Scratch {
                 + self.col_stamp.capacity()
                 + self.full.capacity()
                 + self.rows.capacity())
-            + 8 * (self.active.capacity() + self.columns.capacity() + self.touched.capacity() + self.bits.capacity())
+            + 8 * (self.active.capacity()
+                + self.columns.capacity()
+                + self.touched.capacity()
+                + self.bits.capacity())
             + size_of::<(u32, u32, f64)>() * self.edges.capacity()
             + size_of::<(u32, f64, u8)>() * self.offer_list.capacity()
             + size_of::<Giver>() * self.givers.capacity()
@@ -1179,6 +1102,7 @@ impl Scratch {
 
 /// One giver's offers in [`Scratch::offer_list`] (`start..end`), and what it placed across
 /// each horizontal face and down, before its stack's cap and the Jacobi division.
+#[cfg(test)]
 struct Giver {
     i: u32,
     #[cfg(feature = "profile")]
@@ -1193,6 +1117,7 @@ struct Giver {
 
 /// A **stack**'s offers across each horizontal face (package P): the sum over its rows and
 /// the most any single row placed, and whether its bottom cell offers down out of it.
+#[cfg(test)]
 #[derive(Default)]
 struct StackFaces {
     placed: [f64; 4],
@@ -1212,7 +1137,8 @@ struct StackFaces {
 /// equal whatever their scratch holds.
 #[derive(Default)]
 pub(crate) struct ExchangeScratch {
-    /// The dense fallback's buffers (worlds taller than [`MASK_ROWS`]).
+    /// The dense reference's buffers.
+    #[cfg(test)]
     dense: Option<Box<Scratch>>,
     /// The per-column rule on the calling thread.
     serial: Option<Serial>,
@@ -1225,7 +1151,10 @@ pub(crate) struct ExchangeScratch {
 impl ExchangeScratch {
     /// Bytes of buffer this scratch holds (capacity, not use).
     pub(crate) fn bytes(&self) -> usize {
+        #[cfg(test)]
         let dense = self.dense.as_ref().map_or(0, |d| d.bytes());
+        #[cfg(not(test))]
+        let dense = 0;
         let serial = self.serial.as_ref().map_or(0, Serial::scratch_bytes);
         #[cfg(feature = "parallel")]
         let parallel = self.parallel.as_ref().map_or(0, Parallel::scratch_bytes);
@@ -1255,6 +1184,7 @@ impl std::fmt::Debug for ExchangeScratch {
 
 /// Every column's four horizontal neighbour columns, in the exchange's face order: `x`
 /// wraps, `z` stops at the walls (`u32::MAX`). A column is `z * width + x`.
+#[cfg(test)]
 fn neighbour_columns(width: usize, depth: usize) -> Vec<[u32; 4]> {
     let mut out = Vec::with_capacity(width * depth);
     for z in 0..depth {
@@ -1281,6 +1211,7 @@ fn neighbour_columns(width: usize, depth: usize) -> Vec<[u32; 4]> {
 
 /// The `y` of every cell of an **ascending** index list, by walking the rows alongside it:
 /// one comparison per cell and one addition per row instead of a division per cell.
+#[cfg(test)]
 fn rows_of(cells: &[usize], plane: usize, rows: &mut Vec<u32>) {
     rows.clear();
     let (mut y, mut end) = (0u32, plane);
@@ -1329,7 +1260,7 @@ fn rows_of(cells: &[usize], plane: usize, rows: &mut Vec<u32>) {
 /// `1` runs the per-column rule serially on the calling thread ([`Serial`]); more runs it
 /// on the process's rayon pool of that many workers ([`Parallel`] on
 /// [`cubarium_rules::water::host::pool`]) when the `parallel` feature is on. The schedule
-/// passes `SimConfig::threads`. Worlds taller than [`MASK_ROWS`] take the dense serial path
+/// passes `SimConfig::threads`. All heights use column masks
 /// whatever `threads` says.
 pub fn exchange(w: &mut World, threads: usize) {
     #[cfg(feature = "profile")]
@@ -1340,17 +1271,17 @@ pub fn exchange(w: &mut World, threads: usize) {
 }
 
 fn exchange_inner(w: &mut World, threads: usize) {
-    if w.config.height as usize > MASK_ROWS {
-        exchange_dense(w);
-        return;
-    }
     // The world's own scratch, taken out for the call so it and the world are borrowed
     // apart, and put back after (a few pointer moves).
     let mut held = std::mem::take(&mut w.water_scratch);
     #[cfg(feature = "parallel")]
     if pooled(w.config.width as usize * w.config.depth as usize, threads) {
         held.serial = None;
-        if held.parallel.as_ref().is_none_or(|p| p.threads() != threads) {
+        if held
+            .parallel
+            .as_ref()
+            .is_none_or(|p| p.threads() != threads)
+        {
             held.parallel = Some(Parallel::new(threads));
         }
         exchange_with(w, held.parallel.as_mut().expect("just made"));
@@ -1366,9 +1297,9 @@ fn exchange_inner(w: &mut World, threads: usize) {
     w.water_scratch = held;
 }
 
-pub use cubarium_rules::water::host::{ExchangeBackend, Serial};
 #[cfg(feature = "parallel")]
 pub use cubarium_rules::water::host::Parallel;
+pub use cubarium_rules::water::host::{ExchangeBackend, Serial};
 
 /// Build the process's water pool of `threads` workers now, if the phases will use one
 /// (`threads > 1` and the `parallel` feature). The phases build it on first use anyway;
@@ -1386,8 +1317,7 @@ pub fn prepare_pool(threads: usize) {
 /// **The exchange through `cubarium_rules::water`** (from the single-source trial,
 /// `design/handoffs/voxel-single-source-gpu-trial-2026-09-23.md`): one per-column rule,
 /// driven by `backend` — [`Serial`] or [`Parallel`] (what [`exchange`] picks by its thread
-/// count), or any other [`ExchangeBackend`] (the trial's GPU driver was one). Worlds at
-/// most [`MASK_ROWS`] tall; [`exchange`] keeps the dense path for taller ones.
+/// count), or any other [`ExchangeBackend`] (the trial's GPU driver was one). Column masks cover every height, with one word for short worlds.
 ///
 /// The rule is the one [`exchange_dense`] implements over the ascending wet list,
 /// restructured per column: see `cubarium_rules::water`. It agrees with that path to
@@ -1402,11 +1332,10 @@ pub fn exchange_with(w: &mut World, backend: &mut dyn ExchangeBackend) {
         w.config.depth as usize,
         w.config.height as usize,
     );
-    assert!(
-        height <= MASK_ROWS,
-        "the per-column exchange covers worlds up to {MASK_ROWS} rows, not {height}"
+    debug_assert_eq!(
+        w.wet.columns().map_or(0, <[u128]>::len),
+        width * depth * height.div_ceil(MASK_ROWS)
     );
-    debug_assert_eq!(w.wet.columns().map_or(0, <[u128]>::len), width * depth);
     w.ensure_void_runs();
     let grid = cubarium_rules::water::Grid {
         width,
@@ -1419,7 +1348,7 @@ pub fn exchange_with(w: &mut World, backend: &mut dyn ExchangeBackend) {
     };
     #[cfg(feature = "profile")]
     census_substep(w);
-    let wet = w.wet.columns_mut().expect("a short world's wet set is row masks");
+    let wet = w.wet.columns_mut().expect("water sets use column masks");
     let delta = backend.exchange(grid, &mut w.free, &w.void_runs.mask, wet, &p);
     w.wet.adjust(delta);
 }
@@ -1453,28 +1382,31 @@ fn census_substep(w: &mut World) {
         let b = census::bin(w.free[from]);
         edge_depth[b] += 1;
         let (y, col) = (from / plane, from % plane);
-        let above = masks[col].checked_shr(y as u32 + 1).unwrap_or(0) & 1;
-        if !cubarium_rules::water::is_full(w.free[from]) && above != 0 {
+        let words = (w.config.height as usize).div_ceil(MASK_ROWS);
+        let above = cubarium_rules::water::has_row(&masks[col * words..(col + 1) * words], y + 1);
+        if !cubarium_rules::water::is_full(w.free[from]) && above {
             edge_depth_unpacked[b] += 1;
         }
     }
     let (mut runs, mut columns, mut unpacked) = (0u64, 0u64, 0u64);
-    for (col, &m) in masks.iter().enumerate() {
-        if m == 0 {
+    let words = (w.config.height as usize).div_ceil(MASK_ROWS);
+    for (col, m) in masks.chunks_exact(words).enumerate() {
+        if m.iter().all(|&word| word == 0) {
             continue;
         }
-        let mut full = 0u128;
-        let mut rest = m;
-        while rest != 0 {
-            let y = rest.trailing_zeros() as usize;
-            rest &= rest - 1;
-            if cubarium_rules::water::is_full(w.free[y * plane + col]) {
-                full |= 1u128 << y;
-            }
-        }
         columns += 1;
-        runs += u64::from((m & !(m << 1)).count_ones());
-        unpacked += u64::from((m & !full & (m >> 1)).count_ones());
+        let mut previous = None;
+        for y in cubarium_rules::water::mask_rows(m) {
+            if previous.is_none_or(|p| y != p + 1) {
+                runs += 1;
+            }
+            if !cubarium_rules::water::is_full(w.free[y * plane + col])
+                && cubarium_rules::water::has_row(m, y + 1)
+            {
+                unpacked += 1;
+            }
+            previous = Some(y);
+        }
     }
     let wet = w.wet.members();
     census::exchange_substep(Substep {
@@ -1488,11 +1420,12 @@ fn census_substep(w: &mut World) {
     });
 }
 
-/// **The dense fallback** for worlds taller than [`MASK_ROWS`], serial: the exchange's rule
-/// over the ascending wet list, with each active column's displacement targets filled by a
-/// dense walk of its cached void runs ([`scan_column`]). The same rule as
-/// `cubarium_rules::water`'s per-column one; the two agree to rounding
-/// (`the_rules_exchange_follows_the_dense_path_within_rounding`). No preset is this tall.
+/// **The dense reference**, serial and test-only: the exchange's rule over the ascending
+/// wet list, with each active column's displacement targets filled by a dense walk of its
+/// cached void runs ([`scan_column`]). The same rule as `cubarium_rules::water`'s
+/// per-column one, which every world now runs at every height; the tests hold the two to
+/// rounding (`the_rules_exchange_follows_the_dense_path_within_rounding`).
+#[cfg(test)]
 fn exchange_dense(w: &mut World) {
     if w.wet.len() == 0 {
         return;
@@ -1549,7 +1482,7 @@ fn exchange_dense(w: &mut World) {
             );
         }
 
-        // ---- one pass per active column: heads, and (dense fallback only) where a push
+        // ---- one pass per active column: heads, and (dense reference only) where a push
         // displaces to.
         #[cfg(feature = "profile")]
         lap.next(crate::profile::Phase::ExchangeScan);
@@ -1925,13 +1858,13 @@ fn exchange_dense(w: &mut World) {
 
 /// Place `q` into the cells with room at or above world cell `j`, inside that cell's own
 /// void run, bottom first, recording each part as an offer. Returns how much of `q`
-/// actually found room. The dense fallback's lookup, for worlds taller than
-/// [`MASK_ROWS`].
+/// actually found room. The dense reference's lookup.
 ///
 /// This is the displacement rule: pushing against a submerged cell fills the stack above
 /// it rather than stopping at whatever room that one cell has left. Without it a nearly
 /// full column throttles the flow into it to its own remaining hair of room, and a U-tube
 /// crawls toward its level geometrically instead of reaching it.
+#[cfg(test)]
 fn offer_up_the_run(w: &World, plane: usize, j: usize, q: f64, sc: &mut Scratch) -> f64 {
     let (at, top) = (sc.room_target[j], sc.run_top[j]);
     if at == u32::MAX || top == u32::MAX {
@@ -1943,6 +1876,7 @@ fn offer_up_the_run(w: &World, plane: usize, j: usize, q: f64, sc: &mut Scratch)
 /// The walk both lookups share: from world cell `at` up to `top`, one row at a time,
 /// every positive sliver of room takes what is left of `q`.
 #[inline]
+#[cfg(test)]
 fn offer_from(
     w: &World,
     plane: usize,
@@ -1969,12 +1903,14 @@ fn offer_from(
 /// `free_transfer_cap`, when the config sets one: the most one face may move in one
 /// substep, in cell units. Zero leaves the flux uncapped, which is the default.
 #[inline]
+#[cfg(test)]
 fn cap_flux(cap: f64, q: f64) -> f64 {
     if cap > 0.0 { q.min(cap) } else { q }
 }
 
 /// The column scan over every active column, serial: the dense walk over the cached void
 /// runs, heads and displacement tables together.
+#[cfg(test)]
 fn scan_columns(w: &World, plane: usize, sc: &mut Scratch) {
     let free = &w.free[..];
     let offset = &w.void_runs.offset[..];
@@ -1993,7 +1929,7 @@ fn scan_columns(w: &World, plane: usize, sc: &mut Scratch) {
 }
 
 /// One pass over a column: the head of every wet cell, and the displacement target of
-/// every non-solid cell. The dense fallback.
+/// every non-solid cell. The dense reference.
 ///
 /// A **void run** is a maximal stack of non-solid cells; the displacement target of a cell
 /// is the lowest cell with room at or above it *within its own run*, because a solid
@@ -2005,6 +1941,7 @@ fn scan_columns(w: &World, plane: usize, sc: &mut Scratch) {
 /// this pass never rediscovers them from `material`; only the water-dependent values —
 /// `room_target`, `run_top` and `head` — are written here, every substep, at the column's
 /// own world indices.
+#[cfg(test)]
 fn scan_column(
     free: &[f64],
     plane: usize,
@@ -2189,7 +2126,9 @@ pub fn reentry(w: &mut World) {
         // every drop of its own store. It stops at the floor the world set, so it cannot
         // pump the water table out from under the lake.
         if w.config.reentry_from_aquifer {
-            let floor = w.config.aquifer_volume_for_head(w.config.reentry_floor_head_m);
+            let floor = w
+                .config
+                .aquifer_volume_for_head(w.config.reentry_floor_head_m);
             let spare = w.aquifer_m3 - floor;
             if spare <= 0.0 {
                 return;
@@ -2602,7 +2541,7 @@ fn spill_to_nearest_void(w: &mut World, from: usize, volume_m3: f64) -> f64 {
 #[cfg(any(test, feature = "profile"))]
 pub(crate) fn rules_proposals(w: &mut World) -> Vec<(usize, usize, f64)> {
     use cubarium_rules::water::{
-        Field, Grid, Params, column_drive_pass, column_edges, column_heads,
+        Field, Grid, Params, Stride, column_drive_pass, column_edges, column_heads_words,
     };
     begin(w);
     w.ensure_void_runs();
@@ -2613,24 +2552,34 @@ pub(crate) fn rules_proposals(w: &mut World) -> Vec<(usize, usize, f64)> {
     };
     let (n, plane) = (grid.cells(), grid.plane());
     let wet = w.wet.columns().expect("row masks").to_vec();
-    let mut full = vec![0u128; plane];
+    let words = grid.mask_words();
+    // The general layout serves every height; the drivers pick `One` for speed alone.
+    let layout = Stride(words);
+    let mut full = vec![0u128; plane * words];
     let mut head = vec![0.0; n];
     for col in 0..plane {
-        if wet[col] != 0 {
-            full[col] = column_heads(grid, col, wet[col], &w.free, |i, h| head[i] = h);
-        }
+        column_heads_words(
+            grid,
+            layout,
+            col,
+            grid.column(&wet, col),
+            &mut full[col * words..(col + 1) * words],
+            &w.free,
+            |i, h| head[i] = h,
+        );
     }
     let mut drive = head.clone();
     for _ in 0..HEAD_PASSES {
         let src = drive.clone();
         for col in 0..plane {
-            if full[col] != 0 {
-                column_drive_pass(grid, col, &wet, &full, &src, |i, h| drive[i] = h);
+            if grid.column(&full, col).iter().any(|&m| m != 0) {
+                column_drive_pass(grid, layout, col, &wet, &full, &src, |i, h| drive[i] = h);
             }
         }
     }
     let field = Field {
         grid,
+        layout,
         free: &w.free,
         void: &w.void_runs.mask,
         wet: &wet,
@@ -2644,7 +2593,7 @@ pub(crate) fn rules_proposals(w: &mut World) -> Vec<(usize, usize, f64)> {
     };
     let mut out = Vec::new();
     for col in 0..plane {
-        if wet[col] != 0 {
+        if grid.column(&wet, col).iter().any(|&m| m != 0) {
             column_edges(&field, &p, col, |from, to_col, to_row, q| {
                 out.push((from * plane + col, to_row * plane + to_col, q));
             });
@@ -3302,7 +3251,10 @@ mod exchange_geometry_tests {
                     worst <= 1e-9,
                     "height {height} step {step}: the paths differ by {worst}"
                 );
-                assert!(residual(&rules).abs() < 1e-12, "height {height} step {step}: ledger");
+                assert!(
+                    residual(&rules).abs() < 1e-12,
+                    "height {height} step {step}: ledger"
+                );
             }
             eprintln!("height {height}: largest difference {peak:e}");
             if height > 64 {
@@ -3363,34 +3315,133 @@ mod exchange_geometry_tests {
                 .zip(&b.free)
                 .map(|(x, y)| (x - y).abs())
                 .fold(0.0, f64::max);
-            assert!(worst <= 1e-9, "step {step}: serial and parallel differ by {worst}");
+            assert!(
+                worst <= 1e-9,
+                "step {step}: serial and parallel differ by {worst}"
+            );
             assert!(residual(&b).abs() < 1e-12, "step {step}: ledger");
             assert_eq!(a.wet, b.wet, "step {step}: wet sets");
         }
     }
 
-    /// A world taller than the widest mask keeps the dense scan, and that is what the
-    /// selector picks: same trajectory as the dense path, and no masks built.
+    /// Tall columns use several words and agree with the dense reference.
     #[test]
-    fn a_world_above_the_mask_width_uses_the_dense_fallback() {
-        let height = MASK_ROWS as u32 + 1;
-        let mut selected = tall_fixture(height);
-        let mut reference = selected.clone();
-        for step in 0..40 {
-            exchange(&mut selected, 1);
-            exchange_dense(&mut reference);
+    fn tall_column_masks_match_the_dense_exchange() {
+        for height in [129, 138, 168, 256, 259] {
+            let mut selected = tall_fixture(height);
+            for y in [126, 127, 128, 129, 254, 255, 256] {
+                if y < height {
+                    selected.apply(Command::AddWater {
+                        x: 0,
+                        y,
+                        z: 0,
+                        volume_m3: 1.0,
+                    });
+                    selected.apply(Command::AddWater {
+                        x: 1,
+                        y,
+                        z: 0,
+                        volume_m3: 0.3,
+                    });
+                }
+            }
+
+            let mut parallel = selected.clone();
+            let mut reference = selected.clone();
+            let mut backend = super::Parallel::new(4);
+            for step in 0..4 {
+                exchange(&mut selected, 1);
+                super::exchange_with(&mut parallel, &mut backend);
+                exchange_dense(&mut reference);
+                for w in [&selected, &parallel] {
+                    let worst = w
+                        .free
+                        .iter()
+                        .zip(&reference.free)
+                        .map(|(a, b)| (a - b).abs())
+                        .fold(0.0, f64::max);
+                    assert!(worst <= 1e-9, "height {height}, step {step}: {worst}");
+                    assert!(residual(w).abs() < 1e-12);
+                    let mut true_set = w.clone();
+                    true_set.rebuild_active_sets();
+                    assert_eq!(w.wet, true_set.wet);
+                }
+                let apart = selected
+                    .free
+                    .iter()
+                    .zip(&parallel.free)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0, f64::max);
+                assert!(
+                    apart <= 1e-9,
+                    "height {height}, step {step}: serial and parallel differ by {apart}"
+                );
+            }
+            selected.ensure_void_runs();
+            let plane = selected.config.width as usize * selected.config.depth as usize;
             assert_eq!(
-                selected.free, reference.free,
-                "fallback diverged at step {step}"
+                selected.void_runs.mask.len(),
+                plane * (height as usize).div_ceil(MASK_ROWS)
             );
         }
-        selected.ensure_void_runs();
-        assert!(selected.void_runs.mask.is_empty());
+    }
+
+    /// A neighbour's push displaced up a full run that crosses the 128-row word boundary
+    /// lands in the room above it: the walk skips the full rows of both words. Checked
+    /// against the dense reference, serially and on a pool.
+    #[test]
+    fn a_push_crosses_a_full_run_over_the_word_boundary() {
+        let height = 138;
+        let mut w = World::empty(cfg(2, height));
+        // Column 0 full to row 136; column 1 full to row 130 with room from row 131.
+        for (x, top) in [(0, 136), (1, 130)] {
+            for y in 1..=top {
+                w.apply(Command::AddWater {
+                    x,
+                    y,
+                    z: 0,
+                    volume_m3: 1.0,
+                });
+            }
+        }
+        let plane = 2;
+        let crossing = super::rules_proposals(&mut w.clone())
+            .iter()
+            .any(|&(from, to, q)| {
+                q > 0.0 && from % plane == 0 && from / plane < MASK_ROWS && to == 131 * plane + 1
+            });
+        assert!(
+            crossing,
+            "no push from the lower word reached the room above the boundary"
+        );
+
+        let mut parallel = w.clone();
+        let mut reference = w.clone();
+        let mut backend = super::Parallel::new(4);
+        for step in 0..20 {
+            exchange(&mut w, 1);
+            super::exchange_with(&mut parallel, &mut backend);
+            exchange_dense(&mut reference);
+            for got in [&w, &parallel] {
+                let worst = got
+                    .free
+                    .iter()
+                    .zip(&reference.free)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0, f64::max);
+                assert!(worst <= 1e-9, "step {step}: {worst}");
+                assert!(residual(got).abs() < 1e-12, "step {step}: ledger");
+            }
+        }
+        assert!(
+            w.free[131 * plane + 1] > 0.0,
+            "the room above the run took nothing"
+        );
     }
 
     #[test]
-    fn masks_cover_one_row_and_a_full_word() {
-        for height in [1, 64, MASK_ROWS as u32] {
+    fn masks_cover_one_row_full_words_and_a_partial_final_word() {
+        for height in [1, 64, MASK_ROWS as u32, 129, 138, 168, 256, 259] {
             let mut w = World::empty(cfg(1, height));
             w.apply(Command::SetMaterial {
                 x: 0,
@@ -3407,23 +3458,33 @@ mod exchange_geometry_tests {
                 });
             }
             w.ensure_void_runs();
-            let expected_mask = if height as usize == MASK_ROWS {
-                u128::MAX
-            } else {
-                (1u128 << height) - 1
-            };
-            assert_eq!(w.void_runs.mask, [expected_mask]);
-            let mut head = vec![0.0; height as usize];
-            // Every row full but the top one.
-            let full = expected_mask & !(1u128 << (height - 1));
             let grid = cubarium_rules::water::Grid {
                 width: 1,
                 depth: 1,
                 height: height as usize,
             };
-            let found = cubarium_rules::water::column_heads(grid, 0, expected_mask, &w.free, |i, h| {
-                head[i] = h;
-            });
+            let mut expected_mask = vec![0u128; grid.mask_words()];
+            for y in 0..height as usize {
+                expected_mask[y / MASK_ROWS] |= 1u128 << (y % MASK_ROWS);
+            }
+            assert_eq!(w.void_runs.mask, expected_mask);
+            let mut head = vec![0.0; height as usize];
+            // Every row full but the top one; the wet run crosses each word boundary.
+            let mut full = expected_mask.clone();
+            let last = height as usize - 1;
+            full[last / MASK_ROWS] &= !(1u128 << (last % MASK_ROWS));
+            let mut found = vec![0u128; grid.mask_words()];
+            cubarium_rules::water::column_heads_words(
+                grid,
+                cubarium_rules::water::Stride(grid.mask_words()),
+                0,
+                &expected_mask,
+                &mut found,
+                &w.free,
+                |i, h| {
+                    head[i] = h;
+                },
+            );
             assert_eq!(found, full, "the full mask at height {height}");
             assert!(
                 head.iter().all(|&h| h == f64::from(height - 1) + 0.25),
@@ -3432,8 +3493,10 @@ mod exchange_geometry_tests {
             if height >= 64 {
                 let last = height as usize - 1;
                 w.free.fill(1.0);
-                for y in [0, 63, last] {
-                    assert_offer_paths_match(&w, y, 0.75);
+                for y in [0, 63, 127, 128, 255, 256, last] {
+                    if y < height as usize {
+                        assert_offer_paths_match(&w, y, 0.75);
+                    }
                 }
                 w.free[0] = 0.5;
                 assert_offer_paths_match(&w, 0, 0.75);
@@ -3586,19 +3649,20 @@ mod exchange_geometry_tests {
         let reference_placed = offer_up_the_run(w, 1, y, q, &mut reference);
 
         // The per-column rule's displacement walk over the same column.
-        let mut full = [0u128];
+        let mut full = vec![0u128; height.div_ceil(MASK_ROWS)];
         for row in 0..height {
             if w.free[row] >= 1.0 - ROOM_EPS {
-                full[0] |= 1u128 << row;
+                full[row / MASK_ROWS] |= 1u128 << (row % MASK_ROWS);
             }
         }
-        let wet = [0u128];
+        let wet = vec![0u128; height.div_ceil(MASK_ROWS)];
         let field = cubarium_rules::water::Field {
             grid: cubarium_rules::water::Grid {
                 width: 1,
                 depth: 1,
                 height,
             },
+            layout: cubarium_rules::water::Stride(height.div_ceil(MASK_ROWS)),
             free: &w.free,
             void: &w.void_runs.mask,
             wet: &wet,
@@ -3610,6 +3674,24 @@ mod exchange_geometry_tests {
         let placed = cubarium_rules::water::walk(&field, 0, y, q, |row, t| offers.push((row, t)));
         assert_eq!(placed, reference_placed, "placed from y={y}");
         assert_eq!(offers, reference.offers, "offers from y={y}");
+        if height <= MASK_ROWS {
+            // The one-word layout the drivers pick for a short world walks the same way.
+            let one = cubarium_rules::water::Field {
+                grid: field.grid,
+                layout: cubarium_rules::water::One,
+                free: field.free,
+                void: field.void,
+                wet: field.wet,
+                full: field.full,
+                head: field.head,
+                drive: field.drive,
+            };
+            let mut one_offers = Vec::new();
+            let one_placed =
+                cubarium_rules::water::walk(&one, 0, y, q, |row, t| one_offers.push((row, t)));
+            assert_eq!(one_placed, placed, "one-word placed from y={y}");
+            assert_eq!(one_offers, offers, "one-word offers from y={y}");
+        }
     }
 }
 /// **The drainable set** (package D): `drain` walks the porous cells over their field
@@ -3639,7 +3721,8 @@ mod drain_set_tests {
                 }
                 let m = w.material[i];
                 let cap = w.config.materials.pore_capacity(m);
-                if cap <= 0.0 || w.pore[i] <= 0.0 || w.config.materials.permeability_per_s(m) <= 0.0 {
+                if cap <= 0.0 || w.pore[i] <= 0.0 || w.config.materials.permeability_per_s(m) <= 0.0
+                {
                     continue;
                 }
                 let unit = cap * c.voxel_volume();
@@ -4189,6 +4272,40 @@ mod sky_tests {
         w.apply(Command::AddWater { x, y, z, volume_m3 });
     }
 
+    #[test]
+    fn tall_sky_and_evaporation_use_the_highest_open_word() {
+        for height in [129, 138, 168, 256, 259] {
+            let mut w = World::empty(Config {
+                width: 3,
+                depth: 1,
+                height,
+                voxel_m: 1.0,
+                evaporation_m_per_s: 0.01,
+                ..Config::default()
+            });
+            water(&mut w, 0, 127, 0, 0.5);
+            water(&mut w, 1, 128, 0, 0.5);
+            water(&mut w, 2, height - 1, 0, 0.5);
+            assert_matches_the_walk(&mut w, "before evaporation");
+            assert_eq!(sky_tops(&mut w), [127, 128, height - 1]);
+            let before = w.free.clone();
+            super::evaporate(&mut w);
+            for (col, y) in [(0, 127usize), (1, 128), (2, height as usize - 1)] {
+                let i = y * 3 + col;
+                assert!(
+                    w.free[i] < before[i],
+                    "height {height}, row {y}: no evaporation"
+                );
+            }
+            // Water below a roof in a later word cannot become the sky's wet cell.
+            if height > 129 {
+                set(&mut w, 1, 129, 0, Material::Rock);
+                assert_matches_the_walk(&mut w, "after a roof at row 129");
+                assert_eq!(sky_tops(&mut w)[1], u32::MAX);
+            }
+        }
+    }
+
     /// Row `z = 0`, one column each: sky-open ground with a film; a roofed column with
     /// water under the roof; a grotto with water in the pocket and on the roof; a column
     /// packed to the ceiling; a brim-full cell with dry air over it; a brim-full top row.
@@ -4287,7 +4404,10 @@ mod sky_tests {
         assert!(w.config.closed_water_budget);
         let events = w.ledger.rain_events;
         let rain_before = w.ledger.rain_in;
-        assert!(w.open_with_rain(), "a closed world with water aloft can rain");
+        assert!(
+            w.open_with_rain(),
+            "a closed world with water aloft can rain"
+        );
         for tick in 0..40 {
             if tick % 10 == 0 {
                 assert_matches_the_walk(&mut w, &format!("at shower tick {tick}"));
@@ -4617,7 +4737,10 @@ mod closed_budget_tests {
                 break;
             }
         }
-        assert!(!w.view().is_raining(), "and it stopped at its stop humidity");
+        assert!(
+            !w.view().is_raining(),
+            "and it stopped at its stop humidity"
+        );
         assert_eq!(w.view().weather.rain_m_per_s, 0.0);
 
         // The open budget is unchanged: its rain really is prescribed, every tick.
@@ -4836,7 +4959,7 @@ mod units_tests {
 /// **The water phases on a pool** (`design/handoffs/voxel-water-parallel-2026-09-24.md`):
 /// a tick split across the process's pool follows the same tick on one thread to rounding,
 /// conserves, and keeps the three active sets true to the arrays; and a world too tall for
-/// a row mask runs the same per-column rules over member lists. Tolerances, never bits.
+/// a row mask runs the same per-column rules over several words. Tolerances, never bits.
 #[cfg(test)]
 mod pool_tests {
     use super::drains;
@@ -4925,13 +5048,19 @@ mod pool_tests {
                 );
             }
             let (wa, wb) = (one.wet.len() as f64, pooled.wet.len() as f64);
-            assert!((wa - wb).abs() <= 0.01 * wa, "tick {tick}: wet cells {wa} against {wb}");
+            assert!(
+                (wa - wb).abs() <= 0.01 * wa,
+                "tick {tick}: wet cells {wa} against {wb}"
+            );
             if tick % 20 == 19 {
                 assert_sets_are_true(&one, &format!("on one thread, tick {tick}"));
                 assert_sets_are_true(&pooled, &format!("on the pool, tick {tick}"));
             }
         }
-        assert!(one.ledger.rain_in > rain_before, "the shower placed no rain");
+        assert!(
+            one.ledger.rain_in > rain_before,
+            "the shower placed no rain"
+        );
         assert!(one.wet.columns().is_some(), "a 72-row ring keeps row masks");
     }
 
@@ -4977,11 +5106,10 @@ mod pool_tests {
         w
     }
 
-    /// A world taller than a row mask keeps its sets as member lists and runs the same
-    /// per-column rules over them (and the dense exchange): the same water as the same
+    /// A tall world runs the mask-backed per-column phases: the same water as the same
     /// ground in a 128-row world, where the sets are row masks.
     #[test]
-    fn a_tall_world_runs_the_column_phases_over_member_lists() {
+    fn a_tall_world_runs_the_column_phases_over_masks() {
         let mut tall = ground(131);
         let mut short = ground(128);
         for tick in 0..150 {
@@ -5000,7 +5128,7 @@ mod pool_tests {
             );
             assert!((tall.aquifer_m3 - short.aquifer_m3).abs() <= 1e-12);
         }
-        assert!(tall.wet.columns().is_none(), "131 rows keep member lists");
+        assert!(tall.wet.columns().is_some(), "131 rows use column masks");
         assert_sets_are_true(&tall, "after 150 ticks");
         // The rain soaked in, drained, and reached the aquifer.
         assert!(tall.drainable.len() > 0, "nothing is draining");
@@ -5023,7 +5151,12 @@ mod scratch_tests {
             seed: 3,
             ..Config::default()
         });
-        w.apply(Command::AddWater { x: 1, y: 1, z: 1, volume_m3: 0.05 });
+        w.apply(Command::AddWater {
+            x: 1,
+            y: 1,
+            z: 1,
+            volume_m3: 0.05,
+        });
         w
     }
 
@@ -5035,7 +5168,11 @@ mod scratch_tests {
     #[test]
     fn the_water_scratch_belongs_to_the_world_and_goes_with_it() {
         for (width, depth, threads) in [(8u32, 4u32, 1usize), (32, 16, 2)] {
-            assert_eq!(pooled((width * depth) as usize, threads), threads > 1, "the fixture picks its driver");
+            assert_eq!(
+                pooled((width * depth) as usize, threads),
+                threads > 1,
+                "the fixture picks its driver"
+            );
             let stepped_elsewhere = std::thread::spawn(move || {
                 let mut a = puddle(width, depth);
                 assert_eq!(a.water_scratch_bytes(), 0, "a fresh world has no scratch");
@@ -5044,15 +5181,29 @@ mod scratch_tests {
             })
             .join()
             .expect("the stepping thread");
-            assert!(stepped_elsewhere.water_scratch_bytes() > 0, "its scratch outlived the thread that built it");
-            assert_eq!(stepped_elsewhere.clone().water_scratch_bytes(), 0, "a clone copies none");
+            assert!(
+                stepped_elsewhere.water_scratch_bytes() > 0,
+                "its scratch outlived the thread that built it"
+            );
+            assert_eq!(
+                stepped_elsewhere.clone().water_scratch_bytes(),
+                0,
+                "a clone copies none"
+            );
 
             let mut b = puddle(width, depth);
-            assert_eq!(b.water_scratch_bytes(), 0, "no thread's scratch is handed to another world");
+            assert_eq!(
+                b.water_scratch_bytes(),
+                0,
+                "no thread's scratch is handed to another world"
+            );
             exchange(&mut b, threads);
             assert!(b.water_scratch_bytes() > 0);
             drop(stepped_elsewhere);
-            assert!(b.water_scratch_bytes() > 0, "dropping one world leaves another's alone");
+            assert!(
+                b.water_scratch_bytes() > 0,
+                "dropping one world leaves another's alone"
+            );
         }
     }
 
@@ -5063,8 +5214,14 @@ mod scratch_tests {
         exchange(&mut w, 2);
         assert!(w.water_scratch.parallel.is_some() && w.water_scratch.serial.is_none());
         exchange(&mut w, 1);
-        assert!(w.water_scratch.parallel.is_none() && w.water_scratch.serial.is_some(), "the pooled driver's buffers went");
+        assert!(
+            w.water_scratch.parallel.is_none() && w.water_scratch.serial.is_some(),
+            "the pooled driver's buffers went"
+        );
         exchange(&mut w, 2);
-        assert!(w.water_scratch.parallel.is_some() && w.water_scratch.serial.is_none(), "and the serial one's");
+        assert!(
+            w.water_scratch.parallel.is_some() && w.water_scratch.serial.is_none(),
+            "and the serial one's"
+        );
     }
 }

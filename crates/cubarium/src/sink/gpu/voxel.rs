@@ -38,7 +38,7 @@ use anyhow::{Context, Result, bail};
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
     MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, POSE_ENTRIES, PLANE_GLOW, PLANE_GLYPHS, PLANE_ROOF,
-    PLANE_CANOPY, PLANE_SKY, PLANE_STYLES, SLOW_PLANES, FrameClock, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
+    PLANE_CANOPY, PLANE_SKY, PLANE_STYLES, SLOW_PLANES, FrameClock, Pipelines, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
 };
 use cubarium_voxel::{Material, Materials, VoxelView, World};
 use cubarium_voxel_flora::{FaceDraw, Flora, FloraView};
@@ -75,6 +75,11 @@ const _: () = assert!(sleep::POSE_ENTRIES == POSE_ENTRIES && POSE_ENTRIES <= 64)
 #[path = "oracle.rs"]
 #[doc(hidden)]
 pub mod oracle;
+
+/// The fast preview tier's tests on a headless renderer.
+#[cfg(test)]
+#[path = "fast_preview_tests.rs"]
+mod fast_preview_tests;
 
 /// The renderer hosted in an app: the Godot world view's (H1, D-0005).
 #[path = "hosted.rs"]
@@ -117,6 +122,36 @@ pub struct VoxelGpuSinkOptions {
     pub textures_under: Option<PathBuf>,
     /// Unsimulated animals drawn from the models' `specimens` (`voxel_specimens` only).
     pub specimens: Vec<Specimen>,
+    /// Which of the walk's pipelines the renderer builds ([`Pipelines`]).
+    pub pipelines: Pipelines,
+}
+
+/// How an offscreen renderer bakes its sky lighting ([`VoxelGpuSink::offscreen_with`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SkyBake {
+    /// The sky plane at once, on every core but one: a live world.
+    Now,
+    /// The sky plane in turn behind other previews', on a bounded pool: a still world's.
+    Queued,
+    /// Never: the picture keeps the open sky it starts with, and no light shafts. The fast
+    /// tier alone.
+    Never,
+}
+
+/// How [`VoxelGpuSink::offscreen_with`] builds a renderer: the fast tier's knobs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OffscreenOptions {
+    pub pipelines: Pipelines,
+    pub sky: SkyBake,
+    /// Seconds of the presenter's clock the sky plane takes to ease in when it lands on a
+    /// picture already drawn under open sky (`[light] sky_fade_s`); 0 switches at once.
+    pub sky_fade_s: f32,
+}
+
+impl Default for OffscreenOptions {
+    fn default() -> OffscreenOptions {
+        OffscreenOptions { pipelines: Pipelines::All, sky: SkyBake::Now, sky_fade_s: 0.0 }
+    }
 }
 
 impl Default for VoxelGpuSinkOptions {
@@ -128,6 +163,7 @@ impl Default for VoxelGpuSinkOptions {
             models: None,
             textures_under: None,
             specimens: Vec::new(),
+            pipelines: Pipelines::All,
         }
     }
 }
@@ -186,6 +222,12 @@ pub struct VoxelGpuSink<T: SinkTarget = GpuTarget> {
     awaiting_light: bool,
     /// The light shafts' sun-visibility bakes (`[light] volumetric`), or `None`.
     sunvis: Option<SunVisDriver>,
+    /// How long the first sky plane eases in over the open sky drawn before it
+    /// ([`OffscreenOptions::sky_fade_s`]; 0 at once), and when its ease began.
+    sky_fade_s: f32,
+    sky_fade: Option<Instant>,
+    /// The presenter's clock when a capture runs it ([`Self::set_presenter_clock`]).
+    presenter_now: Option<Instant>,
     /// The frame clock in seconds of sim time ([`VoxelGpuSink::set_clock`]).
     clock_s: f64,
     /// GLOW-EASE: the emitter table's cells this frame (scratch).
@@ -253,8 +295,39 @@ impl VoxelGpuSink<Offscreen> {
     /// A sink with no target, for a host that records and reads back the renderer's frames
     /// itself ([`hosted`]).
     pub fn offscreen(cfg: &VoxelConfig, proj: Projection, models: Option<Arc<ModelLibrary>>) -> Result<Self> {
-        let options = VoxelGpuSinkOptions { target: GpuTargetKind::Headless, models, ..Default::default() };
-        Self::build(cfg, proj, options, |_, _| Ok(Offscreen))
+        Self::offscreen_with(cfg, proj, models, OffscreenOptions::default())
+    }
+
+    /// [`VoxelGpuSink::offscreen`] with the fast tier's knobs: which pipelines, how the sky
+    /// plane is baked, and how it eases in.
+    pub fn offscreen_with(
+        cfg: &VoxelConfig,
+        proj: Projection,
+        models: Option<Arc<ModelLibrary>>,
+        o: OffscreenOptions,
+    ) -> Result<Self> {
+        let options = VoxelGpuSinkOptions {
+            target: GpuTargetKind::Headless,
+            models,
+            pipelines: o.pipelines,
+            ..Default::default()
+        };
+        let mut sink = Self::build(cfg, proj, options, |_, _| Ok(Offscreen))?;
+        if let Some(l) = sink.packer.light.as_mut() {
+            match o.sky {
+                SkyBake::Now => {}
+                SkyBake::Queued => l.worker = SkyWorker::preview(),
+                SkyBake::Never => {
+                    l.bake = false;
+                    l.current = true;
+                }
+            }
+        }
+        if o.sky == SkyBake::Never {
+            sink.sunvis = None;
+        }
+        sink.sky_fade_s = o.sky_fade_s.max(0.0);
+        Ok(sink)
     }
 }
 
@@ -286,6 +359,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
             );
         }
         let params = params_of(cfg, proj, options.roof_from_texture);
+        let opened = Instant::now();
         let gpu = std::sync::Arc::new(
             Gpu::open(options.target.instance_extensions())
                 .context("opening the Vulkan device for --sink gpu")?,
@@ -295,9 +369,16 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
             gpu.name,
             params.upload_bytes() as f64 / 1024.0
         );
+        let device_ms = opened.elapsed().as_secs_f64() * 1e3;
         let textures = load_textures(cfg, options.textures_under.as_deref(), &params);
+        let textures_ms = opened.elapsed().as_secs_f64() * 1e3 - device_ms;
         let species = SpeciesFaces::of(&textures);
-        let mut renderer = VoxelRenderer::new(&gpu, params, &textures)?;
+        let mut renderer = VoxelRenderer::with_pipelines(&gpu, params, &textures, options.pipelines)?;
+        let renderer_ms = opened.elapsed().as_secs_f64() * 1e3 - device_ms - textures_ms;
+        super::pack_timer::render_timing(format_args!(
+            "sink {}x{} raster {}x{} lit={}: device {device_ms:.0} ms, textures {textures_ms:.0} ms, renderer {renderer_ms:.0} ms",
+            params.width, params.depth, params.raster_w, params.raster_h, params.lit
+        ));
         let target = open(&gpu, &mut renderer)?;
         let mut packer = Packer {
             specimens: options.specimens.clone(),
@@ -358,6 +439,9 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
                 .effects
                 .volume_on(params.lit)
                 .then(|| SunVisDriver::new(f64::from(cfg.light.volumetric_rebake_s))),
+            sky_fade_s: 0.0,
+            sky_fade: None,
+            presenter_now: None,
             clock_s: 0.0,
             emit_cells: Vec::new(),
             web: None,
@@ -399,8 +483,9 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         p.s = proj.s; p.rise = proj.rise; p.base = proj.base;
         p.raster_w = u32::from(proj.raster_w); p.raster_h = u32::from(proj.raster_h);
         let textures = load_textures(cfg, None, &p);
-        let mut next = VoxelRenderer::new(&self.gpu, p, &textures)?;
+        let mut next = VoxelRenderer::with_pipelines(&self.gpu, p, &textures, self.renderer.pipelines())?;
         next.inherit_atmosphere(&self.renderer);
+        next.set_sky_lift(self.renderer.sky_lift());
         self.packer.glyphs = vec![0; p.glyph_bytes()];
         let used = appearance::atlas_len(p.s, p.rise);
         appearance::write_atlas(p.s, p.rise, &mut self.packer.glyphs[..used]);
@@ -460,6 +545,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
     /// own frames passes each frame's time, so the fades play at real speed in the video.
     pub fn set_presenter_clock(&mut self, now: Option<Instant>) {
         self.packer.set_film_now(now);
+        self.presenter_now = now;
     }
 
     pub fn read_raster(&self) -> Result<Vec<u8>> {
@@ -550,6 +636,9 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
                 tops: &mut self.tops,
                 founding_sky: &mut self.founding_sky,
                 awaiting_light: &mut self.awaiting_light,
+                sky_fade: (self.sky_fade_s, &mut self.sky_fade),
+                presenter_now: self.presenter_now,
+                drawn: self.frames > 0,
                 figure_tick: &mut self.figure_tick,
                 packs_skipped: &mut self.packs_skipped,
                 ticks_staged: &mut self.ticks_staged,
@@ -657,6 +746,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
             f64::from(cubarium_voxel::TICK_HZ),
             self.water_smooth,
         ));
+        self.ease_sky();
         // The glowcaps' candles move on the frame clock; the light they cast follows at the
         // tick (`Packer::prepare`).
         if let Some(c) = self.packer.candle {
@@ -790,6 +880,41 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
     /// world's. Never set by the live display.
     pub fn set_weather_preview(&mut self, preview: Option<super::weather::WeatherPreview>) {
         self.weather_preview = preview.map(|p| (p, None));
+    }
+
+    /// Move the first sky plane's ease (on the presenter's clock, which runs while the sim
+    /// stands still): smoothstep from open sky to the plane over `sky_fade_s`.
+    fn ease_sky(&mut self) {
+        let Some(start) = self.sky_fade else { return };
+        let now = self.presenter_now.unwrap_or_else(Instant::now);
+        let t = (now.saturating_duration_since(start).as_secs_f32() / self.sky_fade_s.max(1e-3)).clamp(0.0, 1.0);
+        self.renderer.set_sky_lift(1.0 - t * t * (3.0 - 2.0 * t));
+        if t >= 1.0 {
+            self.sky_fade = None;
+        }
+    }
+
+    /// Whether the first sky plane is still easing in ([`OffscreenOptions::sky_fade_s`]).
+    pub fn light_fading(&self) -> bool {
+        self.sky_fade.is_some()
+    }
+
+    /// A still world's poll, without packing: whether the sky plane for the terrain last
+    /// staged has been baked and waits for one pack to take it in.
+    pub fn sky_landed(&mut self) -> bool {
+        match self.packer.light.as_mut() {
+            Some(l) if !l.current => l.worker.wait(Duration::ZERO),
+            _ => false,
+        }
+    }
+
+    /// A still world's poll, without packing: take in the light shafts' first bake once it
+    /// has finished (a pack or a redrawn frame would; a still world has neither).
+    pub fn land_shafts(&mut self) {
+        let sun = self.renderer.params().sun;
+        if let Some(sv) = &mut self.sunvis {
+            sv.frame(self.clock_s, sun, &mut self.renderer);
+        }
     }
 
     /// Whether the lit tier's sky plane for the terrain last staged is still being
@@ -1212,6 +1337,10 @@ struct Stager<'a> {
     tops: &'a mut (Option<u64>, Vec<u16>),
     founding_sky: &'a mut Option<([f32; 3], [f32; 3])>,
     awaiting_light: &'a mut bool,
+    sky_fade: (f32, &'a mut Option<Instant>),
+    presenter_now: Option<Instant>,
+    /// Whether a frame has been drawn yet: a plane that lands before any is not eased in.
+    drawn: bool,
     figure_tick: &'a mut Option<u64>,
     packs_skipped: &'a mut u64,
     ticks_staged: &'a mut u64,
@@ -1246,6 +1375,11 @@ impl Stager<'_> {
             view.tick as f64 / f64::from(cubarium_voxel::TICK_HZ)
         };
         let slow = self.packer.prepare_with(view, flora, fauna, candle_s, hint);
+        if std::mem::take(&mut self.packer.fresh_sky) && self.sky_fade.0 > 0.0 && self.drawn {
+            // The first plane over the open sky drawn so far: it eases in from that sky.
+            self.renderer.set_sky_lift(1.0);
+            *self.sky_fade.1 = Some(self.presenter_now.unwrap_or_else(Instant::now));
+        }
         if let Some(sv) = self.sunvis.as_mut() {
             let packer = &*self.packer;
             let snapshot = || {
@@ -1411,6 +1545,9 @@ struct Packer {
     light: Option<LightPlanes>,
     /// Whether the last fill left any free water (the lit tier animates it).
     wet: bool,
+    /// The first sky plane has just been taken in over the open sky (`Stager::stage` eases
+    /// it in).
+    fresh_sky: bool,
     /// The glowcap candle, when it runs (lit tier, emission on, `candle_min` below 1).
     candle: Option<Candle>,
     /// This tick's candle curve for each flora stand (its index in `FloraView::stands`):
@@ -1595,6 +1732,8 @@ struct LightPlanes {
     submitted: u64,
     /// Whether the plane for the newest terrain has arrived.
     current: bool,
+    /// Whether planes are baked at all ([`SkyBake::Never`]: the open sky stays).
+    bake: bool,
     worker: SkyWorker,
     canopy: Canopy,
     /// The canopy plane, built in `prepare` from the flora and copied in `fill` when its
@@ -1712,11 +1851,13 @@ impl Packer {
             vines_moved: false,
             cover_override: None,
             wet: false,
+            fresh_sky: false,
             light: p.lit.then(|| LightPlanes {
                 sky: vec![255; n],
                 sky_key: 0,
                 submitted: 0,
                 current: false,
+                bake: true,
                 worker: SkyWorker::spawn(),
                 canopy: Canopy::new(p.width, p.depth),
                 canopy_plane: vec![0; p.canopy_bytes()],
@@ -1874,10 +2015,14 @@ impl Packer {
             self.roof_key += 1;
             self.delta.full = true;
             self.stands.reset_incremental();
-            if let Some(l) = &mut self.light {
+            if let Some(l) = &mut self.light
+                && l.bake
+            {
                 l.submitted += 1;
                 l.current = false;
                 l.worker.submit(l.submitted, view.config, view.material);
+            }
+            if let Some(l) = &mut self.light {
                 l.glow.set_terrain(view.config, view.material);
                 l.glow_set.set_terrain(view.config, view.material);
             }
@@ -1962,6 +2107,7 @@ impl Packer {
             if let Some((id, plane)) = l.worker.poll()
                 && id == l.submitted
             {
+                self.fresh_sky |= l.sky_key == 0;
                 l.sky = plane;
                 l.sky_key += 1;
                 l.current = true;

@@ -202,11 +202,11 @@ struct Candidates {
 }
 
 enum ToSim {
-    Install(Box<Prepared>),
-    Load(PathBuf, Option<Sender<Result<(), String>>>),
+    Install(Box<Prepared>, Option<PathBuf>),
+    Load(PathBuf, Option<PathBuf>, Option<Sender<Result<(), String>>>),
     Line(String),
     Save(PathBuf, Option<Sender<Result<SaveMeta, String>>>),
-    Snapshot(PathBuf, Sender<Result<SaveMeta, String>>),
+    Snapshot(PathBuf, Option<Sender<Result<SaveMeta, String>>>),
     Close,
     Shutdown,
     Hook(Option<Box<dyn LoopHook>>),
@@ -462,7 +462,7 @@ impl SessionStop {
         let (tx, rx) = mpsc::channel();
         threads
             .to_sim
-            .send(ToSim::Snapshot(dir.to_path_buf(), tx))
+            .send(ToSim::Snapshot(dir.to_path_buf(), Some(tx)))
             .map_err(|_| "the session has stopped".to_string())?;
         drop(threads);
         rx.recv_timeout(timeout).map_err(|_| "the save did not finish in time".to_string())?
@@ -689,6 +689,11 @@ impl Session {
     /// stay. Once founded the world is installed in place of whatever was running and the
     /// candidates are dropped. Refused at once while another founding runs.
     pub fn promote(&self, index: usize) -> Result<(), String> {
+        self.promote_into(index, None)
+    }
+
+    /// Found a candidate with its persistent home attached when it is installed.
+    pub fn promote_into(&self, index: usize, home: Option<PathBuf>) -> Result<(), String> {
         let mut slot = self.job.lock().map_err(|_| "the founding is poisoned")?;
         if slot.as_ref().is_some_and(|j| j.info.lock().is_ok_and(|i| i.state == "founding")) {
             return Err("a world is already being founded".into());
@@ -760,7 +765,7 @@ impl Session {
                         // can check against the candidate's `terrain`.
                         info.terrain = Some(format!("{:016x}", p.world.terrain_hash()));
                         info.label = Some(p.label.clone());
-                        let _ = to_sim.send(ToSim::Install(p));
+                        let _ = to_sim.send(ToSim::Install(p, home));
                     }
                     Outcome::Refused(why) | Outcome::Failed(why) => {
                         info.state = "failed".into();
@@ -830,7 +835,7 @@ impl Session {
 
     /// Install a world made elsewhere (a tool, a test) in place of whatever was running.
     pub fn install(&self, prepared: Prepared) {
-        self.send(ToSim::Install(Box::new(prepared)));
+        self.send(ToSim::Install(Box::new(prepared), None));
     }
 
     /// Load the save in `dir` in place of whatever is running. Returns at once; the world
@@ -838,15 +843,20 @@ impl Session {
     /// another version is refused with a plain error — leaves the running world alone and
     /// is told as a `load_failed` notice.
     pub fn load(&self, dir: &Path) {
+        self.load_with_home(dir, dir);
+    }
+
+    /// Load a snapshot while attaching its world's persistent home in the same install.
+    pub fn load_with_home(&self, dir: &Path, home: &Path) {
         self.shared.loading.store(true, Ordering::SeqCst);
-        self.send(ToSim::Load(dir.to_path_buf(), None));
+        self.send(ToSim::Load(dir.to_path_buf(), Some(home.to_path_buf()), None));
     }
 
     /// [`Session::load`], waiting up to `timeout` for the outcome.
     pub fn load_blocking(&self, dir: &Path, timeout: Duration) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
         self.shared.loading.store(true, Ordering::SeqCst);
-        self.send(ToSim::Load(dir.to_path_buf(), Some(tx)));
+        self.send(ToSim::Load(dir.to_path_buf(), Some(dir.to_path_buf()), Some(tx)));
         rx.recv_timeout(timeout).map_err(|_| "the load did not finish in time".to_string())?
     }
 
@@ -856,6 +866,17 @@ impl Session {
     /// world's [`Session::home`].
     pub fn save(&self, dir: &Path) {
         self.send(ToSim::Save(dir.to_path_buf(), None));
+    }
+
+    /// Save an app-owned snapshot without changing the running world's persistent home.
+    pub fn save_snapshot(&self, dir: &Path) {
+        self.send(ToSim::Snapshot(dir.to_path_buf(), None));
+    }
+
+    /// Update the current world's home after an app-owned directory rename.
+    pub fn attach_home(&self, dir: &Path) {
+        let generation = self.shared.generation.load(Ordering::SeqCst);
+        self.shared.set_home(generation, Some(dir.to_path_buf()));
     }
 
     /// [`Session::save`], waiting up to `timeout` for the write.
@@ -1422,14 +1443,13 @@ impl Loop {
     fn handle(&mut self, m: ToSim) -> bool {
         match m {
             ToSim::Shutdown => return false,
-            ToSim::Install(p) => self.install(*p, 0),
-            ToSim::Load(dir, reply) => {
+            ToSim::Install(p, home) => self.install_at(*p, 0, home),
+            ToSim::Load(dir, home, reply) => {
                 let made = prepare_loaded(&self.options.exec, &dir);
                 self.shared.loading.store(false, Ordering::SeqCst);
                 let result = match made {
                     Ok(p) => {
-                        self.install(p, 1);
-                        self.shared.set_home(self.generation, Some(dir.clone()));
+                        self.install_at(p, 1, home);
                         self.notice(Notice { path: Some(dir.display().to_string()), ..Notice::say("loaded", "loaded") });
                         Ok(())
                     }
@@ -1444,7 +1464,7 @@ impl Loop {
                 }
             }
             ToSim::Save(dir, reply) => self.save(dir, reply, true),
-            ToSim::Snapshot(dir, reply) => self.save(dir, Some(reply), false),
+            ToSim::Snapshot(dir, reply) => self.save(dir, reply, false),
             ToSim::Hook(hook) => {
                 self.hook = hook;
                 self.hook_installed();
@@ -1520,7 +1540,12 @@ impl Loop {
     }
 
     /// Run `p`; `segment` is the vitals rows' (0 for a world made here, 1 for a load).
+    #[cfg(test)]
     fn install(&mut self, p: Prepared, segment: u32) {
+        self.install_at(p, segment, None);
+    }
+
+    fn install_at(&mut self, p: Prepared, segment: u32, home: Option<PathBuf>) {
         if let Some(r) = &self.run {
             self.speed = r.console.speed;
             self.paused = r.console.paused;
@@ -1587,6 +1612,7 @@ impl Loop {
             vitals,
             held: Default::default(),
         });
+        self.shared.set_home(self.generation, home);
         self.shared.generation.store(self.generation, Ordering::SeqCst);
         self.hook_installed();
         // The first publication at once, whatever the speed or pause.
@@ -1954,7 +1980,7 @@ mod founding_rejection_tests {
         assert_eq!(info.state, "done", "{info:?}");
         assert_eq!(info.terrain_rejection, None);
         assert!(info.attempt >= 1, "pre-rolled and placed: {info:?}");
-        assert!(matches!(installs.try_recv(), Ok(ToSim::Install(_))), "the founded world is installed");
+        assert!(matches!(installs.try_recv(), Ok(ToSim::Install(_, _))), "the founded world is installed");
     }
 }
 
@@ -1989,6 +2015,44 @@ mod command_point_tests {
         }, 0);
         let (tx, rx) = mpsc::channel();
         (host, tx, rx, reader)
+    }
+
+    #[test]
+    fn installed_home_stays_attached_across_manual_snapshots() {
+        let (mut host, _, _, _) = tiny_loop();
+        let home = PathBuf::from("/worlds/this world (autosave)");
+        let (world, flora, fauna) = host.run.as_ref().unwrap().sim.layers();
+        let prepared = Prepared {
+            world: world.clone(),
+            flora: flora.clone(),
+            fauna: fauna.clone(),
+            label: "attached home".into(),
+            exec: SimParams {
+                threads: 1,
+                ..Default::default()
+            },
+        };
+        host.install_at(prepared, 0, Some(home.clone()));
+        assert_eq!(host.shared.home(), Some(home.clone()));
+        let generation = host.shared.status().generation;
+        let dir = std::env::temp_dir().join(format!(
+            "cubarium-home-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let (reply, written) = mpsc::channel();
+        host.save(dir.clone(), Some(reply), false);
+        written
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        host.writer.take().unwrap().join().unwrap();
+        assert_eq!(host.shared.home(), Some(home));
+        assert_eq!(host.shared.status().generation, generation);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     fn behind(host: &mut Loop) {

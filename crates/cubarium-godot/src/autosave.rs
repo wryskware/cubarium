@@ -71,7 +71,9 @@ fn autosave() {
         eprintln!("cubarium: autosave skipped, a save or load is in flight");
         return;
     }
-    match world_save::save_running(&sessions, TIMEOUT) {
+    let outcome = world_save::save_running(&sessions, TIMEOUT);
+    world_save::report(&outcome, false);
+    match outcome {
         Outcome::Saved { slot, meta, took } => eprintln!(
             "cubarium: autosave: saved tick {} (day {}) into {} in {:.2} s",
             meta.tick,
@@ -80,7 +82,9 @@ fn autosave() {
             took.as_secs_f64()
         ),
         Outcome::Nothing(why) => eprintln!("cubarium: autosave: nothing saved, {why}"),
-        Outcome::Failed { slot, why } => eprintln!("cubarium: autosave into {} failed: {why}", slot.display()),
+        Outcome::Failed { slot, why } => {
+            eprintln!("cubarium: autosave into {} failed: {why}", slot.display())
+        }
     }
 }
 

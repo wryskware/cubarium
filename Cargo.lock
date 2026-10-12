@@ -640,6 +640,7 @@ dependencies = [
  "minifb",
  "png",
  "raw-window-handle",
+ "rayon",
  "rustc-hash",
  "rustix",
  "serde",

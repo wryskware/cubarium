@@ -205,13 +205,11 @@ impl<'a> VoxelView<'a> {
         let Some(set) = self.wet else { return false };
         match set.columns() {
             Some(cols) => {
-                let plane = cols.len();
-                for (col, &mask) in cols.iter().enumerate() {
-                    let mut m = mask;
-                    while m != 0 {
-                        let y = m.trailing_zeros() as usize;
+                let plane = self.config.width as usize * self.config.depth as usize;
+                let words = (self.config.height as usize).div_ceil(MASK_ROWS);
+                for (col, masks) in cols.chunks_exact(words).enumerate() {
+                    for y in cubarium_rules::water::mask_rows(masks) {
                         out.push(y * plane + col);
-                        m &= m - 1;
                     }
                 }
             }
@@ -405,7 +403,10 @@ impl<'a> VoxelView<'a> {
             }
             None => (lo..=hi).rev().find(|&y| self.is_support_direct(x, y, z)),
         };
-        debug_assert_eq!(found, (lo..=hi).rev().find(|&y| self.is_support_direct(x, y, z)));
+        debug_assert_eq!(
+            found,
+            (lo..=hi).rev().find(|&y| self.is_support_direct(x, y, z))
+        );
         found
     }
 
@@ -599,7 +600,9 @@ impl<'a> VoxelView<'a> {
     /// capacity times the voxel volume. Zero in air and bedrock.
     pub fn pore_water_m3(&self, x: i64, y: u32, z: u32) -> f64 {
         let i = self.config.index(x, y, z);
-        self.pore[i] * self.config.materials.pore_capacity(self.material[i]) * self.config.voxel_volume()
+        self.pore[i]
+            * self.config.materials.pore_capacity(self.material[i])
+            * self.config.voxel_volume()
     }
 
     /// Geometric sky visibility of the top face of `(x, y, z)`: the cosine-weighted
@@ -940,7 +943,10 @@ impl SkyMemo {
             return None;
         }
         if self.version.load(Ordering::Acquire) != version {
-            let _held = self.reset.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let _held = self
+                .reset
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if self.version.load(Ordering::Acquire) != version {
                 for s in slots.iter() {
                     s.store(SKY_EMPTY, Ordering::Relaxed);
@@ -1035,10 +1041,9 @@ pub(crate) struct VoidRuns {
     pub(crate) offset: Vec<u32>,
     /// Every run, grouped by column in ascending `(col, y0)` order.
     pub(crate) runs: Vec<VoidRun>,
-    /// One bit per non-solid row, when the world is at most [`MASK_ROWS`] cells tall.
+    /// One bit per non-solid row, in contiguous words per column.
     /// This is the same geometry as `runs`, in a form the water exchange can query
-    /// without filling a dense per-cell displacement table every substep. Taller worlds
-    /// use `runs`.
+    /// without filling a dense per-cell displacement table every substep.
     pub(crate) mask: Vec<u128>,
     /// Per column: the lowest row of the run that is open to the sky — the run whose top
     /// is the world's top row — or `height` when the top cell itself is solid and the
@@ -1065,8 +1070,7 @@ impl Default for VoidRuns {
     }
 }
 
-/// The tallest world whose columns fit one [`VoidRuns::mask`] word: the water exchange's
-/// bitmask path covers heights up to this, and the dense scan is the fallback above it.
+/// Rows per [`VoidRuns::mask`] word; taller worlds use multiple words per column.
 /// The panel's ring is 72 rows, so a 64-bit word was not enough.
 pub(crate) const MASK_ROWS: usize = cubarium_rules::water::MASK_ROWS;
 
@@ -1402,7 +1406,11 @@ impl World {
     /// stops the settle after that tick, reported as not converged. A watcher that always
     /// says `true` is exactly [`World::settle_watching`]. What a founding that can be
     /// cancelled steps through.
-    pub fn settle_while(&mut self, cap_ticks: u32, mut watch: impl FnMut(&World) -> bool) -> Settle {
+    pub fn settle_while(
+        &mut self,
+        cap_ticks: u32,
+        mut watch: impl FnMut(&World) -> bool,
+    ) -> Settle {
         let window = SETTLE_WINDOW as usize;
         let mut history: Vec<(f64, usize)> = Vec::with_capacity(window + 1);
         let mut stored: Vec<f64> = Vec::with_capacity(window + 1);
@@ -1557,24 +1565,7 @@ impl World {
         let n = self.config.cells();
         let plane = self.config.width as usize * self.config.depth as usize;
         let height = self.config.height as usize;
-        if height > MASK_ROWS {
-            self.wet.reset(n);
-            self.damp.reset(n);
-            self.drainable.reset(n);
-            for i in 0..n {
-                if !self.material[i].is_solid() && self.free[i] > 0.0 {
-                    self.wet.insert(i);
-                }
-                if self.config.materials.pore_capacity(self.material[i]) > 0.0 && self.pore[i] > 0.0 {
-                    self.damp.insert(i);
-                }
-                if crate::water::drains(self, i) {
-                    self.drainable.insert(i);
-                }
-            }
-            return;
-        }
-        // At most 128 rows: every set is one row mask per column.
+        // Every height uses column masks; short columns retain one word.
         self.wet.reset_columns(n, plane);
         self.damp.reset_columns(n, plane);
         self.drainable.reset_columns(n, plane);
@@ -1584,7 +1575,8 @@ impl World {
                 if !self.material[i].is_solid() && self.free[i] > 0.0 {
                     self.wet.insert_at(y, col);
                 }
-                if self.config.materials.pore_capacity(self.material[i]) > 0.0 && self.pore[i] > 0.0 {
+                if self.config.materials.pore_capacity(self.material[i]) > 0.0 && self.pore[i] > 0.0
+                {
                     self.damp.insert_at(y, col);
                 }
                 if crate::water::drains(self, i) {
@@ -1624,13 +1616,10 @@ impl World {
         sky_floor.clear();
         offset.reserve(plane + 1);
         sky_floor.reserve(plane);
-        let masked = height <= MASK_ROWS;
-        if masked {
-            mask.reserve(plane);
-        }
+        let words = height.div_ceil(MASK_ROWS);
+        mask.resize(plane * words, 0);
         for col in 0..plane {
             offset.push(runs.len() as u32);
-            let mut col_mask = 0u128;
             let mut floor = height as u32;
             let mut y = 0usize;
             while y < height {
@@ -1649,13 +1638,16 @@ impl World {
                 if top + 1 == height {
                     floor = y as u32;
                 }
-                if masked {
-                    col_mask |= run_bits(y, top - y + 1);
+                // A void run can cross any number of words, including a partial last
+                // word. Never set padding rows beyond the world ceiling.
+                let mut at = y;
+                while at <= top {
+                    let bit = at % MASK_ROWS;
+                    let len = (MASK_ROWS - bit).min(top - at + 1);
+                    mask[col * words + at / MASK_ROWS] |= run_bits(bit, len);
+                    at += len;
                 }
                 y = top + 1;
-            }
-            if masked {
-                mask.push(col_mask);
             }
             sky_floor.push(floor);
         }
@@ -1754,7 +1746,10 @@ impl World {
             ensure!(flux.is_finite(), "the ledger's {name} is {flux}");
         }
         let drains = self.lake_drain.iter().map(|&c| ("lake drain", Some(c)));
-        for (name, cell) in [("outlet", self.outlet_cell), ("spring", self.spring_cell)].into_iter().chain(drains) {
+        for (name, cell) in [("outlet", self.outlet_cell), ("spring", self.spring_cell)]
+            .into_iter()
+            .chain(drains)
+        {
             if let Some((x, y, z)) = cell {
                 ensure!(
                     x < self.config.width && y < self.config.height && z < self.config.depth,

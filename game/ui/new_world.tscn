@@ -178,6 +178,52 @@ theme_type_variation = &"SmallTextLabel"
 text = "256 × 128 × 48 cells, the standard terrarium."
 autowrap_mode = 3
 
+[node name="Dimensions" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form/SizeField"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Label" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/SizeField/Dimensions"]
+custom_minimum_size = Vector2(212, 0)
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "W × H × D"
+vertical_alignment = 1
+
+[node name="Width" type="LineEdit" parent="Center/Page/Body/Margin/Stack/Columns/Form/SizeField/Dimensions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(124, 52)
+layout_mode = 2
+theme_override_fonts/font = ExtResource("10_text")
+theme_override_font_sizes/font_size = 21
+text = "288"
+max_length = 4
+alignment = 1
+caret_blink = true
+
+[node name="Height" type="LineEdit" parent="Center/Page/Body/Margin/Stack/Columns/Form/SizeField/Dimensions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(124, 52)
+layout_mode = 2
+theme_override_fonts/font = ExtResource("10_text")
+theme_override_font_sizes/font_size = 21
+text = "138"
+max_length = 4
+alignment = 1
+caret_blink = true
+
+[node name="Depth" type="LineEdit" parent="Center/Page/Body/Margin/Stack/Columns/Form/SizeField/Dimensions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(124, 52)
+layout_mode = 2
+theme_override_fonts/font = ExtResource("10_text")
+theme_override_font_sizes/font_size = 21
+text = "48"
+max_length = 4
+alignment = 1
+caret_blink = true
+
 [node name="TerrainField" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form"]
 layout_mode = 2
 mouse_filter = 2
