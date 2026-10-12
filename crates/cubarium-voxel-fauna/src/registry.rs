@@ -390,8 +390,8 @@ fn founder_rows() -> Vec<Row> {
         r("intent.prey_slots", "slots", nonneg, "CONTRACTS: prey rows a menu lineage's brain sees").digest(),
         r("intent.place_slots", "slots", nonneg, "CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees").digest(),
         r("intent.adult_fraction", "x body_max", fraction, "CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard)"),
-        // The kick (`kick::Kick`, CONTRACTS, behaviour-AI §3.3): `None` on every lineage until
-        // LS-DEFEND; `step_in_windup` and `kick_back` are switches: no row.
+        // The kick (`kick::Kick`, CONTRACTS, behaviour-AI §3.3): the loftstrider's (LS-DEFEND),
+        // `None` on every other lineage; `step_in_windup` and `kick_back` are switches: no row.
         r("kick.windup_s", "s", nonneg, "CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s").optional(),
         r("kick.recovery_s", "s", nonneg, "CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s").optional(),
         r("kick.reach_m", "m", nonneg, "CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m)").optional(),

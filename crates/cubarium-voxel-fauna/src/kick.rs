@@ -14,8 +14,10 @@
 //!   dodges a strike. A landed kick wounds it `damage × size_kicker / size_target`.
 //! - **Recovery** `recovery_s`, then ready again.
 //!
-//! **No lineage kicks by default** (`FounderPhysiology::kick` is `None`); LS-DEFEND turns it on
-//! for the loftstrider.
+//! **The loftstrider kicks** (LS-DEFEND, [`kick_of`]: Wrysk's topic 6, "kicks wound"); every
+//! other lineage has none (`FounderPhysiology::kick` is `None`). Its defence layer aims the
+//! kick ([`crate::defend`]); a bite that lands draws the kick-back on the same budget, and
+//! its lineage's reactive counter (`Counter`) never answers besides it.
 
 use serde::{Deserialize, Serialize};
 
@@ -59,7 +61,7 @@ impl Kick {
     /// §3.3's loftstrider kick: a 0.4 s windup, 2.5 s recovery, about 1.3 m of reach (beyond a
     /// hound's 0.84 m bite, so a hound must step inside it to bite), a front arc, the legs'
     /// band, and 0.18 at equal size — about a third off a grown hound at the size ratio 1.9
-    /// (Wrysk, topic 6: kicks wound). Off for every lineage until LS-DEFEND.
+    /// (Wrysk, topic 6: kicks wound). The loftstrider's ([`kick_of`]).
     pub const LOFTSTRIDER: Kick = Kick {
         windup_s: 0.4,
         recovery_s: 2.5,
@@ -75,6 +77,14 @@ impl Kick {
 
     fn ticks(s: f64) -> u32 {
         if s.is_finite() && s > 0.0 { (s / DT).round().max(1.0) as u32 } else { 1 }
+    }
+}
+
+/// **Each lineage's kick** (LS-DEFEND): the loftstrider's, none for the rest.
+pub fn kick_of(founder: Founder) -> Option<Kick> {
+    match founder {
+        Founder::Loftstrider => Some(Kick::LOFTSTRIDER),
+        _ => None,
     }
 }
 
@@ -161,7 +171,9 @@ pub(crate) fn kick_back(fauna: &mut Fauna, bitten: u64, biter: u64) -> bool {
     if !table(fauna, &fauna.animals[i]).is_some_and(|k| k.kick_back) {
         return false;
     }
-    request(fauna, i, biter, Source::Back).is_ok()
+    let ok = request(fauna, i, biter, Source::Back).is_ok();
+    fauna.ledger.kick_backs += u64::from(ok);
+    ok
 }
 
 /// Whether kicker `a`'s kick reaches body `t` now (module note's contact, without the dodge).

@@ -485,6 +485,8 @@ pub(crate) struct Teach {
     pub held: Option<&'static str>,
     /// The call it made this sample (0 none, `k + 1` its lineage's kind `k`).
     pub call: u8,
+    /// LS-DEFEND: it started an aimed kick this sample ([`crate::kick`]).
+    pub kick: bool,
 }
 
 /// The nearest track of `class` in body `id`'s record, as a body subject.
@@ -562,7 +564,7 @@ pub(crate) fn teacher_label(
             // VH-TACTICS: the tactic's own proposal, hold and call.
             S::Pack if fauna.hound_teach.contains_key(&a.id) => {
                 let h = fauna.hound_teach[&a.id];
-                Teach { name: Some(h.proposal), subject: h.subject, held: Some(h.held), call: h.call }
+                Teach { name: Some(h.proposal), subject: h.subject, held: Some(h.held), call: h.call, kick: false }
             }
             S::Pack => {
                 let name = fauna.pack_hint.get(&a.id).copied().unwrap_or("search");
@@ -686,6 +688,7 @@ pub(crate) fn record(
     if teach.call > 0 {
         executed.call = teach.call;
     }
+    executed.kick |= teach.kick;
     rec.executed = executed;
     rec.sample_tick = now;
     rec.last_wound = fauna.animals[i].wound;

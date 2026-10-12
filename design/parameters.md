@@ -3567,14 +3567,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.intent.prey_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: prey rows a menu lineage's brain sees |
 | `fauna.founders.loftstrider.intent.place_slots` | 1 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
 | `fauna.founders.loftstrider.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
-| `fauna.founders.loftstrider.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
-| `fauna.founders.loftstrider.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
-| `fauna.founders.loftstrider.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
-| `fauna.founders.loftstrider.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
-| `fauna.founders.loftstrider.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
-| `fauna.founders.loftstrider.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
-| `fauna.founders.loftstrider.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
-| `fauna.founders.loftstrider.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.loftstrider.kick.windup_s` | 0.4 | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
+| `fauna.founders.loftstrider.kick.recovery_s` | 2.5 | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.loftstrider.kick.reach_m` | 1.3 | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
+| `fauna.founders.loftstrider.kick.origin_forward_fraction` | 0.5 | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
+| `fauna.founders.loftstrider.kick.arc_deg` | 60.0 | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
+| `fauna.founders.loftstrider.kick.band_low_fraction` | 0.0 | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
+| `fauna.founders.loftstrider.kick.band_high_fraction` | 0.6 | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
+| `fauna.founders.loftstrider.kick.damage` | 0.18 | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.loftstrider.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
 | `fauna.founders.loftstrider.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
 | `fauna.founders.loftstrider.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |

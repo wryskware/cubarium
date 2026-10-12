@@ -526,9 +526,10 @@ fn the_kick_tracks_a_target_moving_during_the_windup_within_the_turn_rate() {
 }
 
 #[test]
-fn no_lineage_kicks_by_default() {
+fn a_lineage_without_a_kick_table_cannot_kick() {
+    // LS-DEFEND turned the loftstrider's on (`defend_tests`); every other lineage has none.
     let c = FaunaConfig::default();
-    assert!(Founder::ALL.iter().all(|&f| c.founder(f).kick.is_none()));
+    assert!(Founder::ALL.iter().filter(|&&f| f != Founder::Loftstrider).all(|&f| c.founder(f).kick.is_none()));
     let (_, _, mut f, ls, vh) = kick_world(1.0, Kick::LOFTSTRIDER);
     f.config.founders[Founder::Loftstrider.index()].kick = None;
     let i = index_of(&f, ls);

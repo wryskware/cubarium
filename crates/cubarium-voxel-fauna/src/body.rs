@@ -657,8 +657,8 @@ pub struct FounderPhysiology {
     /// Read only by a menu lineage's two-layer brain; a heuristic or a plain brain ignores it.
     #[serde(default)]
     pub brain: crate::BrainArbitration,
-    /// **Its kick** (CONTRACTS, [`crate::kick::Kick`]): `None`, no kick, for every lineage
-    /// until LS-DEFEND turns the loftstrider's on.
+    /// **Its kick** (CONTRACTS, [`crate::kick::Kick`]): the loftstrider's (LS-DEFEND,
+    /// [`crate::kick::kick_of`]); `None`, no kick, for every other lineage.
     #[serde(default)]
     pub kick: Option<crate::kick::Kick>,
     /// **Its family defence** (LS-DEFEND, [`crate::Defence`]): the threat-time intent layer.
@@ -2071,6 +2071,7 @@ impl FounderPhysiology {
         p.calls = crate::calls::calls_of(founder);
         p.rest = crate::sleep::rest_of(founder);
         p.defence = crate::defend::defence_of(founder);
+        p.kick = crate::kick::kick_of(founder);
         p.drop = crate::step::jump::drop_of(founder);
         p.wade = crate::step::jump::wade_of(founder);
         p.rhythm = crate::rhythm::rhythm_of(founder);

@@ -221,7 +221,6 @@ pub(crate) struct Scene {
     pub(crate) me: Animal,
     pub(crate) young: bool,
     pub(crate) radius: f64,
-    #[allow(dead_code)]
     pub(crate) length: f64,
     /// Threats in its record, nearest first ([`crate::vigil::threats`]); pressing ones are
     /// approaching (seen moving or near, heard or felt), not watched.
@@ -430,7 +429,17 @@ fn guard(fauna: &Fauna, view: &VoxelView<'_>, d: &Defence, s: &Scene, ring: f64)
         None => bunch_point(d, s, ring).filter(|g| reachable(fauna, view, me, *g, ring)).unwrap_or((me.pose.x, me.pose.z)),
     };
     let (_, _, off) = gap(me.pose.x, me.pose.z, gx, gz, ring);
-    let act = if off > d.arrive_m { walk(me, gx, gz, 1.0, ring) } else { face(me, h.x, h.z, ring) };
+    // Charge and return (§3.1): with its kick ready, a hound that comes within `charge_m` of
+    // its post but out of the kick's reach is charged, at most `leash_m` out; then back.
+    let ready = me.kick.phase == crate::kick::Phase::Ready && me.founder.is_some_and(|f| fauna.config.founder(f).kick.is_some());
+    let charge = ready && d.charge_m > 0.0 && gap(gx, gz, h.x, h.z, ring).2 <= d.charge_m && off <= d.leash_m && !in_kick_reach(fauna, s, h, ring);
+    let act = if charge {
+        walk(me, h.x, h.z, 1.0, ring)
+    } else if off > d.arrive_m {
+        walk(me, gx, gz, 1.0, ring)
+    } else {
+        face(me, h.x, h.z, ring)
+    };
     Some(Plan { name: "guard", score: d.w_guard, subject: threat_subject(h, fauna.tick), act })
 }
 
@@ -555,15 +564,56 @@ pub(crate) fn steer(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option
         // Held calm under the hold while a defence intent is proposed: today's rules run,
         // the proposal recorded.
         let p = ps.iter().find(|p| ix(p.name) == proposal)?;
-        fauna.ls_teach.insert(a.id, Teach { name: Some(p.name), subject: p.subject, held: None, call: 0 });
+        fauna.ls_teach.insert(a.id, Teach { name: Some(p.name), subject: p.subject, held: None, call: 0, kick: false });
         return None;
     }
     let plan = ps.iter().find(|p| ix(p.name) == k)?;
     let prop = ps.iter().find(|p| ix(p.name) == proposal).copied().unwrap_or(*plan);
     let call = called_now(fauna, a.id, f);
-    fauna.ls_teach.insert(a.id, Teach { name: Some(prop.name), subject: plan.subject, held: Some(plan.name), call });
+    // The aimed kick (§3.3): a grown body whose kick is ready kicks a hound it sees in reach
+    // and in its front arc, whatever defence intent it holds; it stands for the windup.
+    let mut act = plan.act;
+    let kicked = match (s.young, phys.kick) {
+        (false, Some(kk)) if a.kick.phase == crate::kick::Phase::Ready => kick_target(fauna, &kk, &s, ring)
+            .is_some_and(|t| crate::kick::request(fauna, i, t, crate::kick::Source::Aimed).is_ok()),
+        _ => false,
+    };
+    if kicked {
+        act.forward = 0.0;
+        act.feed = 0.0;
+    }
+    fauna.ls_teach.insert(a.id, Teach { name: Some(prop.name), subject: plan.subject, held: Some(plan.name), call, kick: kicked });
     fauna.ledger.defence_samples[ix(plan.name)] += 1;
-    Some(plan.act)
+    Some(act)
+}
+
+/// **The hound to kick** (§3.3), from what body `s.me` sees: the nearest threat it sees whose
+/// footprint (estimated from its size) its kick reaches from its origin, inside the front arc.
+fn kick_target(fauna: &Fauna, k: &crate::kick::Kick, s: &Scene, ring: f64) -> Option<u64> {
+    let me = &s.me;
+    let now = fauna.tick;
+    let fresh = 2 * fauna.config.perception.stagger_ticks();
+    let (ox, oz) = crate::step::jaw_of(me.pose.x, me.pose.z, me.pose.heading_rad, s.length, k.origin_forward_fraction);
+    fauna
+        .percept(me.id)?
+        .tracks()
+        .iter()
+        .filter(|t| t.known && t.class == class::THREAT && t.modes & SIGHT != 0 && now.saturating_sub(t.tick) <= fresh)
+        .filter(|t| {
+            let (dx, dz, dd) = gap(me.pose.x, me.pose.z, t.x, t.z, ring);
+            dd > 1e-9 && angle_between(me.pose.heading_rad, dx.atan2(dz)) <= k.arc_deg.to_radians() && gap(ox, oz, t.x, t.z, ring).2 <= k.reach_m + radius_est(&fauna.config, t)
+        })
+        .min_by(|p, q| gap(me.pose.x, me.pose.z, p.x, p.z, ring).2.total_cmp(&gap(me.pose.x, me.pose.z, q.x, q.z, ring).2).then(p.id.cmp(&q.id)))
+        .map(|t| t.id)
+}
+
+/// Whether body `s.me`'s kick would reach threat `h` now, from what it sees (the charge
+/// stops there; [`kick_target`]'s test).
+fn in_kick_reach(fauna: &Fauna, s: &Scene, h: &Threat, ring: f64) -> bool {
+    let Some(k) = s.me.founder.and_then(|f| fauna.config.founder(f).kick) else { return false };
+    let Some(t) = fauna.percept(s.me.id).and_then(|p| p.track(h.id)) else { return false };
+    let (ox, oz) = crate::step::jaw_of(s.me.pose.x, s.me.pose.z, s.me.pose.heading_rad, s.length, k.origin_forward_fraction);
+    gap(ox, oz, t.x, t.z, ring).2 <= k.reach_m + radius_est(&fauna.config, t)
 }
 
 /// The call kind body `id` emitted this tick (0 none, `k + 1` its lineage's kind `k`).

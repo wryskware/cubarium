@@ -376,6 +376,7 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
             }
         }
         for k in kicks {
+            fauna.ledger.kicks_landed_by_founder[k.by.index()] += 1;
             wound(fauna, flora, k.target, k.damage, k.by, Some(&view));
         }
     });
@@ -4244,6 +4245,11 @@ fn strike_tick(
 /// juvenile, a rider, a lineage with no counter, or a jaw out of its reach.
 fn counter_answer(config: &crate::FaunaConfig, view: &VoxelView<'_>, striker: &Animal, jaw_to: (f64, f64), prey: &Animal) -> Option<Hit> {
     let pf = prey.founder?;
+    // LS-DEFEND (§3.3, one kick, one budget): a lineage with a kick answers a landed bite
+    // only through its kick-back ([`crate::kick::kick_back`]), never a second, free counter.
+    if config.founder(pf).kick.is_some() {
+        return None;
+    }
     let c = config.founder(pf).counter?;
     let sf = striker.founder?;
     if prey.attached.is_some() || prey.body < crate::effective_config(config, prey).birth_body || !(striker.body > 0.0) {
@@ -7141,7 +7147,7 @@ mod hunt_escape_tests;
 mod traps_tests;
 
 /// Begin the common windup, used by walking and perched catchers.
-fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
+pub(crate) fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
     let founder = fauna.animals[i].founder.expect("founder");
     let phys = *fauna.config.founder(founder);
     let h = phys.active_hunter().expect("a hunter");
