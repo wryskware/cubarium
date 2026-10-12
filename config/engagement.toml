@@ -1,15 +1,16 @@
-# ENGAGE baseline. 32 m periodic width × 24 m open depth, bare soil.
+# ENGAGE baseline. 40 m periodic width × 40 m open depth, bare soil. The pack starts 10–14 m
+# out, where the family can notice it; a 4–6 m start opened every episode at contact (2026-10-12).
 # Frozen terrain/flora, ordinary fauna heuristics and sensory field; no other fauna.
 # Seeded ranges are inclusive. Pack reserve and stomach are 10–20% full (hunting
 # latch engages normally); family 85–95% full. Ages preserve remaining lifetimes.
 duration_s = 300.0
 episodes = 50
-width = 128
+width = 160
 height = 48
-depth = 96
+depth = 160
 voxel_m = 0.25
 soil_layers = 2
-distance_m = [4.0, 6.0]
+distance_m = [10.0, 14.0]
 spacing_m = 1.5
 depth_jitter_m = 1.0
 adult_body = [0.9, 1.0]
