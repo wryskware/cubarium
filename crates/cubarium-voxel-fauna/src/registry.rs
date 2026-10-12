@@ -380,10 +380,10 @@ fn founder_rows() -> Vec<Row> {
         r("intent.switch_margin", "probability", fraction, "CONTRACTS: after the hold, a new intent replaces the held one only when this much more probable"),
         r("intent.temperature", "logit units", Range::positive(), "CONTRACTS: the fixed softmax temperature the margin's probabilities are taken at"),
         r("intent.subject_lost_s", "s", nonneg, "CONTRACTS: a subject unsensed for this long becomes none and ends its hold; an animal that loses sight of another searches for seconds, not minutes"),
-        r("intent.kin_slots", "slots", nonneg, "CONTRACTS: kin rows a menu lineage's brain sees (a sensed mother or calf keeps one); a family or pack member sees its group (§2.1 kin 1 -> 4)"),
-        r("intent.threat_slots", "slots", nonneg, "CONTRACTS: threat rows a menu lineage's brain sees"),
-        r("intent.prey_slots", "slots", nonneg, "CONTRACTS: prey rows a menu lineage's brain sees"),
-        r("intent.place_slots", "slots", nonneg, "CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees"),
+        r("intent.kin_slots", "slots", nonneg, "CONTRACTS: kin rows a menu lineage's brain sees (a sensed mother or calf keeps one); a family or pack member sees its group (§2.1 kin 1 -> 4)").digest(),
+        r("intent.threat_slots", "slots", nonneg, "CONTRACTS: threat rows a menu lineage's brain sees").digest(),
+        r("intent.prey_slots", "slots", nonneg, "CONTRACTS: prey rows a menu lineage's brain sees").digest(),
+        r("intent.place_slots", "slots", nonneg, "CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees").digest(),
         r("intent.adult_fraction", "x body_max", fraction, "CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard)"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
         r("hunker.run_start_m", "m", nonneg, "HERD: run from a pressing hunter within this (herd_enabled)"),
@@ -760,6 +760,7 @@ fn knob_rows() -> Vec<Row> {
         pk("hearing_near_m", "m", pos, "received loudness is emission over the distance, read as at least this"),
         pk("place_memory_fade_s", "s", nonneg, "time for last-used home-place freshness to fall linearly to zero without a physical revisit; 0 disables recall").search(60.0, 7200.0).log(),
         pk("give_up_s", "s", nonneg, "a body not sensed again within this is given up; a pursuit walks to its last-known point until then").search(1.0, 60.0).log(),
+        pk("lame_wound", "wound", fraction, "CONTRACTS: a body seen with at least this wound reads lame (a visible limp) on a sight track"),
     ]);
 
     // `fauna.scent.*`: the scent field (SENSES-CORE).

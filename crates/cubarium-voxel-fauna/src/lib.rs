@@ -53,6 +53,8 @@ pub use groom::Grooming;
 pub mod nurse;
 /// CONTRACTS (behaviour-AI §11): intents, subjects and their records.
 pub mod intent;
+/// CONTRACTS (behaviour-AI §11.1): slots and subject candidates.
+pub mod subjects;
 #[cfg(test)]
 mod intent_tests;
 pub use nurse::Nursing;
@@ -166,6 +168,34 @@ pub use pose::Pose;
 pub use flight::{flyer_fits_on_face, flyer_sheltered};
 pub use senses::{Senses, UPDATE_TICKS};
 pub use snapshot::SCHEMA;
+
+/// **A founding mother id** (CONTRACTS, behaviour-AI §11.6): the high bit set over a family's
+/// or a pack's own number. Founders of one family are recorded as sisters, and of one pack as
+/// littermates, by sharing one: kin reward and recognition hold from the first generation. It
+/// names no living animal (body ids never reach the bit), so everything that reads
+/// [`Animal::mother`] for a body (nursing, the mother pull, the census) treats it as no mother.
+pub const FOUNDING_MOTHER_BIT: u64 = 1 << 63;
+
+/// The founding mother id of founding group `group` ([`FOUNDING_MOTHER_BIT`]).
+pub const fn founding_mother(group: u64) -> u64 {
+    FOUNDING_MOTHER_BIT | group
+}
+
+/// Whether a recorded mother id is a founding one, naming no body ([`FOUNDING_MOTHER_BIT`]).
+pub const fn is_founding_mother(id: u64) -> bool {
+    id & FOUNDING_MOTHER_BIT != 0
+}
+
+/// Body `a`'s mother as a body: its recorded mother unless that is a founding id.
+pub fn mother_body(a: &Animal) -> Option<u64> {
+    a.mother.filter(|&m| !is_founding_mother(m))
+}
+
+/// **Siblings** (§11.6): two different bodies sharing a recorded mother id, a real one or a
+/// founding one; two bodies with none are not siblings.
+pub fn siblings(a: &Animal, b: &Animal) -> bool {
+    a.id != b.id && a.mother.is_some() && a.mother == b.mother
+}
 pub use intent::{EarlyEnd, Executed, IntentKnobs, IntentRecord, Menu, Override, PlaceKind, RestAsk, Subject, menu_of};
 
 /// The browser's three cone sectors as `(foliage_fraction, foliage_proximity)` pairs.
@@ -2648,6 +2678,12 @@ impl FaunaConfig {
         m.cruise_m_per_s = p.cruise_body_lengths_per_s * p.adult_length_m;
         m.yaw_cap_rad_per_s = p.yaw_cap_rad_per_s;
         m.forward_reference_m = m.cruise_m_per_s * m.controller_period_s;
+        if !m.menu.plain() {
+            m.kin_slots = p.intent.kin_slots as usize;
+            m.threat_slots = p.intent.threat_slots as usize;
+            m.prey_slots = p.intent.prey_slots as usize;
+            m.place_slots = p.intent.place_slots as usize;
+        }
         let film_reference = p.taste_reference.is_none() && p.diet == Diet::only(Food::Film);
         m.taste_reference_rule = if film_reference {
             manifest::TASTE_REFERENCE_FILM_RULE

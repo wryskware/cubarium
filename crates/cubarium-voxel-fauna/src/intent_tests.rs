@@ -165,3 +165,157 @@ fn the_records_ride_along_steering_and_positions_match_a_run_with_them_stripped(
         }
     }
 }
+
+// ---- Step 2: subjects and slots (§11.1) ----
+
+use crate::intent::{EarlyEnd, Subject};
+use crate::perception::{Percept, Track, class};
+use crate::subjects::{ROW_WIDTH, candidates};
+
+/// A loftstrider with `n` kin, threat or prey neighbours introduced on the plain (placed by
+/// the case), its record filled by hand.
+fn observer_world(others: &[Founder]) -> (World, Fauna, u64, Vec<u64>) {
+    let w = clock_off(5);
+    let mut f = Fauna::new(quiet_config());
+    let me = introduce(&mut f, &w, Founder::Loftstrider, StartingStores::FULL);
+    place(&mut f, me, 6.0, LANE_Z, EAST);
+    let ids = others
+        .iter()
+        .enumerate()
+        .map(|(k, &o)| {
+            let id = introduce(&mut f, &w, o, StartingStores::FULL);
+            place(&mut f, id, 7.0 + k as f64, LANE_Z, EAST);
+            id
+        })
+        .collect();
+    f.world_geometry = Some((48.0 * VOXEL_M, VOXEL_M));
+    (w, f, me, ids)
+}
+
+fn track(id: u64, cls: u8, x: f64, d: f64, tick: u64) -> Track {
+    Track { known: true, id, class: cls, modes: crate::perception::SIGHT, x, z: LANE_Z, d_m: d, size_m: 1.0, tick, ..Track::default() }
+}
+
+fn set_tracks(f: &mut Fauna, me: u64, tracks: &[Track]) {
+    let mut p = Percept::default();
+    p.tracks[..tracks.len()].copy_from_slice(tracks);
+    p.n = tracks.len() as u8;
+    p.tick = f.tick;
+    f.percepts.insert(me, p);
+}
+
+fn index_of(f: &Fauna, id: u64) -> usize {
+    f.animals.iter().position(|a| a.id == id).unwrap()
+}
+
+#[test]
+fn slot_order_does_not_change_the_subject_or_its_row() {
+    let (_, mut f, me, ids) = observer_world(&[Founder::Loftstrider, Founder::Loftstrider, Founder::Loftstrider]);
+    let tr: Vec<Track> = ids.iter().enumerate().map(|(k, &id)| track(id, class::KIN, 7.0 + k as f64, 1.0 + k as f64, 0)).collect();
+    let subject = Subject::of_track(&tr[1]);
+    let i = index_of(&f, me);
+    set_tracks(&mut f, me, &tr);
+    let c1 = candidates(&f, i, Founder::Loftstrider, subject);
+    let mut rev = tr.clone();
+    rev.reverse();
+    set_tracks(&mut f, me, &rev);
+    let c2 = candidates(&f, i, Founder::Loftstrider, subject);
+    let (r1, r2) = (c1.row_of(subject).unwrap(), c2.row_of(subject).unwrap());
+    assert_eq!(c1.rows[r1].subject.body(), Some(ids[1]));
+    assert_eq!(c1.rows[r1].row, c2.rows[r2].row, "the same body reads the same row");
+    assert_eq!(c1.rows.len(), f.config.manifest(Founder::Loftstrider).candidates());
+    assert!(c1.rows.iter().all(|c| c.row.len() == ROW_WIDTH));
+}
+
+#[test]
+fn two_targets_crossing_keep_the_held_subject_on_its_own_body() {
+    let (_, mut f, me, ids) = observer_world(&[Founder::Chorister, Founder::Chorister]);
+    let i = index_of(&f, me);
+    let (a, b) = (ids[0], ids[1]);
+    let held = Subject::of_track(&track(a, class::THREAT, 7.0, 1.0, 0));
+    // Before the crossing a is nearer; after it b is: the held subject's row moves with a.
+    for (da, db) in [(1.0, 2.0), (1.5, 1.5), (2.0, 1.0)] {
+        set_tracks(&mut f, me, &[track(a, class::THREAT, 6.0 + da, da, 0), track(b, class::THREAT, 6.0 + db, db, 0)]);
+        let c = candidates(&f, i, Founder::Loftstrider, held);
+        let r = c.row_of(held).expect("held");
+        assert_eq!(c.rows[r].subject.body(), Some(a));
+        assert!((c.rows[r].row[5] - crate::observe_v3::proximity(da, f.config.manifest(Founder::Loftstrider).slot_range_m)).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn a_subject_dying_or_vanishing_ends_the_hold() {
+    let (_, mut f, me, ids) = observer_world(&[Founder::Chorister, Founder::Chorister]);
+    let lost = f.config.founder(Founder::Loftstrider).intent.subject_lost_s;
+    let (a, b) = (ids[0], ids[1]);
+    set_tracks(&mut f, me, &[track(a, class::THREAT, 7.0, 1.0, 0), track(b, class::THREAT, 8.0, 2.0, 0)]);
+    let sa = Subject::of_track(&track(a, class::THREAT, 7.0, 1.0, 0));
+    assert!(crate::intent::check_subject(&f, me, sa, lost).is_ok());
+    // Vanishing: unsensed past subject_lost_s. While within it, it is a remembered row.
+    set_tracks(&mut f, me, &[track(b, class::THREAT, 8.0, 2.0, 0)]);
+    f.tick = 1;
+    let c = candidates(&f, index_of(&f, me), Founder::Loftstrider, sa);
+    let r = c.row_of(sa).expect("kept while not given up");
+    assert_eq!(c.rows[r].row[31], 1.0, "remembered");
+    f.tick = (lost / crate::DT).ceil() as u64 + 2;
+    assert_eq!(crate::intent::check_subject(&f, me, sa, lost), Err(EarlyEnd::SubjectLost));
+    assert!(candidates(&f, index_of(&f, me), Founder::Loftstrider, sa).row_of(sa).is_none());
+    // Dying: its id names no living body.
+    let sb = Subject::of_track(&track(b, class::THREAT, 8.0, 2.0, f.tick));
+    f.animals.retain(|x| x.id != b);
+    assert_eq!(crate::intent::check_subject(&f, me, sb, lost), Err(EarlyEnd::SubjectDead));
+    // In the record: the hold ends early and the subject becomes none.
+    let i = index_of(&f, me);
+    let mut rec = f.animals[i].intent;
+    rec.subject = sb;
+    rec.held = 2;
+    rec.since_tick = f.tick;
+    rec.sample_tick = f.tick;
+    f.animals[i].intent = rec;
+    let valid = vec![true; crate::intent::menu_of(Founder::Loftstrider).len()];
+    crate::intent::record(&mut f, i, Founder::Loftstrider, crate::Steer::Heuristic, crate::intent::Teach::default(), &valid, crate::Executed::default());
+    let after = f.animals[i].intent;
+    assert_eq!(after.ended, Some(EarlyEnd::SubjectDead));
+    assert!(after.subject.is_none() || after.subject.body() != Some(b));
+}
+
+#[test]
+fn a_recognised_mother_keeps_the_first_kin_slot_over_nearer_kin() {
+    let (_, mut f, me, ids) = observer_world(&[Founder::Loftstrider, Founder::Loftstrider]);
+    f.config.founders[Founder::Loftstrider.index()].intent.kin_slots = 1;
+    let (near, mother) = (ids[0], ids[1]);
+    let i = index_of(&f, me);
+    f.animals[i].mother = Some(mother);
+    set_tracks(&mut f, me, &[track(near, class::KIN, 7.0, 1.0, 0), track(mother, class::KIN, 9.0, 3.0, 0)]);
+    let c = candidates(&f, i, Founder::Loftstrider, Subject::None);
+    assert_eq!(c.rows[0].subject.body(), Some(mother));
+    assert_eq!(c.rows[0].row[20], 1.0, "marked mother");
+    // A founding mother id names nobody: no one is marked as its mother.
+    f.animals[i].mother = Some(crate::founding_mother(1));
+    let c = candidates(&f, i, Founder::Loftstrider, Subject::None);
+    assert_eq!(c.rows[0].subject.body(), Some(near));
+    assert_eq!(c.rows[0].row[20], 0.0);
+}
+
+#[test]
+fn plain_manifests_carry_no_intent_contract_and_menu_ones_add_it_after_the_v3_text() {
+    for f in Founder::ALL {
+        let m = f.manifest();
+        let text = m.canonical_text();
+        let mut before = m;
+        before.menu = &crate::intent::PLAIN;
+        let pre = before.canonical_text();
+        if menu_of(f).plain() {
+            assert_eq!(text, pre);
+            assert!(!text.contains("|intent:"), "{}", f.name());
+            assert_eq!((m.candidates(), m.row_width()), (0, 0));
+        } else {
+            assert!(text.starts_with(&pre) && text.len() > pre.len(), "{}: additive", f.name());
+            assert!(m.candidates() > 0 && m.row_width() == ROW_WIDTH);
+            // A policy made before the contract is refused by name.
+            let old = crate::manifest::fnv1a_pub(pre.as_bytes());
+            assert_ne!(old, m.digest());
+            assert!(m.digest_refusal(old).contains("before the intent contract"), "{}", f.name());
+        }
+    }
+}

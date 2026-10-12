@@ -144,6 +144,10 @@ pub struct Track {
     /// **FEAR**: its posture as seen ([`posture`]); [`posture::ACTIVE`] unless sight detected
     /// it (a posture is read by eye: a still body is neither heard nor felt).
     pub posture: u8,
+    /// **Lame as seen** (CONTRACTS): sight detected it with its wound at or over the
+    /// perception's `lame_wound`.
+    #[serde(default)]
+    pub lame: bool,
 }
 
 /// **A body's posture** as a sighted observer reads it (FEAR, [`posture_of`]).
@@ -507,6 +511,7 @@ pub(crate) fn sense_pair(
         tick,
         heading: o.pose.heading_rad,
         posture: if modes & SIGHT != 0 { posture_of(config, o) } else { posture::ACTIVE },
+        lame: modes & SIGHT != 0 && o.wound >= pc.lame_wound,
     })
 }
 
@@ -912,6 +917,7 @@ fn interim_track(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, o: &Animal, cl
         tick: fauna.tick,
         heading: o.pose.heading_rad,
         posture: if modes & SIGHT != 0 { posture_of(&fauna.config, o) } else { posture::ACTIVE },
+        lame: modes & SIGHT != 0 && o.wound >= fauna.config.perception.lame_wound,
     }
 }
 

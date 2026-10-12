@@ -229,7 +229,9 @@ impl PlaceKind {
 pub enum Subject {
     #[default]
     None,
-    Body { id: u64, seen_tick: u64 },
+    /// A body by id, with when and where (`[x, z, y_m]`; `None`: never by this body) it was
+    /// last sensed.
+    Body { id: u64, seen_tick: u64, at: Option<[f64; 3]> },
     Place { kind: PlaceKind, x: f64, z: f64, y_m: f64, seen_tick: u64 },
 }
 
@@ -243,6 +245,11 @@ impl Subject {
 
     pub fn is_none(self) -> bool {
         matches!(self, Subject::None)
+    }
+
+    /// The body of a track, where and when it was sensed.
+    pub fn of_track(t: &crate::Track) -> Subject {
+        Subject::Body { id: t.id, seen_tick: t.tick, at: Some([t.x, t.z, t.y_m]) }
     }
 }
 
@@ -482,7 +489,15 @@ fn nearest(fauna: &crate::Fauna, id: u64, class: u8) -> Subject {
         .get(&id)
         .map(|p| p.best[usize::from(class)])
         .filter(|t| t.known)
-        .map_or(Subject::None, |t| Subject::Body { id: t.id, seen_tick: t.tick })
+        .map_or(Subject::None, |t| Subject::of_track(&t))
+}
+
+/// Body `id` as body `me`'s subject: where its record last sensed it, else unplaced.
+fn body_subject(fauna: &crate::Fauna, me: u64, id: u64) -> Subject {
+    fauna.percepts.get(&me).and_then(|p| p.track(id)).map_or(
+        Subject::Body { id, seen_tick: fauna.tick, at: None },
+        Subject::of_track,
+    )
 }
 
 /// **Read the rules' mode as an intent** (§10.2's label sources) for heuristic body `i`
@@ -518,7 +533,7 @@ pub(crate) fn teacher_label(
             S::Flee => t("flee_to_trees", nearest(fauna, a.id, class::THREAT)),
             S::Roost => t("roost", Subject::None),
             S::Groom => t("groom", Subject::None),
-            S::Nurse => t("follow_mother", a.mother.map_or(Subject::None, |m| Subject::Body { id: m, seen_tick: fauna.tick })),
+            S::Nurse => t("follow_mother", a.mother.map_or(Subject::None, |m| body_subject(fauna, a.id, m))),
             S::Heuristic | S::Search | S::Leave | S::Fruit | S::Light if herded => {
                 t("stay_with_troop", nearest(fauna, a.id, class::KIN))
             }
@@ -539,7 +554,7 @@ pub(crate) fn teacher_label(
                 let name = fauna.pack_hint.get(&a.id).copied().unwrap_or("search");
                 let target = a.pack.and_then(|m| fauna.pack(m.pack)).and_then(|p| p.target);
                 let subject = match (name, target) {
-                    ("stalk" | "drive", Some(id)) => Subject::Body { id, seen_tick: fauna.tick },
+                    ("stalk" | "drive", Some(id)) => body_subject(fauna, a.id, id),
                     ("den", _) => a.pack.and_then(|m| fauna.pack(m.pack)).map_or(Subject::None, |p| {
                         let v = fauna.world_geometry.map_or(1.0, |(_, v)| v);
                         Subject::Place {
@@ -573,15 +588,17 @@ pub(crate) fn teacher_label(
 /// when it is dead (no living body has its id) or unsensed past `lost_s`; else the subject
 /// with its `seen_tick` refreshed from the record. Places and none always hold.
 pub(crate) fn check_subject(fauna: &crate::Fauna, me: u64, subject: Subject, lost_s: f64) -> Result<Subject, EarlyEnd> {
-    let Subject::Body { id, seen_tick } = subject else { return Ok(subject) };
+    let Subject::Body { id, seen_tick, .. } = subject else { return Ok(subject) };
     if fauna.animals.binary_search_by_key(&id, |a| a.id).is_err() {
         return Err(EarlyEnd::SubjectDead);
     }
-    let seen = fauna.percepts.get(&me).and_then(|p| p.track(id)).map_or(seen_tick, |t| t.tick.max(seen_tick));
+    let fresh = fauna.percepts.get(&me).and_then(|p| p.track(id)).filter(|t| t.tick >= seen_tick).map(Subject::of_track);
+    let s = fresh.unwrap_or(subject);
+    let Subject::Body { seen_tick: seen, .. } = s else { return Ok(s) };
     if fauna.tick.saturating_sub(seen) as f64 * cubarium_voxel::DT > lost_s {
         return Err(EarlyEnd::SubjectLost);
     }
-    Ok(Subject::Body { id, seen_tick: seen })
+    Ok(s)
 }
 
 /// **Write body `i`'s intent record** for this sample (module note): the proposal (`teach`
@@ -654,8 +671,14 @@ pub(crate) fn young(fauna: &crate::Fauna, a: &crate::Animal, founder: Founder) -
     a.body < phys.intent.adult_fraction * phys.core.body_max
 }
 
-/// Body `i`'s intent mask for its record: spares masked and the menu's "who" applied.
+/// Body `i`'s intent mask for its record: spares masked, the menu's "who" applied, and an
+/// intent that requires a subject valid only while one of its candidates fits.
 pub(crate) fn body_mask(fauna: &crate::Fauna, i: usize, founder: Founder) -> Vec<bool> {
     let a = &fauna.animals[i];
-    intent_mask(menu_of(founder), young(fauna, a, founder), |_| true)
+    let menu = menu_of(founder);
+    if menu.plain() {
+        return vec![true];
+    }
+    let c = crate::subjects::candidates(fauna, i, founder, a.intent.subject);
+    intent_mask(menu, young(fauna, a, founder), |f| c.any(f))
 }
