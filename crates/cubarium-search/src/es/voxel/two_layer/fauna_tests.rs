@@ -302,3 +302,37 @@ fn a_fauna_save_mid_hold_continues_the_brains_identically() {
     }
     assert!(cold_differs, "a cold start answers otherwise: the memory is what continues");
 }
+
+/// **Loading** (step 3): a menu lineage's policy made before the intent contract is refused
+/// by name through either format's loader, and a two-layer file loads into a two-layer
+/// driver whose brains decide.
+#[test]
+fn a_pre_contract_menu_policy_is_refused_by_name_and_a_two_layer_file_loads() {
+    use crate::es::voxel::store::{load_brain_driver, test_centre};
+    let founder = Founder::Loftstrider;
+    let mut before = founder.manifest();
+    before.menu = &cubarium_voxel_fauna::intent::PLAIN;
+    let stale = before.digest();
+    let dir = std::env::temp_dir().join(format!("two-layer-load-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let mut plain = test_centre(founder, 2);
+    plain.digest = stale;
+    let p = dir.join("plain.json");
+    plain.write(&p).unwrap();
+    let err = load_brain_driver(&p, founder).expect_err("refused");
+    assert!(err.contains("before the intent contract"), "{err}");
+
+    let net = loftstrider_net(4);
+    let mut file = super::file::TwoLayerPolicyFile::new(founder, &net, 1, "test");
+    let q = dir.join("two.json");
+    file.write(&q).unwrap();
+    let d = load_brain_driver(&q, founder).expect("a two-layer file loads");
+    assert_eq!(d.name(), "two-layer");
+    assert!(load_brain_driver(&q, Founder::Seedporter).is_err(), "another lineage's brain");
+    file.digest = stale;
+    file.write(&q).unwrap();
+    let err = load_brain_driver(&q, founder).expect_err("refused");
+    assert!(err.contains("before the intent contract"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

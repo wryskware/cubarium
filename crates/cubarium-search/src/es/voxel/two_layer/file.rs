@@ -115,12 +115,7 @@ impl TwoLayerPolicyFile {
             ));
         }
         if self.digest != voxel_schema_digest(founder) {
-            return Err(format!(
-                "{name}: policy digest {:#018x} is not this build's {} manifest digest {:#018x}",
-                self.digest,
-                founder.name(),
-                voxel_schema_digest(founder)
-            ));
+            return Err(format!("{name}: {}", manifest.digest_refusal(self.digest)));
         }
         if s.is_plain() {
             return Err(format!(

@@ -240,11 +240,10 @@ impl VoxelPolicyFile {
         }
         let digest = voxel_schema_digest(founder);
         if digest_too && self.digest != digest {
+            // CONTRACTS' refusal names a menu lineage's pre-contract policy as that.
             return Err(format!(
-                "{name}: policy digest {:#018x} is not this build's {} manifest digest \
-                 {digest:#018x}: the schemas differ and the weights cannot be reinterpreted",
-                self.digest,
-                founder.name()
+                "{name}: {}; the weights cannot be reinterpreted",
+                manifest.digest_refusal(self.digest)
             ));
         }
         if self.starting_stores != super::task::STARTING_STORES_PROTOCOL {
@@ -290,6 +289,43 @@ impl VoxelPolicyFile {
         self.validate_common("policy")?;
         let founder = super::parse_founder(&self.founder)?;
         EpisodeDriver::gru(&self.theta, founder)
+    }
+}
+
+/// **Load any centre file as `founder`'s driver** (TWO-LAYER step 3): a plain
+/// `cub-voxel-policy-1` file exactly as before ([`VoxelPolicyFile::load_or_transfer`], so a
+/// `transfer:` path still works), a two-layer file through
+/// [`super::two_layer::BrainFile`] into a two-layer brain holding by the lineage's default
+/// brain table (an installing world swaps in its own,
+/// [`EpisodeDriver::with_brain_table`]). A menu lineage's plain file is a plain brain
+/// driven through `drive`. Every refusal is by name; a stale digest says why
+/// ([`cubarium_voxel_fauna::Manifest::digest_refusal`]).
+pub fn load_brain_driver(path: &Path, founder: Founder) -> Result<EpisodeDriver, String> {
+    use super::two_layer::BrainFile;
+    let text = path.to_string_lossy();
+    if text.starts_with("transfer:") {
+        let file = VoxelPolicyFile::load_or_transfer(path)?;
+        if file.founder()? != founder {
+            return Err(format!("{} is not a {} centre", path.display(), founder.name()));
+        }
+        return file.driver();
+    }
+    match BrainFile::load(path)? {
+        BrainFile::Plain(file) => {
+            if file.founder()? != founder {
+                return Err(format!("{} is not a {} centre", path.display(), founder.name()));
+            }
+            file.driver()
+        }
+        BrainFile::TwoLayer(file) => {
+            let named = super::parse_founder(&file.founder)?;
+            if named != founder {
+                return Err(format!("{} is not a {} brain", path.display(), founder.name()));
+            }
+            let net = file.net()?;
+            let arbitration = cubarium_voxel_fauna::FaunaConfig::default().founder(founder).brain;
+            Ok(EpisodeDriver::two_layer(net, arbitration, founder))
+        }
     }
 }
 
