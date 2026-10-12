@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 use super::*;
-use crate::voxel::{self, VoxelStyle, VoxelTexel, VoxelTextures};
+use crate::voxel::{self, VoxelTextures};
+#[cfg(feature = "counters")]
+use crate::voxel::{VoxelStyle, VoxelTexel};
 use crate::{atlas::Atlas, scene::RingLayout, synthetic::SyntheticWorld};
 
 fn gpu() -> Gpu {
