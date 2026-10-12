@@ -155,7 +155,7 @@ fn saved_fixture() -> Fauna {
 }
 
 fn scaled_config(f: &Fauna, ratio: f64) -> FaunaConfig {
-    let mut config = f.config.clone();
+    let mut config = *f.config;
     for lineage in Founder::ALL {
         config.founders[lineage.index()].scale_mass(ratio);
     }
@@ -250,7 +250,7 @@ fn an_unchanged_mass_preserves_saved_stocks_bit_for_bit() {
     let animals = loaded.animals.clone();
     let clutches = loaded.clutches.clone();
     let ledger = loaded.ledger.clone();
-    loaded.replace_config(loaded.config.clone()).unwrap();
+    loaded.replace_config(*loaded.config).unwrap();
     for (before, after) in animals.iter().zip(&loaded.animals) {
         assert_eq!(
             stocks(before)
@@ -273,7 +273,7 @@ fn changing_one_lineage_preserves_other_lineages_and_their_eggs() {
     let mut loaded = saved_fixture();
     let animals = loaded.animals.clone();
     let clutches = loaded.clutches.clone();
-    let mut config = loaded.config.clone();
+    let mut config = *loaded.config;
     config.founders[Founder::Browser.index()].scale_mass(3.0);
     loaded.replace_config(config).unwrap();
     for (before, after) in animals.iter().zip(&loaded.animals) {
@@ -305,7 +305,7 @@ fn loaded_bodies_survive(ratio: f64) {
         ));
     }
     let mut loaded = Fauna::load(&fauna.save()).unwrap();
-    let mut config = loaded.config.clone();
+    let mut config = *loaded.config;
     config.founders[Founder::Browser.index()].scale_mass(ratio);
     loaded.replace_config(config).unwrap();
     let minimum = loaded.config.founder(Founder::Browser).core.body_min;

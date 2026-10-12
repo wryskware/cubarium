@@ -242,7 +242,7 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
                     .context("the voxel fauna snapshot's config")?;
             cubarium_voxel::savedoc::note_ignored("voxel fauna", &ignored);
             let mut fauna = env.fauna;
-            fauna.config = config;
+            *fauna.config = config;
             fauna.brain_memory = env.brains.into_iter().collect();
             fauna
         }

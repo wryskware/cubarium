@@ -4141,8 +4141,10 @@ pub struct CensusReadout {
 pub struct Fauna {
     /// Saved beside the state as a named-field document (`cubarium_voxel::savedoc`), not in
     /// its positional bytes: a new knob is not a new state layout.
+    /// Boxed (STACK-FIX): the config is tens of kilobytes, and a `Fauna` held by value in a
+    /// debug build's frames (founding, a loaded start) copied it with it.
     #[serde(skip)]
-    config: FaunaConfig,
+    config: Box<FaunaConfig>,
     /// Last world's (ring circumference, voxel size), rebuilt on introduction/step for
     /// exact death readouts that need cover geometry. Runtime cache, never saved.
     #[serde(skip)]
@@ -4907,7 +4909,7 @@ impl Fauna {
     pub fn try_new(config: FaunaConfig) -> Result<Fauna, String> {
         config.validate()?;
         Ok(Fauna {
-            config,
+            config: Box::new(config),
             world_geometry: None,
             tick: 0,
             animals: Vec::new(),
@@ -5339,7 +5341,7 @@ impl Fauna {
             self.ledger.introduced_mineral_in += c.mineral - before[1];
             self.ledger.introduced_energy_in += c.energy - before[2];
         }
-        self.config = config;
+        *self.config = config;
         for i in 0..self.animals.len() {
             step::cap_fuel(self, i);
         }

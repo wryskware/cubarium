@@ -239,7 +239,7 @@ fn a_faster_close_pack_catches_an_adult_but_a_distant_pack_does_not() {
     let w = clock_off(303);
     let flora = Flora::new(FloraConfig::default());
     let (mut f, grazers, pack) = herd(&w);
-    let mut c = f.config.clone();
+    let mut c = *f.config;
     c.founders[GRAZER.index()].hunker.catch_m =
         (c.founder(GRAZER).hunker.enter_m + c.founder(GRAZER).vigilance.flee_start_m) / 2.0;
     c.founders[VH.index()].cruise_body_lengths_per_s =
@@ -427,7 +427,7 @@ fn a_real_lunge_uses_the_shelter_knob_at_contact() {
     let harm = |exposure| {
         let (w, mut f, calf, adult, striker) = cover_scene(exposure);
         f.set_births_enabled(false);
-        let mut c = f.config.clone();
+        let mut c = *f.config;
         c.founders[GRAZER.index()].vigilance.mode = VigilMode::None;
         c.founders[GRAZER.index()].senses.live = false;
         c.founders[GRAZER.index()].agility = 0.0;

@@ -579,7 +579,7 @@ fn a_rider_takes_its_own_body_share_and_the_books_close() {
         (h0.stored_organic() - h1.stored_organic()) - (t0.stored_organic() - t1.stored_organic());
     // LANTERNJAW-LIFE: the take is `parasite_take_body_per_day` of the rider's own body per
     // ecological day (under what the host bears), whatever its upkeep.
-    let c = s.fauna.config;
+    let c = *s.fauna.config;
     let r0 = animal(&s.fauna, riders_of(&s.fauna, host)[0]);
     assert!(crate::host_bears(&c, r0.body, h0.body), "the grazer bears its hatchling");
     let want = c.parasite_take_body_per_day / c.life.ecological_day_s * r0.body * DT;
@@ -685,7 +685,7 @@ fn a_rider_drops_off_at_its_detach_size_and_is_then_free() {
         parasite_take_body_per_day: 0.0,
         ..config()
     });
-    let c = s.fauna.config;
+    let c = *s.fauna.config;
     let line = c.parasite_detach_body_fraction * c.founder(Founder::Lanternjaw).core.body_max;
     let reserve = animal(&s.fauna, rider).reserve;
     set_stores(&mut s.fauna, rider, 0.98 * line, reserve);
@@ -759,7 +759,7 @@ fn with_no_standable_face_beside_it_a_rider_drops_off_on_its_hosts_place() {
             }
         }
     }
-    let c = s.fauna.config;
+    let c = *s.fauna.config;
     let line = c.parasite_detach_body_fraction * c.founder(Founder::Lanternjaw).core.body_max;
     let reserve = animal(&s.fauna, rider).reserve;
     set_stores(&mut s.fauna, rider, 1.001 * line, reserve);
@@ -962,7 +962,7 @@ fn a_riders_take_grows_with_its_size() {
     let small = extra_drain(&mut s, host, twin);
     assert!(small > 0.0, "a hatchling takes from its host");
 
-    let c = s.fauna.config;
+    let c = *s.fauna.config;
     let line = c.parasite_detach_body_fraction * c.founder(Founder::Lanternjaw).core.body_max;
     let big = 3.0 * animal(&s.fauna, rider).body;
     assert!(
@@ -1000,7 +1000,7 @@ fn outgrown(mut c: FaunaConfig, grazer_dx: Option<f64>) -> (Scene, u64, Option<u
     let rider = riders[0];
     let grazer = grazer_dx.map(|dx| s.add(Founder::Browser, StartingStores::FULL, dx));
     if let Some(g) = grazer {
-        let c = s.fauna.config;
+        let c = *s.fauna.config;
         assert!(crate::host_bears(&c, line, animal(&s.fauna, g).body), "fixture: the grazer bears it");
     }
     // Borne, it stays on.
@@ -1106,7 +1106,7 @@ fn an_outgrown_rider_never_takes_a_host_too_small_to_bear_it() {
     let (x, z) = (animal(&s.fauna, rider).pose.x, animal(&s.fauna, rider).pose.z);
     let small = s.add(Founder::Blind, StartingStores::FULL, 0.0);
     place(&mut s.fauna, small, x + 0.25 * r, z, EAST);
-    let c = s.fauna.config;
+    let c = *s.fauna.config;
     assert!(!crate::host_bears(&c, animal(&s.fauna, rider).body, animal(&s.fauna, small).body), "fixture: too small");
     let teachers = c.teachers;
     s.fauna.controllers.set(rider, crate::controller::heuristic(Founder::Lanternjaw, teachers));
@@ -1125,7 +1125,7 @@ fn a_rider_at_its_detach_size_goes_free_and_looks_for_no_host() {
     let (mut s, host, rider) = ride(config());
     let r = s.fauna.config.parasite_attach_radius_m;
     let other = s.add(Founder::Browser, StartingStores::FULL, 0.25 * r);
-    let c = s.fauna.config;
+    let c = *s.fauna.config;
     let line = c.parasite_detach_body_fraction * c.founder(Founder::Lanternjaw).core.body_max;
     let reserve = animal(&s.fauna, rider).reserve;
     set_stores(&mut s.fauna, rider, 1.001 * line, reserve);
@@ -1228,7 +1228,7 @@ fn slower(mut c: FaunaConfig) -> FaunaConfig {
 /// off, at most `cap`.
 fn ticks_to_drop_off(config: FaunaConfig, cap: u64) -> u64 {
     let (mut s, host, rider) = ride(config);
-    let c = s.fauna.config;
+    let c = *s.fauna.config;
     let lj = c.founder(Founder::Lanternjaw).core;
     let line = c.parasite_detach_body_fraction * lj.body_max;
     let body = 0.85 * line;
@@ -1314,7 +1314,7 @@ fn a_riders_take_never_exceeds_what_its_host_bears() {
     let twin = s.add(Founder::Browser, StartingStores::FULL, 4.0);
     s.past_next_dusk();
     let rider = riders_of(&s.fauna, host)[0];
-    let c = s.fauna.config;
+    let c = *s.fauna.config;
     let bear = |host_body: f64| c.parasite_host_bear_per_day * host_body / c.life.ecological_day_s * DT;
     for _ in 0..200 {
         let h = animal(&s.fauna, host).body;
@@ -1391,7 +1391,7 @@ fn a_host_survives_a_full_ride_from_hatch_to_drop_off() {
             }
             assert_eq!(riders.len(), 1, "fixture: {} bears a hatchling", founder.name());
             let rider = riders[0];
-            s.fauna.config = short_ride_config();
+            *s.fauna.config = short_ride_config();
             s.fauna.set_births_enabled(false);
             let mut dropped = false;
             for _ in 0..240 {

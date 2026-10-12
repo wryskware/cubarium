@@ -477,7 +477,7 @@ fn a_parasite_takes_fuel_as_fuel_and_respires_only_its_cap_overflow() {
             0.8,
         );
         let (h0, r0) = (fauna.animals[0], fauna.animals[1]);
-        let c = fauna.config;
+        let c = *fauna.config;
         let want = crate::rider_take_per_s(&c, r0.body)
             .min(c.parasite_host_bear_per_day / c.life.ecological_day_s * h0.body)
             * crate::DT;
@@ -700,7 +700,7 @@ fn lowering_the_configured_fuel_cap_respires_the_surplus_without_losing_matter()
     );
     let before = fauna.animals[0];
     let cap = before.fuel / 2.0;
-    let mut c = fauna.config;
+    let mut c = *fauna.config;
     c.founders[Founder::Browser.index()].core.fuel_cap = cap / before.body;
     let (digestion, heat) = (fauna.ledger.respired_digestion_out, fauna.ledger.heat_out);
 

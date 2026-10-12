@@ -33,7 +33,7 @@ fn kind_of_reads_prey_threat_and_other_per_observer() {
     let grazer = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
     let grazer2 = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
     let shredder = introduce(&mut fauna, &world, Founder::Blind, StartingStores::FULL);
-    let c = fauna.config;
+    let c = *fauna.config;
     let [lj, lj2, young, grazer, grazer2, shredder] =
         [lj, lj2, young, grazer, grazer2, shredder].map(|id| animal(&fauna, id));
     let moving = |mut a: crate::Animal| {
@@ -109,7 +109,7 @@ fn tremor_rises_for_a_walking_body_and_not_for_a_still_one() {
     assert_eq!(animal(&fauna, lj).still_ticks, 0);
     let felt = fauna.view().tremor(&world.view(), shredder);
     assert!(felt[0] + felt[1] > 0.0, "a walking body 1 m off makes no tremor: {felt:?}");
-    let c = fauna.config;
+    let c = *fauna.config;
     let (s, l) = (animal(&fauna, shredder), animal(&fauna, lj));
     assert_eq!(kind_of(&c, &s, &l, d), BodyKind::Threat);
 
