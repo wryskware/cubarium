@@ -21,7 +21,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use cubarium_voxel_fauna::{Controller, Founder, Layer, Response, Seek};
+use cubarium_voxel_fauna::{BrainMemory, Controller, Decision, DecisionInput, Founder, Layer, Response, Seek};
 use cubarium_voxel_sim::Sim;
 use serde::{Deserialize, Serialize};
 
@@ -32,7 +32,6 @@ use crate::es::voxel::EpisodeDriver;
 use crate::es::voxel::live::curiosity::{Curiosity, Memory};
 use crate::es::voxel::live::variants::VariantTable;
 use crate::es::voxel::live::window::Window;
-use crate::es::voxel::two_layer::BrainState;
 
 /// A scene the matched runner can copy.
 pub trait Scene: Sync {
@@ -125,16 +124,16 @@ impl Scene for EngageScene {
 
 // ---- any saved start (a whole live window) ----
 
-/// A saved start: the three layers' bytes, the lineages its save says a policy drives, and
-/// each body's brain state where it has one (two-layer brains, §11.3).
+/// A saved start: the three layers' bytes and the lineages its save says a policy drives.
+/// Brain memory travels inside the fauna save (CONTRACTS' `Controller::memory`, restored
+/// into whatever controller the body has at its next sample), so a focal's variant and
+/// every other brain continue from the same state in both copies.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SimStart {
     pub world: Vec<u8>,
     pub flora: Vec<u8>,
     pub fauna: Vec<u8>,
     pub policy: Vec<Founder>,
-    #[serde(default)]
-    pub brains: BTreeMap<u64, BrainState>,
 }
 
 impl SimStart {
@@ -146,7 +145,6 @@ impl SimStart {
             flora: cubarium_voxel_flora::snapshot::encode(fl),
             fauna: fa.save(),
             policy: policy.to_vec(),
-            brains: BTreeMap::new(),
         }
     }
 
@@ -159,7 +157,6 @@ impl SimStart {
             flora: read("flora.bin")?,
             fauna: read("fauna.bin")?,
             policy: policy.to_vec(),
-            brains: BTreeMap::new(),
         })
     }
 
@@ -299,7 +296,9 @@ struct Recording {
 }
 
 /// A response's decision: which of its outputs are positive (logits), or which bounded
-/// actions are positive; a bitmask. Two copies "decide alike" at a sample when equal.
+/// actions are positive; a bitmask. Two copies "decide alike" at a sample when equal. A
+/// menu brain's decision sample is read by its held intent and subject instead
+/// ([`intent_decision`]).
 pub fn decision(r: &Response) -> u64 {
     let bits = |xs: &mut dyn Iterator<Item = f64>| xs.take(64).enumerate().fold(0u64, |m, (i, x)| m | (u64::from(x > 0.0) << i));
     match r {
@@ -314,6 +313,11 @@ pub fn decision(r: &Response) -> u64 {
     }
 }
 
+/// A menu brain's decision: its held intent and subject row, packed.
+pub fn intent_decision(d: &Decision) -> u64 {
+    (1 << 63) | ((d.intent as u64) << 32) | d.subject.map_or(0xffff_ffff, |s| s as u64)
+}
+
 impl Controller for Recording {
     fn drive(&mut self, observation: &[f64]) -> Response {
         let r = self.inner.drive(observation);
@@ -321,6 +325,19 @@ impl Controller for Recording {
             log.push(decision(&r));
         }
         r
+    }
+    fn decide(&mut self, observation: &[f64], input: &DecisionInput<'_>) -> (Response, Option<Decision>) {
+        let (r, d) = self.inner.decide(observation, input);
+        if let Ok(mut log) = self.log.lock() {
+            log.push(d.as_ref().map_or_else(|| decision(&r), intent_decision));
+        }
+        (r, d)
+    }
+    fn memory(&self) -> Option<BrainMemory> {
+        self.inner.memory()
+    }
+    fn restore(&mut self, memory: &BrainMemory) -> bool {
+        self.inner.restore(memory)
     }
     fn reset(&mut self) {
         self.inner.reset();

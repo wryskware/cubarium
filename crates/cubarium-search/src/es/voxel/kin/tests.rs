@@ -359,3 +359,106 @@ fn the_shipped_kin_file_parses() {
     let k = KinConfig::load(&path).unwrap();
     assert!(k.of(Founder::Browser).is_today(), "a lineage left out trains as before");
 }
+
+// ---- step 4: matched copies ----
+
+use super::matched::{self, EngageScene, MatchedPlan, Scene, SceneCopy};
+
+/// A short staged encounter: ENGAGE's own test fixture (2 s, small strip), arm 0.
+fn engage(seconds: f64) -> EngageScene {
+    let config = cubarium_voxel_sim::engagement::Config {
+        duration_s: seconds,
+        episodes: 1,
+        width: 64,
+        depth: 40,
+        height: 24,
+        distance_m: [1.0, 1.5],
+        spacing_m: 0.5,
+        depth_jitter_m: 0.0,
+        ..Default::default()
+    };
+    let arm = config.arms[0].clone();
+    EngageScene { config, arm, seed: 73, centres: Vec::new() }
+}
+
+fn table(f: Founder, pairs: usize) -> crate::es::voxel::live::variants::VariantTable {
+    let m = f.manifest();
+    let centre = crate::es::tensor::initial_center_runtime(m.inputs(), m.outputs(), m.hidden, 5);
+    crate::es::voxel::live::variants::VariantTable::antithetic(f, &centre, 3, 0.05, 0, pairs).unwrap()
+}
+
+#[test]
+fn the_focal_and_the_sign_rotate() {
+    let plans = matched::rotate(&[10, 20, 30], 2, 6);
+    assert_eq!(plans.iter().map(|p| p.focal).collect::<Vec<_>>(), vec![10, 20, 30, 10, 20, 30]);
+    assert_eq!(plans.iter().map(|p| p.pair).collect::<Vec<_>>(), vec![0, 1, 0, 1, 0, 1]);
+    // Each focal's second turn swaps which copy carries +.
+    for k in 0..3 {
+        assert_ne!(plans[k].plus_first, plans[k + 3].plus_first, "focal {} sign slot rotates", plans[k].focal);
+    }
+    // The two copies differ only in the focal's sign.
+    let [a, b] = MatchedPlan { focal: 7, pair: 3, plus_first: false }.copies();
+    assert_eq!((a.focal, b.focal), (7, 7));
+    assert_eq!((a.candidate, b.candidate), (Some(7), Some(6)));
+    assert!(matched::rotate(&[], 2, 4).is_empty());
+}
+
+#[test]
+fn matched_copies_change_only_the_focal() {
+    let scene = engage(1.0);
+    let copy = scene.open().unwrap();
+    let focals = scene.focals(&copy, Founder::Loftstrider);
+    assert!(!focals.is_empty(), "the family is focal-eligible");
+    let before: Vec<(u64, bool)> = copy.sim().fauna().view().animals.iter().map(|a| (a.id, copy.sim().fauna().has_controller(a.id))).collect();
+    drop(copy);
+    let t = table(Founder::Loftstrider, 2);
+    let kin = KinConfig::default();
+    let plan = MatchedPlan { focal: focals[0], pair: 1, plus_first: true };
+    let [p0, p1] = plan.copies();
+    let a = matched::run_copy(&scene, p0, Some(&t), &kin).unwrap();
+    let b = matched::run_copy(&scene, p1, Some(&t), &kin).unwrap();
+    // The runner replaced one controller per copy, the focal's, with its sign.
+    assert_eq!(a.installed, vec![(focals[0], Some(2))]);
+    assert_eq!(b.installed, vec![(focals[0], Some(3))]);
+    // Every body the scene founded is metered in both copies.
+    for (id, driven) in before {
+        assert!(driven, "the scene drives body {id}");
+        assert!(a.scores.contains_key(&id) && b.scores.contains_key(&id), "body {id} metered in both");
+    }
+    assert!(!a.decisions.is_empty(), "the focal's decisions are recorded");
+    let r = matched::run_pair(&scene, plan, &t, &kin, 1).unwrap();
+    assert!(r.difference().is_some_and(f64::is_finite));
+    let s = matched::pair_scores(&[r], 2);
+    assert_eq!(s.pairs.len(), 1);
+    assert_eq!(s.missing, 1, "pair 0 never ran: missing, not zero");
+}
+
+#[test]
+fn a_null_pair_reports_its_gap() {
+    let scene = engage(1.0);
+    let copy = scene.open().unwrap();
+    let focal = scene.focals(&copy, Founder::Chorister)[0];
+    drop(copy);
+    let t = table(Founder::Chorister, 1);
+    let np = matched::null_pair(&scene, matched::CopyPlan { focal, candidate: Some(0) }, Some(&t), &KinConfig::default(), 2).unwrap();
+    assert!(np.bodies > 0);
+    assert!(np.focal_gap.is_finite() && np.max_combined_gap.is_finite());
+    assert!(np.ticks[0] > 0 && np.ticks[1] > 0);
+}
+
+#[test]
+fn a_saved_start_opens_into_copies() {
+    let mut sim = small_sim(&[(Founder::Blind, 2)]);
+    for _ in 0..5 {
+        sim.step();
+    }
+    let start = matched::SimStart::capture(&sim, &[]);
+    let scene = matched::SavedScene { start, ticks: 20, centres: Vec::new(), threads: 1, water_every: 1 };
+    let mut c = scene.open().unwrap();
+    assert_eq!(c.sim().world().tick(), sim.world().tick());
+    let mut n = 0;
+    while c.step() {
+        n += 1;
+    }
+    assert_eq!(n, 20, "a saved scene runs its window");
+}
