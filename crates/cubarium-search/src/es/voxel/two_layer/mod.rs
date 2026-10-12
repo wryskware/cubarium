@@ -22,6 +22,7 @@ pub mod brain;
 pub mod clone;
 pub mod file;
 pub mod net;
+pub mod record;
 pub mod shape;
 
 #[cfg(test)]

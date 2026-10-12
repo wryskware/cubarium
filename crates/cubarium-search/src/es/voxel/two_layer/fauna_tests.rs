@@ -336,3 +336,129 @@ fn a_pre_contract_menu_policy_is_refused_by_name_and_a_two_layer_file_loads() {
     assert!(err.contains("before the intent contract"), "{err}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ---- Step 5: teacher streams, forced modes, the shadow teacher ----
+
+use super::clone::{CloneSet, RecordSource};
+use super::record::{ShadowTeacher, records_from_tap};
+
+/// Seedporters and a lanternjaw under their heuristics on the plain, a Veilhound beside
+/// them; returns the world, its plants, the layer and the menu bodies.
+fn teacher_scene() -> (World, Flora, Fauna, Vec<(u64, Founder)>) {
+    let w = plain_world(5);
+    let mut config = FaunaConfig::default();
+    for f in Founder::ALL {
+        config.founders[f.index()].active = Activity::Always;
+    }
+    let mut f = Fauna::new(config);
+    let teachers = f.config().teachers;
+    let mut ids = Vec::new();
+    for (x, founder) in [
+        (6, Founder::Seedporter),
+        (9, Founder::Seedporter),
+        (12, Founder::Lanternjaw),
+        (20, Founder::Chorister),
+    ] {
+        assert!(f.apply(
+            &w,
+            Command::IntroduceFounder {
+                x,
+                z: 6,
+                founder,
+                stores: StartingStores::FULL,
+                heading_rad: std::f64::consts::FRAC_PI_2,
+            }
+        ));
+        let id = f.view().animals.last().unwrap().id;
+        assert!(f.set_controller(id, cubarium_voxel_fauna::heuristic(founder, teachers)));
+        if founder != Founder::Chorister {
+            ids.push((id, founder));
+        }
+    }
+    (w, Flora::new(FloraConfig::default()), f, ids)
+}
+
+/// The tap becomes the core's records: teacher stretches with a label before the hold,
+/// forced stretches as alternative-mode records with none, every held subject among its
+/// sample's rows, and the records fit the lineage's shape.
+#[test]
+fn the_tap_becomes_teacher_and_alternative_mode_records() {
+    let (w, mut flora, mut f, ids) = teacher_scene();
+    f.start_tap();
+    let forced_from = 200u64;
+    for t in 0..400u64 {
+        if t == forced_from {
+            for &(id, _) in &ids {
+                f.force_own(id, true);
+            }
+        }
+        f.step(&w, &mut flora);
+    }
+    let tap = f.take_tap().expect("tap");
+    for founder in [Founder::Seedporter, Founder::Lanternjaw] {
+        let shape = TwoLayerShape::menu_from_manifest(
+            &founder.manifest(),
+            MenuHeads { kick: false, call_kinds: 0, rest: false, top_hidden: 8, pointer_width: 6 },
+        );
+        let records = records_from_tap(&tap, founder, &shape, &|_, tick| tick > forced_from, 1);
+        assert!(records.iter().any(|(_, r)| r.source == RecordSource::Teacher), "{}", founder.name());
+        assert!(records.iter().any(|(_, r)| r.source == RecordSource::AlternativeMode), "{}", founder.name());
+        let menu = founder.manifest().menu;
+        for (_, r) in &records {
+            for s in &r.samples {
+                assert_eq!(s.observation.len(), shape.observation);
+                assert_eq!(s.candidates.len(), shape.candidates);
+                if let Some(sub) = s.held.subject {
+                    assert!(s.candidates.iter().any(|c| c.key == sub.key), "a held subject has its row");
+                }
+                match r.source {
+                    RecordSource::Teacher => assert!(s.proposal.is_some()),
+                    _ => {
+                        assert!(s.proposal.is_none());
+                        let name = menu.name(s.held.intent);
+                        assert!(["forage", "ambush", "rest", "feed"].contains(&name), "forced {name}");
+                    }
+                }
+            }
+        }
+        let only: Vec<_> = records.into_iter().map(|(_, r)| r).collect();
+        let arb = cubarium_voxel_fauna::BrainArbitration::default();
+        CloneSet::new(&shape, &arb, &only).expect("the records fit the shape");
+    }
+}
+
+/// The shadow teacher labels the learner's states and never changes its body: a brain
+/// with a shadow beside it moves exactly as the same brain alone.
+#[test]
+fn the_shadow_teacher_does_not_change_the_brain_driven_body() {
+    let founder = Founder::Seedporter;
+    let shape = TwoLayerShape::menu_from_manifest(
+        &founder.manifest(),
+        MenuHeads { kick: false, call_kinds: 0, rest: false, top_hidden: 8, pointer_width: 6 },
+    );
+    let net = Arc::new(TwoLayerNet::new(shape.clone(), initial_center(&shape, 8)).unwrap());
+    let arb = cubarium_voxel_fauna::BrainArbitration::default();
+    let period = founder.manifest().controller_period_s;
+    let (w, mut flora_a, mut a, ids) = teacher_scene();
+    let (_, mut flora_b, mut b, _) = teacher_scene();
+    let teachers = a.config().teachers;
+    let log = Arc::new(Mutex::new(Vec::new()));
+    for &(id, f) in &ids {
+        if f != founder {
+            continue;
+        }
+        let shadow = ShadowTeacher::new(net.brain(arb, period), cubarium_voxel_fauna::heuristic(founder, teachers), founder, log.clone());
+        assert!(a.set_controller(id, Box::new(shadow)));
+        assert!(b.set_controller(id, Box::new(net.brain(arb, period))));
+    }
+    for t in 0..300 {
+        a.step(&w, &mut flora_a);
+        b.step(&w, &mut flora_b);
+        for &(id, _) in &ids {
+            assert_eq!(a.view().animal(id).map(|x| x.pose), b.view().animal(id).map(|x| x.pose), "tick {t}");
+        }
+    }
+    let log = log.lock().unwrap();
+    assert!(!log.is_empty(), "the shadow labelled the learner's samples");
+    assert!(log.iter().all(|s| s.proposal.is_none() && s.actions.len() == shape.actions.len()));
+}

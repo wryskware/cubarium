@@ -361,7 +361,7 @@ pub fn fit_tap(
 }
 
 /// One held label as the manifest's action vector.
-fn held_actions(manifest: &Manifest, held: &cubarium_voxel_fauna::Held) -> Vec<f64> {
+pub(crate) fn held_actions(manifest: &Manifest, held: &cubarium_voxel_fauna::Held) -> Vec<f64> {
     manifest
         .actions
         .iter()
