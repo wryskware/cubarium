@@ -78,6 +78,7 @@ use cubarium_voxel_flora::Flora;
 
 mod arena;
 pub mod edit;
+pub mod engagement;
 #[cfg(test)]
 mod edit_tests;
 pub mod found;

@@ -302,6 +302,13 @@ impl Params {
                 ));
             }
         }
+        let table = crate::engagement::registry();
+        let dump = table.dump(&crate::engagement::Config::default())?;
+        md.push_str("\n**`engagement.*`** (isolated harness; `config/engagement.toml`)\n\n| path | value | unit | range | what |\n| --- | --- | --- | --- | --- |\n");
+        for row in table.rows() {
+            let values: Vec<_> = dump.iter().filter(|d| d.row.path == row.path).map(|d| d.value.as_str()).collect();
+            md.push_str(&format!("| `{}` | {} | {} | {} | {} |\n", row.path, values.join(", "), row.unit, row.range, row.what));
+        }
         Ok(md)
     }
 
