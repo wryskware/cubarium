@@ -419,6 +419,10 @@ fn founder_rows() -> Vec<Row> {
         r("defence.w_go_to_adults", "logit", nonneg, "LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded)"),
         // YOUNG-ROAM (`roam::Young`, behaviour-AI §3.5).
         r("young.pace_floor", "x adult cruise", fraction, "YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed"),
+        r("young.independence_s", "s", nonneg, "YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth"),
+        r("young.follow_m", "m", nonneg, "YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off"),
+        r("young.roam_m", "m", nonneg, "YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get)"),
+        r("young.follow_pull", "fraction", fraction, "YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean)"),
         // Calls (`calls::CallTable`, CONTRACTS, behaviour-AI §11.2); `recognise_voice` is a switch.
         r("calls.range_m", "m", nonneg, "CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres"),
         r("calls.loudness.*", "x range", nonneg, "CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion"),

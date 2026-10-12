@@ -9,11 +9,13 @@ mod fixture;
 
 #[allow(unused_imports)]
 use super::*;
+use crate::perception::{SIGHT, Track, class, posture};
 use crate::{Activity, Fauna, FaunaConfig, Founder, StartingStores};
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
-use fixture::{EAST, SURFACE_Y, VOXEL_M, animal_mut, drive, hunting_config, introduce, place};
+use fixture::{EAST, SURFACE_Y, VOXEL_M, WEST, animal, animal_mut, drive, hunting_config, introduce, place};
 
 const LS: Founder = Founder::Loftstrider;
+const SP: Founder = Founder::Seedporter;
 
 /// Arena columns and rows (0.25 m voxels): 40 m around the ring, 30 m deep.
 const W: u32 = 160;
@@ -62,6 +64,67 @@ fn world(seed: u64) -> (World, Fauna) {
 
 fn index(f: &Fauna, id: u64) -> usize {
     f.animals.iter().position(|a| a.id == id).expect("a live body")
+}
+
+fn length(f: &Fauna, id: u64) -> f64 {
+    crate::body_of(&f.config, &animal(f, id)).expect("a body").length_m
+}
+
+/// What body `me` sees of body `id` now: a sight track as the senses write it.
+fn seen(f: &Fauna, me: u64, id: u64, cls: u8, moving: bool) -> Track {
+    let (m, o) = (animal(f, me), animal(f, id));
+    let (dx, dz) = crate::pose::wrapped_delta(m.pose.x, m.pose.z, o.pose.x, o.pose.z, RING);
+    Track {
+        known: true,
+        id,
+        lineage: o.founder.expect("a lineage").index() as u8,
+        class: cls,
+        modes: SIGHT,
+        x: o.pose.x,
+        z: o.pose.z,
+        y_m: o.pose.y_m,
+        site: (o.site.x, o.site.y, o.site.z),
+        grounded: true,
+        moving,
+        d_m: (dx * dx + dz * dz).sqrt(),
+        size_m: length(f, id),
+        tick: f.tick,
+        heading: o.pose.heading_rad,
+        posture: posture::ACTIVE,
+        ..Track::default()
+    }
+}
+
+/// Body `me` sees exactly `bodies` now: `(id, class, moving)`.
+fn sees(f: &mut Fauna, me: u64, bodies: &[(u64, u8, bool)]) {
+    let tracks: Vec<Track> = bodies.iter().map(|&(id, c, m)| seen(f, me, id, c, m)).collect();
+    let mut p = f.percepts.get(&me).copied().unwrap_or_default();
+    p.tracks = [Track::default(); crate::perception::MAX_TRACKS];
+    p.tracks[..tracks.len()].copy_from_slice(&tracks);
+    p.n = tracks.len() as u8;
+    p.tick = f.tick;
+    f.percepts.insert(me, p);
+}
+
+/// A mother of `founder` at `(x, MID_Z)` and her young `share` of her `birth_body`, aged
+/// `age_s`, at `(x + gap, MID_Z)`; the young sees her.
+fn family(f: &mut Fauna, w: &World, founder: Founder, x: f64, gap: f64, share: f64, age_s: f64) -> (u64, u64) {
+    let mother = introduce(f, w, founder, StartingStores::FULL);
+    let young = introduce(f, w, founder, StartingStores::FULL);
+    let birth = f.config.founder(founder).core.birth_body;
+    animal_mut(f, young).body = share * birth;
+    animal_mut(f, young).mother = Some(mother);
+    animal_mut(f, young).age_ticks = (age_s / cubarium_voxel::DT).round() as u64;
+    place(f, mother, x, MID_Z, WEST);
+    place(f, young, x + gap, MID_Z, EAST);
+    drive(f, mother, 0.0, false);
+    drive(f, young, 0.0, false);
+    sees(f, young, &[(mother, class::KIN, false)]);
+    (mother, young)
+}
+
+fn set_age(f: &mut Fauna, id: u64, age_s: f64) {
+    animal_mut(f, id).age_ticks = (age_s / cubarium_voxel::DT).round() as u64;
 }
 
 // ------------------------------------------------------------------ step 1: young pace
@@ -122,4 +185,72 @@ fn a_driven_calf_moves_at_its_own_lengths_pace_and_a_driven_adult_at_its_lineage
     assert!(scale < 1.0);
     assert!((top_adult - cruise).abs() <= 0.02 * cruise, "adult {top_adult} vs cruise {cruise}");
     assert!((top_calf - scale * cruise).abs() <= 0.02 * cruise, "calf {top_calf} vs {}", scale * cruise);
+}
+
+// ------------------------------------------------------------------ step 2: the leash
+
+#[test]
+fn the_leash_grows_with_age_from_follow_m_to_roam_m_and_ends_at_independence() {
+    let (w, mut f) = world(2);
+    let y = f.config.founder(LS).young;
+    assert!(y.roams() && y.roam_m > y.follow_m);
+    // Between the two comforts: pulled at birth, left alone near independence.
+    let gap = 0.5 * (y.follow_m + y.roam_m);
+    let (_, calf) = family(&mut f, &w, LS, 10.0, gap, 0.3, 0.0);
+    let i = index(&f, calf);
+    let mut last = 0.0;
+    for k in [0.0, 0.25, 0.5, 0.75, 0.999] {
+        set_age(&mut f, calf, k * y.independence_s);
+        let (comfort, weight) = leash(&f, i).expect("a young calf with a mother is leashed");
+        let want = y.follow_m + (y.roam_m - y.follow_m) * k;
+        assert!((comfort - want).abs() <= 1e-3 * y.roam_m, "at {k}: {comfort} vs {want}");
+        assert!(comfort >= last);
+        assert_eq!(weight, y.follow_pull);
+        last = comfort;
+    }
+    set_age(&mut f, calf, 0.0);
+    let pull = crate::nurse::mother_pull(&f, i, RING).expect("it senses its mother");
+    let pull = pull.expect("past its birth comfort: pulled toward her");
+    assert!(pull.dx < 0.0, "toward its mother, west of it");
+    assert_eq!(pull.weight, y.follow_pull);
+    set_age(&mut f, calf, 0.999 * y.independence_s);
+    assert_eq!(crate::nurse::mother_pull(&f, i, RING), Some(None), "within its grown comfort: no pull");
+    // At independence the leash is gone: the family's pull again.
+    set_age(&mut f, calf, y.independence_s);
+    assert!(leash(&f, i).is_none());
+    assert!(crate::nurse::mother_pull(&f, i, RING).is_none());
+    // No recorded mother: no leash.
+    set_age(&mut f, calf, 0.0);
+    animal_mut(&mut f, calf).mother = None;
+    assert!(leash(&f, i).is_none());
+}
+
+#[test]
+fn a_seedporter_infant_before_weaning_keeps_its_nursing_follow_and_never_strays() {
+    let (w, mut f) = world(3);
+    let n = f.config.founder(SP).nursing;
+    let y = f.config.founder(SP).young;
+    assert!(n.on() && y.roams() && y.independence_s > n.weaning_age_s);
+    let (_, young) = family(&mut f, &w, SP, 10.0, n.leash_m.max(n.follow_m) + 0.5, 0.3, 0.0);
+    let i = index(&f, young);
+    for k in [0.0, 0.5, 0.999] {
+        set_age(&mut f, young, k * n.weaning_age_s);
+        assert!(crate::nurse::dependent(&f, i));
+        assert!(progress(&f, i).is_none(), "an infant has no roam");
+        // Its comfort is the nursing leash, whatever the young table says.
+        let pull = crate::nurse::mother_pull(&f, i, RING).expect("it senses its mother");
+        assert!(pull.is_some_and(|p| p.weight == n.follow_pull.clamp(0.0, 1.0)), "pulled back past the nursing leash");
+    }
+    // Weaned: the roam starts at `follow_m` and grows.
+    set_age(&mut f, young, n.weaning_age_s);
+    assert!(!crate::nurse::dependent(&f, i));
+    assert_eq!(progress(&f, i), Some(0.0));
+    let (c0, _) = leash(&f, i).expect("a weaned young is leashed");
+    assert!((c0 - y.follow_m).abs() <= 1e-9);
+    set_age(&mut f, young, 0.5 * (n.weaning_age_s + y.independence_s));
+    let (c1, _) = leash(&f, i).expect("leashed");
+    assert!(c1 > c0 && c1 < y.roam_m);
+    // A weaned young weighs its mother on its sensings, as an infant does.
+    let mother = animal(&f, young).mother.expect("a mother");
+    assert!(crate::nurse::weighs_as_mother(&f, i, mother));
 }
