@@ -2783,6 +2783,9 @@ impl SpeciesConfig {
             dark_establish_min: 0.5,
             dark_spore_bias: 4.0,
             dark_founder_share: 0.5,
+            // INSECT-N (Wrysk 2026-10-12: "yah makes sense"): mushroom flesh carries 4-6 %
+            // nitrogen of its dry mass against leaves' 2-3 %, so twice the leaves' 0.02.
+            n_tissue: 0.04,
             trophic: Trophic::Saprotroph,
             // SHADE-REAL leaf area: a cap is not a leaf; it shades as one opaque disc over
             // its footprint, an "LAI" of 1 over the 0.0625 m² floor at 0.2 units of cap
@@ -3563,7 +3566,9 @@ impl Default for FloraConfig {
             // Half the capacity: a live world founds an established pond, not a fresh
             // film (roster R2b repair). Read only when `seed_film_at_founding` is on.
             film_seed_per_m2: 0.2,
-            film_n_tissue: SpeciesConfig::springturf().n_tissue,
+            // INSECT-N (Wrysk 2026-10-12): an algal film carries 4-8 % nitrogen of its dry
+            // mass against leaves' 2-3 %, so twice the leaves' 0.02.
+            film_n_tissue: 0.04,
             film_energy_density: SpeciesConfig::springturf().energy_density,
             seed_film_at_founding: false,
         }

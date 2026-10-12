@@ -2093,7 +2093,14 @@ impl FounderPhysiology {
                     // litter cue's reference stock `emit_reference`, so a litter film gives crumbs
                     // and a real pile nearly a whole bite.
                     bite_half_stock: 0.00125,
-                    n_tissue: 0.02,
+                    // INSECT-N (Wrysk 2026-10-12: "larvae (prob lanternjaw too?) needa be
+                    // more protein"): insect flesh carries about as much nitrogen as
+                    // vertebrate flesh (8-12 % of dry mass against 10-12 %), so the
+                    // vertebrates' 0.05. On litter (0.02, yield 0.5) a bite builds 0.4 of
+                    // its organic, not 0.5: growth a fifth slower. The capgnawer and ripple
+                    // snail take it with this table ("yes for all"); the bellwing keeps 0.02
+                    // until its larva builds its body from leaves.
+                    n_tissue: 0.05,
                     body_max: 0.0125,
                     // From body_min to birth_body (0.009375) in ≥ 2,757 s, so that with the
                     // 900 s hold a hatchling's first clutch is ≥ 3,657 s after it hatched.
@@ -2335,10 +2342,12 @@ impl FounderPhysiology {
                     maintenance_per_s: DAILY_LANTERNJAW / DAY_S,
                     // The browser's K scaled by body (0.005 × 0.035 / 0.05).
                     bite_half_stock: 0.0035,
-                    // Set from carrion's own composition, as the shredder's is from
-                    // litter's: a corpse carries its dead body's tissue mineral (0.02 to
-                    // 0.05), so 0.02 never binds the budget.
-                    n_tissue: 0.02,
+                    // INSECT-N (Wrysk 2026-10-12: "prob lanternjaw too?"): insect flesh's
+                    // nitrogen, the vertebrates' 0.05, as the shredder's; the Veilhound takes
+                    // it with this table ("yes for all"). A corpse carries
+                    // its dead body's tissue mineral, so only bellwing carrion (0.02 until
+                    // its larva ships) binds it.
+                    n_tissue: 0.05,
                     body_max: 0.035,
                     // LJ-GROW (Wrysk 2026-10-10: "bugs dont take like 4 months to grow"):
                     // 1.0e-5, 3.0e-4 ou/s at the shipped mass (1.08 ou/h at a full
@@ -2623,6 +2632,10 @@ impl FounderPhysiology {
                 let mut core = shredder.core;
                 core.scale_mass(BELLWING_MASS_RATIO);
                 core.maintenance_per_s = DAILY_BELLWING / DAY_S;
+                // Not the shredder's 0.05 (INSECT-N): its young grow on nectar (mineral
+                // 0.01), so at 0.05 they would take 2.5x as long to mature. It rises with
+                // the larva stage, whose body is built from leaves (Wrysk 2026-10-12).
+                core.n_tissue = 0.02;
                 // Nectar's half-stock: a tenth of a bloomcrown's nectar cap (0.02), so a
                 // full flower gives about nine tenths of a sip and a nearly drained one
                 // crumbs. Not a mass (the food's stock does not scale with the eater).
