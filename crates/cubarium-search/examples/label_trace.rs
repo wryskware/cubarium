@@ -1,9 +1,10 @@
 //! **What a lineage's bodies do under each teacher label in a live training world**
 //! (CLONE-AGREE step 2): the `two_layer_clone` world (`small`, still water, default founders,
-//! the lineage topped up), stepped under the heuristics; every whole second, per body of the
-//! lineage, its proposal (the top's label), the intent it holds, its steering layer, whether it
-//! holds still, its state, its rest bout, its eating latch and emergency. Then a count of each
-//! combination, grouped by proposal.
+//! the lineage topped up), stepped under the heuristics; at every decision sample of a body of
+//! the lineage (the samples a clone's records hold: an asleep body samples none), its proposal
+//! (the top's label), the intent it holds, its steering layer, whether it holds still, its
+//! held turn and feed, its state, its rest bout, its eating latch and emergency. Then a count
+//! of each combination, grouped by proposal.
 //!
 //! ```text
 //! label_trace founder=loftstrider seeds=9 seconds=600 bodies=8 [fullness=F] \
@@ -41,19 +42,22 @@ fn main() -> Result<(), String> {
         }
         world::top_up(&mut sim, world::TopUp { founder: f, bodies, fullness });
         let stay = sim.fauna().config().teachers.forage_stay_forward;
-        for s in 0..seconds {
-            for _ in 0..per_s {
-                sim.step();
-            }
+        for t in 0..seconds * per_s {
+            sim.step();
+            let s = t / per_s;
             let fauna = sim.fauna();
-            for a in fauna.view().animals.iter().filter(|a| a.founder == Some(f)) {
+            let now = fauna.tick();
+            for a in fauna.view().animals.iter().filter(|a| a.founder == Some(f) && a.intent.sample_tick == now) {
                 let proposal = menu.name(usize::from(a.intent.proposal)).to_string();
                 let fwd = a.founder_state.held.forward;
+                let held = a.founder_state.held;
                 let key = format!(
-                    "held={} steer={:?} still={} state={:?} bout={} eating={} emergency={}",
+                    "held={} steer={:?} still={} turn={} feed={} state={:?} bout={} eating={} emergency={}",
                     menu.name(usize::from(a.intent.held)),
                     fauna.steer_of(a.id),
                     fwd <= stay,
+                    held.turn != 0.0,
+                    held.feed > 0.0,
                     a.state,
                     a.rest_ticks > 0,
                     a.eating,
