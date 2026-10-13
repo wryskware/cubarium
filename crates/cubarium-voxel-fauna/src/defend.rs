@@ -27,10 +27,13 @@
 //!   calf weighs `mother_weight` more (topic 7).
 //! - **guard** (adult): a pressing threat within `guard_m` of it or of the calf it stands by:
 //!   hold the guard point facing its hound, kick a hound in reach, charge one that comes
-//!   close and return.
+//!   close and return. The aimed kick is guard's alone (§3.3; `kick_any_intent` widens it).
 //! - The calm intents (**graze**, **stay with family**, **rest**) are today's skills (the
 //!   forager, the herd pull, the rhythm): with none of the above scored, [`steer`] returns
 //!   `None` and the rules below it run as before.
+//!
+//! A hound that looks young (a pup: it cannot strike) is no threat the menu meets unless
+//! `meet_young` (VH-KICKED).
 //!
 //! # What it reads (§2.1)
 //!
@@ -93,6 +96,20 @@ pub struct Defence {
     pub w_go_to_calf: f64,
     pub w_guard: f64,
     pub w_go_to_adults: f64,
+    /// VH-KICKED: whether a hound that **looks young** (its sensed length under its lineage's
+    /// `intent.adult_fraction` of the grown body, [`looks_young`]) is a threat the defence meets.
+    /// Off (the loftstrider's): such a hound is no threat to the menu — no calf runs from it, no
+    /// adult goes to a calf over it, guards against it, charges it or aims a kick at it. A
+    /// Veilhound pup cannot strike (R3) and stays at its den, and a landed kick's size ratio
+    /// kills it at once; before this a family grazing by a den charged and kicked the litter
+    /// dead. On: every hound is met, as before.
+    pub meet_young: bool,
+    /// VH-KICKED: whether the aimed kick goes from any defence intent it holds. Off (the
+    /// loftstrider's, §3.3 "the kick is an aimed action of an adult in **guard**"): only while
+    /// it holds guard; a kick-back answers a bite in any intent. On: from any defence intent
+    /// (watch, move off, go to calf too), as LS-DEFEND shipped it — a body running to its calf
+    /// kicked a hound walking home past it.
+    pub kick_any_intent: bool,
 }
 
 impl Default for Defence {
@@ -134,6 +151,8 @@ impl Defence {
         w_go_to_calf: 2.5,
         w_guard: 3.0,
         w_go_to_adults: 3.0,
+        meet_young: false,
+        kick_any_intent: false,
     };
 }
 
@@ -234,6 +253,8 @@ pub(crate) struct Scene {
     /// senses that it knows as its own (recognition, §3.5).
     pub(crate) mother: Option<u64>,
     pub(crate) own: Vec<u64>,
+    /// Its [`Defence::meet_young`]: whether a young-looking hound is a threat it meets.
+    pub(crate) meet_young: bool,
 }
 
 /// **The scene** of body `i` (module note): read from its own record and calls only.
@@ -244,7 +265,11 @@ pub(crate) fn scene(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Sce
     let ring = f64::from(view.config.width) * view.config.voxel_m;
     let now = fauna.tick;
     let p = fauna.percept(a.id).copied().unwrap_or_default();
-    let threats = crate::vigil::threats(&fauna.config, &a, &p, now, ring, view.config.voxel_m);
+    let meet_young = phys.defence.meet_young;
+    let threats: Vec<Threat> = crate::vigil::threats(&fauna.config, &a, &p, now, ring, view.config.voxel_m)
+        .into_iter()
+        .filter(|t| meet_young || !p.track(t.id).is_some_and(|k| looks_young(&fauna.config, k)))
+        .collect();
     let fresh = 2 * fauna.config.perception.stagger_ticks();
     let kin: Vec<Track> = p
         .tracks()
@@ -261,7 +286,7 @@ pub(crate) fn scene(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Sce
         .filter(|c| fauna.animals.binary_search_by_key(&c.id, |o| o.id).ok().is_some_and(|j| crate::mother_body(&fauna.animals[j]) == Some(a.id)))
         .map(|c| c.id)
         .collect();
-    Some(Scene { me: a, young: crate::intent::young(fauna, &a, f), radius: body.footprint_radius(), length: body.length_m, threats, adults, calves, call, mother, own })
+    Some(Scene { me: a, young: crate::intent::young(fauna, &a, f), radius: body.footprint_radius(), length: body.length_m, threats, adults, calves, call, mother, own, meet_young })
 }
 
 /// Whether lineage `f`'s body `a` knows a grown kin (a fresh kin track that looks grown):
@@ -595,12 +620,14 @@ pub(crate) fn steer(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option
     let plan = ps.iter().find(|p| ix(p.name) == k)?;
     let prop = ps.iter().find(|p| ix(p.name) == proposal).copied().unwrap_or(*plan);
     let call = called_now(fauna, a.id, f);
-    // The aimed kick (§3.3): a grown body whose kick is ready kicks a hound it sees in reach
-    // and in its front arc, whatever defence intent it holds; it stands for the windup. The
-    // write side starts it ([`kick_now`]) once no later layer has replaced the steering.
+    // The aimed kick (§3.3): a grown body in guard (any defence intent with
+    // `kick_any_intent`) whose kick is ready kicks a hound it sees in reach and in its front
+    // arc; it stands for the windup. The write side starts it ([`kick_now`]) once no later
+    // layer has replaced the steering.
     let mut act = plan.act;
+    let kicks_now = d.kick_any_intent || plan.name == "guard";
     let target = match (s.young, phys.kick) {
-        (false, Some(kk)) if a.kick.phase == crate::kick::Phase::Ready => kick_target(fauna, &kk, &s, ring),
+        (false, Some(kk)) if kicks_now && a.kick.phase == crate::kick::Phase::Ready => kick_target(fauna, &kk, &s, ring),
         _ => None,
     };
     if target.is_some() {
@@ -635,6 +662,7 @@ fn kick_target(fauna: &Fauna, k: &crate::kick::Kick, s: &Scene, ring: f64) -> Op
         .tracks()
         .iter()
         .filter(|t| t.known && t.class == class::THREAT && t.modes & SIGHT != 0 && now.saturating_sub(t.tick) <= fresh)
+        .filter(|t| s.meet_young || !looks_young(&fauna.config, t))
         .filter(|t| {
             let (dx, dz, dd) = gap(me.pose.x, me.pose.z, t.x, t.z, ring);
             dd > 1e-9 && angle_between(me.pose.heading_rad, dx.atan2(dz)) <= k.arc_deg.to_radians() && gap(ox, oz, t.x, t.z, ring).2 <= k.reach_m + radius_est(&fauna.config, t)
