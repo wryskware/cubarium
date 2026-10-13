@@ -401,6 +401,13 @@ Each option and the chosen approval report `fill_profile`, `fill_mean` and `idle
 including setup and serial builds. `lab status` prints fill segments and idle cost;
 unknown task durations leave fill unknown. These add information, no approval gate.
 
+**Budget** (`labkit/budget.py`): Wrysk's grants (USD plus his words, `lab budget grant USD
+--note TEXT [--at ISO]`) and one spend row per terminated instance (hours × configured spot
+price; the AWS bill is the truth). Remaining = granted − spent − committed, where a running
+approval commits its `max_usd` less what it has spent. `lab approve` and the daemon refuse an
+approval over the remaining budget before launch; the budget never stops a running instance.
+`lab budget` lists grants and spend; `lab status` shows what is left.
+
 1. **idle → approval-needed.** This happens when pending tasks may run on EC2 and either
    only EC2 fits (a job names `ec2`, or the arch is aarch64), or the local queue estimate
    exceeds `suggest_after_h` and the EC2 estimate is shorter. The estimate is
