@@ -571,6 +571,46 @@ impl RouteGraph {
         RouteGraph { faces, components, index, adj, sizes, climb, width: c.width, depth: c.depth, voxel_m: v }
     }
 
+    /// **ROUTE-WALK, a diagnostic**: for each support face in column `(x, z)` (layers
+    /// `ys`), which of [`RouteGraph::for_founder`]'s tests it passes: standable (support,
+    /// wade, headroom), inside the depth edges, the disc of radius + `margin_m` clear at its
+    /// centre, the bare disc clear at its centre, and the deepest any solid reaches into each
+    /// disc there (metres). Read only.
+    pub fn face_tests(
+        view: &VoxelView<'_>,
+        phys: &crate::FounderPhysiology,
+        margin_m: f64,
+        x: u32,
+        z: u32,
+        ys: std::ops::RangeInclusive<u32>,
+    ) -> Vec<String> {
+        let c = view.config;
+        let v = c.voxel_m;
+        let body = phys.adult_body();
+        let step = phys.step_limits(v);
+        let room = body.headroom_voxels(v);
+        let r0 = body.footprint_radius();
+        let r = r0 + margin_m.max(0.0);
+        let (cx, cz) = ((f64::from(x) + 0.5) * v, (f64::from(z) + 0.5) * v);
+        let mut out = Vec::new();
+        for y in ys {
+            if !view.is_support(i64::from(x), y, z) {
+                continue;
+            }
+            let wade = view.water_depth_m(i64::from(x), y, z) <= phys.wade_depth_m(&body);
+            let head = has_headroom(view, i64::from(x), y, z, room);
+            let edge = cz + 1e-9 >= r0 && cz <= f64::from(c.depth) * v - r0 + 1e-9;
+            let clear_m = crate::body::pose_clear(view, cx, cz, y, r, room, step);
+            let clear_0 = crate::body::pose_clear(view, cx, cz, y, r0, room, step);
+            let pen_m = crate::body::pose_penetration(view, cx, cz, y, r, room, step);
+            let pen_0 = crate::body::pose_penetration(view, cx, cz, y, r0, room, step);
+            out.push(format!(
+                "({x},{y},{z}) wade={wade} headroom={head} edge={edge} clear_r+m={clear_m} clear_r={clear_0} pen_r+m={pen_m:.4} pen_r={pen_0:.4} r={r0:.4} m={margin_m:.3} v={v}"
+            ));
+        }
+        out
+    }
+
     /// The node count of node `i`'s walkable component (WADE-OUT's pocket test).
     pub fn component_len(&self, i: usize) -> usize {
         self.components.get(i).and_then(|k| self.sizes.get(k)).copied().unwrap_or(0)
