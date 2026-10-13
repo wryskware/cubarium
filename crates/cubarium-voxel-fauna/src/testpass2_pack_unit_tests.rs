@@ -251,7 +251,7 @@ fn the_way_out_is_off_at_pit_search_m_zero() {
     let zc = (f64::from(z0) + 0.5 * f64::from(cols)) * V;
     for pit in [4.0, 0.0] {
         let mut c = c0.clone();
-        c.founding.clearance_margin_m = 0.5 * f64::from(cols) * V - r + V;
+        c.route_clearance_m = 0.5 * f64::from(cols) * V - r + V;
         let pk = c.founders[CH.index()].pack.as_mut().unwrap();
         pk.pit_search_m = pit;
         pk.pack_size = 1;

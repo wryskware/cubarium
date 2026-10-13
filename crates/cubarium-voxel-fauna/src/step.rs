@@ -7563,6 +7563,9 @@ mod fear2_tests;
 #[path = "drop_tests.rs"]
 mod drop_tests;
 #[cfg(test)]
+#[path = "route_walk_tests.rs"]
+mod route_walk_tests;
+#[cfg(test)]
 #[path = "hunker_tests.rs"]
 mod hunker_tests;
 #[cfg(test)]

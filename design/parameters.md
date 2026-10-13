@@ -1572,7 +1572,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.04 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4581 rows)
+**`fauna.*`** (4583 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -6157,6 +6157,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.parasite_switch_radius_m` | 3.0 | m | [0, inf) | 1–8 | N | placeholder | LJ-HOSTSWITCH: how far an outgrown rider senses a host that bears it and walks to it |
 | `fauna.parasite_switch_give_up_s` | 600.0 | s | [0, inf) | 60–3600 log | N | placeholder | LJ-HOSTSWITCH: how long an outgrown rider looks for a new host before going free |
 | `fauna.lineage_body_ceiling` | 2500 | bodies | [0, inf) |  | N | decision | COMPUTE GUARD, not ecology: living bodies a lineage may hold before breeding is refused and logged (0 off) |
+| `fauna.route_clearance_m` | 0.0 | m | [0, inf) |  | N | placeholder | ROUTE-WALK: slack added to the adult footprint radius where the live route graph judges a body stands and steps (0: the bare disc the motor walks with) |
+| `fauna.route_line_clearance_m` | 0.03 | m | [0, inf) |  | N | placeholder | ROUTE-WALK: slack added to the adult footprint radius at every node and edge a straight-line shortcut on the route graph crosses |
 
 **`engagement.*`** (isolated harness; `config/engagement.toml`)
 

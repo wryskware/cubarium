@@ -3404,7 +3404,7 @@ fn pit_probe(args: &[String]) {
                 return g.clone();
             }
         }
-        let g = std::sync::Arc::new(RouteGraph::for_founder(&sim.world().view(), params.fauna.founder(f), margin));
+        let g = std::sync::Arc::new(params.fauna.walking_graph(&sim.world().view(), params.fauna.founder(f)));
         graphs.insert(f.index(), (t, g.clone()));
         g
     };
@@ -3431,7 +3431,7 @@ fn pit_probe(args: &[String]) {
         let p = params.fauna.founder(f);
         let st = p.step_limits(v);
         let b = p.adult_body();
-        println!("lineage,{},step_up={},step_down={},walls={},adult_r={:.3},headroom={},margin={margin}", f.name(), st.up, st.down, p.climbs_walls, b.footprint_radius(), b.headroom_voxels(v));
+        println!("lineage,{},step_up={},step_down={},walls={},adult_r={:.3},headroom={},margin={margin},route_clearance={},route_line_clearance={}", f.name(), st.up, st.down, p.climbs_walls, b.footprint_radius(), b.headroom_voxels(v), params.fauna.route_clearance_m, params.fauna.route_line_clearance_m);
     }
     for r in sim.fauna().packs().to_vec() {
         let g = graph_of(&sim, &mut graphs, r.lineage, 0);
@@ -3689,12 +3689,11 @@ fn drop_probe(args: &[String]) {
     let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     let wc = sim.world().config().clone();
     let v = wc.voxel_m;
-    let margin = params.fauna.founding.clearance_margin_m;
     let tc = params.fauna.teachers;
     let cols = (tc.way_on_m / v).ceil() as u32;
     let lineages: Vec<Founder> = Founder::ALL.into_iter().filter(|f| names.iter().any(|n| n == f.name())).collect();
     let graphs: rustc_hash::FxHashMap<usize, RouteGraph> =
-        lineages.iter().map(|&f| (f.index(), RouteGraph::for_founder(&sim.world().view(), params.fauna.founder(f), margin))).collect();
+        lineages.iter().map(|&f| (f.index(), params.fauna.walking_graph(&sim.world().view(), params.fauna.founder(f)))).collect();
     // (id, lineage, start wound, pocket)
     let mut placed: Vec<(u64, Founder, f64, cubarium_voxel_flora::Site)> = Vec::new();
     let mut taken: rustc_hash::FxHashSet<cubarium_voxel_flora::Site> = Default::default();
@@ -3934,7 +3933,7 @@ fn edge_probe(args: &[String]) {
                     let wv = sim.world().view();
                     let fresh = graphs.get(&k).is_some_and(|(t0, _)| fv.tick.saturating_sub(*t0) < 60 * hz);
                     if !fresh {
-                        graphs.insert(k, (fv.tick, cubarium_voxel_fauna::RouteGraph::for_founder(&wv, p, params.fauna.founding.clearance_margin_m)));
+                        graphs.insert(k, (fv.tick, params.fauna.walking_graph(&wv, p)));
                     }
                     let g = &graphs[&k].1;
                     let body = p.body_at(b.body);
@@ -3965,7 +3964,7 @@ fn edge_probe(args: &[String]) {
                     println!("edgeshort,{},{}{},at=({:.2},{:.2},y{}),head=({fx:.2},{fz:.2}),steer={},held=({:.2},{:.2}),press={:?}", fv.tick, f.name(), b.id, b.pose.x, b.pose.z, b.site.y, src.name(), b.founder_state.held.forward, b.founder_state.held.turn, sim.fauna().press_of(b.id));
                     if arg(args, "detail=").is_some_and(|d| d == "1") {
                         let p = params.fauna.founder(f);
-                        let g = cubarium_voxel_fauna::RouteGraph::for_founder(&sim.world().view(), p, params.fauna.founding.clearance_margin_m);
+                        let g = params.fauna.walking_graph(&sim.world().view(), p);
                         let body = p.body_at(b.body);
                         let r = body.footprint_radius();
                         let own = (r / v).ceil() as u32;
@@ -4067,7 +4066,7 @@ fn edge_probe(args: &[String]) {
                     // EDGE-2: where a wedged body stands against its lineage's route graph,
                     // its step, its glide height, and the support layers round it.
                     let p = params.fauna.founder(f);
-                    let g = cubarium_voxel_fauna::RouteGraph::for_founder(&sim.world().view(), p, params.fauna.founding.clearance_margin_m);
+                    let g = params.fauna.walking_graph(&sim.world().view(), p);
                     let body = p.body_at(b.body);
                     let r = body.footprint_radius();
                     let own = (r / v).ceil() as u32;
@@ -4544,7 +4543,6 @@ fn pit2_probe(args: &[String]) {
     let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     let v = sim.world().config().voxel_m;
     let ring = f64::from(sim.world().config().width) * v;
-    let margin = params.fauna.founding.clearance_margin_m;
     let hz = u64::from(TICK_HZ);
     let p = *params.fauna.founder(VH);
     let t = p.pack.unwrap();
@@ -4569,7 +4567,7 @@ fn pit2_probe(args: &[String]) {
         let vh: Vec<cubarium_voxel_fauna::Animal> = fv.animals.iter().filter(|a| a.founder == Some(VH)).copied().collect();
         for a in &vh {
             if a.pack.is_some_and(|m| m.pup) && seen.insert(a.id) {
-                let g = RouteGraph::for_founder(&sim.world().view(), &p, margin);
+                let g = params.fauna.walking_graph(&sim.world().view(), &p);
                 let view = sim.world().view();
                 let geom = p.body_at(a.body);
                 let own_r = (geom.footprint_radius() / v).ceil() as u32;
@@ -4582,7 +4580,7 @@ fn pit2_probe(args: &[String]) {
                 println!("born,{tick},m{},vh{},age_s={},site={:?},on={on},way={},den_d={den_d:.2},breeder_on={b_on},breeder_state={:?},breeder_site={:?}", minute0 + tt / (60 * hz), a.id, a.age_ticks / hz, a.site, way.is_some(), breeder.map(|b| b.state), breeder.map(|b| b.site));
             }
             if trace_pups && a.pack.is_some_and(|m| m.pup) && a.age_ticks <= 240 * hz && (a.age_ticks % (2 * hz) == 0 || (a.age_ticks >= 12 * hz && a.age_ticks <= 26 * hz && a.age_ticks % cadence == 0)) {
-                let g = RouteGraph::for_founder(&sim.world().view(), &p, margin);
+                let g = params.fauna.walking_graph(&sim.world().view(), &p);
                 let own_r = (p.body_at(a.body).footprint_radius() / v).ceil() as u32;
                 let on = g.node_near(a.site, (a.pose.x, a.pose.z), own_r).is_some();
                 let (line, gx, gz) = pit2_diag(a.id);
@@ -4642,7 +4640,7 @@ fn pit2_probe(args: &[String]) {
             }
             wedged[k] += if *r == long { long } else { 1 };
             if graph.as_ref().is_none_or(|(b, _)| tick.saturating_sub(*b) >= 60 * hz) {
-                graph = Some((tick, std::sync::Arc::new(RouteGraph::for_founder(&sim.world().view(), &p, margin))));
+                graph = Some((tick, std::sync::Arc::new(params.fauna.walking_graph(&sim.world().view(), &p))));
             }
             let g = graph.as_ref().unwrap().1.clone();
             let view = sim.world().view();
