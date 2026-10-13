@@ -1,0 +1,25 @@
+# TWIN-MIX signal probe (design/handoffs/twin-mix-2026-10-13.md, step 4): on the same live
+# lanternjaw starts (16 worlds founded as the training worlds, --top-up lanternjaw=8:0.3,
+# 30-minute warm-up on the centre), 64 pairs at sigma 0.05 over 2-minute twin windows:
+#   all  - all-sign twins, newborns on the variant (the trainer's all-sign twins);
+#   focal - one lanternjaw on the variant (LJ-TWIN's focal flip);
+#   mix  - half-and-half twins (carrier_share 0.5), the estimate at dial 0 with kin shares
+#          0.5 (each row also carries the parts, so twin_signal.py reads dials 0, 0.5, 1).
+# Read: python3 -I scripts/brain-pilot/twin_signal.py <job>/run/twin
+# Price: 16 x (1 null + 3 x 64) = 3088 twins x ~2.5 thread-s (smoke: 0.5 s per 30-s twin)
+# + 16 warm-ups x ~25 s = ~2.3 thread-hours; ~20 min on 8 threads.
+name = "twin-mix-probe"
+kind = "command"
+argv = ["/home/wrysk/wryskware/cubarium/runs/bin/lj_twin-48efcb7f",
+  "centre=/home/wrysk/wryskware/cubarium/runs/lab/1012-154001-brest-lj-clone-then-smok-fb68/run/clone/lanternjaw-two-layer.json",
+  "out={out}/run/twin", "worlds=16", "warmup_min=30", "window_min=2", "sigmas=0.05", "pairs=64",
+  "modes=all,focal,mix", "threads=8", "trainer_newborns=1", "carrier_share=0.5",
+  "stranger_weight=0", "mix_shares=0.5", "mix_seed=1"]
+cwd = "/home/wrysk/wryskware/cubarium"
+threads = 8
+mem_gb = 8
+hosts = ["desktop"]
+est_h = 0.4
+timeout_h = 1.5
+done_marker = "run/twin/DONE"
+priority = 1
