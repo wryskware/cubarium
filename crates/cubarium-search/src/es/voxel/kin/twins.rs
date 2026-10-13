@@ -383,8 +383,9 @@ fn related(id: u64, carrier: &dyn Fn(u64) -> bool, roster: &super::Roster, share
     (a, rho)
 }
 
-/// One copy's [`MixBody`]s and [`MixCopy`] from its outcome.
-fn mix_side(
+/// One copy's [`MixBody`]s and [`MixCopy`] from its outcome: `ids` the lineage's bodies at
+/// the start and `carriers` the twin's draw, both sorted.
+pub fn mix_side(
     ids: &[u64],
     carriers: &[u64],
     lineage: Founder,
