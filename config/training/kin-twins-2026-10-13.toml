@@ -14,6 +14,11 @@
 # The layout below is the code default, chosen from LJ-TWIN's ICCs (one start per pair:
 # at ICC ~0.12 a second start on a pair buys 0.12 of a new measurement's signal).
 #
+# TWIN-MIX (2026-10-13): from that package's build on, a [<lineage>.twins] table without
+# `carrier_share` runs half-and-half twins (carrier_share 0.5, stranger_weight 0); the
+# all-sign twins described here are `carrier_share = 1.0` with `stranger_weight = 1.0`.
+# The live-twins stage-1 jobs run a binary from before that and read this file as written.
+#
 # Shares stay 0: on all-sign twins every body of the lineage carries the variant and the
 # summed score already counts what each relative gained.
 

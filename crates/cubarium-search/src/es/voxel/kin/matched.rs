@@ -418,6 +418,9 @@ pub struct AssignedOutcome {
     pub scores: BTreeMap<u64, KinParts>,
     /// Every metered body's window score and its parts (intake, motor, death).
     pub metered: Vec<crate::es::voxel::live::window::MeteredBody>,
+    /// Who was whose relative over the copy (TWIN-MIX's split of the social effect).
+    #[serde(skip)]
+    pub roster: super::Roster,
 }
 
 /// **Several bodies on variants in one copy** (LJ-TWIN's probe): run one copy of `scene`
@@ -447,6 +450,13 @@ pub struct AssignOptions {
     /// A lineage whose newborns get a candidate of the table the tick they are born (the
     /// birth factory is replaced for the copy); `None`: newborns take the scene's factory.
     pub newborns: Option<(Founder, usize)>,
+    /// **Inherited variants** (TWIN-MIX): a newborn of this lineage whose recorded mother
+    /// runs this candidate (a body of the assignment, or a newborn put on it earlier) is
+    /// put on it from the tick after its birth; every other newborn keeps the scene's
+    /// factory. The birth tick itself is the factory's (the fauna's factory cannot see the
+    /// mother), so the leak is one tick of the centre, never a variant on a non-carrier's
+    /// calf. `None`: no newborn is touched.
+    pub inherit: Option<(Founder, usize)>,
 }
 
 /// [`run_assigned`] under `options` (LIVE-TWINS: a live start's copy metered as the live
@@ -488,17 +498,47 @@ pub fn run_assigned_with<S: Scene>(
         kin,
     );
     w.stomach_aware_reward = options.stomach_aware_reward;
+    // TWIN-MIX: the bodies on the inherited candidate, and every body seen so far.
+    let mut heirs: Option<(Founder, usize, rustc_hash::FxHashSet<u64>, rustc_hash::FxHashSet<u64>)> =
+        options.inherit.map(|(f, c)| {
+            let on: rustc_hash::FxHashSet<u64> = assign.iter().filter(|a| a.1 == c).map(|a| a.0).collect();
+            let seen = copy.sim().fauna().view().animals.iter().map(|a| a.id).collect();
+            (f, c, on, seen)
+        });
+    if let Some((_, c, _, _)) = &heirs {
+        if *c >= table.len() {
+            return Err(format!("candidate {c} is not in a table of {}", table.len()));
+        }
+    }
     while !w.done() {
         let mark = w.before_step(copy.sim());
         if !copy.step() {
             break;
         }
         w.after_step(copy.sim_mut(), mark);
+        if let Some((f, c, on, seen)) = &mut heirs {
+            let born: Vec<(u64, bool)> = copy
+                .sim()
+                .fauna()
+                .view()
+                .animals
+                .iter()
+                .filter(|a| !seen.contains(&a.id))
+                .map(|a| (a.id, a.founder == Some(*f) && a.mother.is_some_and(|m| on.contains(&m))))
+                .collect();
+            for (id, heir) in born {
+                seen.insert(id);
+                if heir {
+                    copy.sim_mut().fauna_mut().set_controller(id, table.controller(*c));
+                    on.insert(id);
+                }
+            }
+        }
         observe(copy.sim());
     }
     let r = w.finish(copy.sim(), 0);
     let scores = kin_scores(&r.metered, &r.roster, kin).into_iter().collect();
-    Ok(AssignedOutcome { ticks: r.ticks, scores, metered: r.metered })
+    Ok(AssignedOutcome { ticks: r.ticks, scores, metered: r.metered, roster: r.roster })
 }
 
 /// One matched pair's result.
