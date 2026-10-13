@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! mask_trace founder=loftstrider seeds=9 seconds=600 bodies=8 [also=LINEAGE=N[:FULLNESS],...] \
-//!     [scenario=PATH] [intents=watch,guard] [lines=1]
+//!     [scenario=PATH] [hound_every_s=S hound_m=M] [intents=watch,guard] [lines=1]
 //! ```
 
 use cubarium_search::es::voxel::live::{ecology::EcologyParams, world};
@@ -52,9 +52,16 @@ fn main() -> Result<(), String> {
             eprintln!("# seed {seed}: scenario {:?} refused {:?}", r.applied, r.refused);
         }
         sim.fauna_mut().start_tap();
+        let hound_every: u64 = arg(&args, "hound_every_s").and_then(|v| v.parse().ok()).unwrap_or(0);
+        let hound_m: f64 = arg(&args, "hound_m").and_then(|v| v.parse().ok()).unwrap_or(8.0);
         // (id, tick) -> what its record holds after the sample.
         let mut seen: HashMap<(u64, u64), String> = HashMap::new();
-        for _ in 0..seconds * per_s {
+        for tick in 0..seconds * per_s {
+            if hound_every > 0 && tick % per_s == 0 && tick > 0 && (tick / per_s) % hound_every == 0 {
+                if let Err(why) = world::show_hunter(&mut sim, f, cubarium_voxel_fauna::Founder::Chorister, tick / per_s / hound_every, hound_m) {
+                    eprintln!("# no Veilhound shown: {why}");
+                }
+            }
             sim.step();
             let fauna = sim.fauna();
             let now = fauna.tick();

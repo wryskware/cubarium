@@ -2103,6 +2103,7 @@ pub(crate) fn controllers(
         // LS-DEFEND: the defence layer's aimed kick, started below once its steering stands.
         let mut defend_kick = None;
         fauna.ls_teach.remove(&id);
+        fauna.call_answer.remove(&id);
         if driven && hunters_here && !retracts && prey {
             if let Some(flee) = flee(fauna, i, view, &fv, predation_occupancy, actions) {
                 actions = flee;

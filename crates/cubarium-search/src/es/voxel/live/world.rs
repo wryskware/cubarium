@@ -356,3 +356,56 @@ pub fn top_up(sim: &mut Sim, t: TopUp) -> usize {
 
 /// The grid step of [`top_up`]'s fallback faces, voxels.
 const TOP_UP_STRIDE: u32 = 4;
+
+/// **A hunter shown to a prey family** (LS-TEACH: the loftstrider teacher worlds, so that
+/// threat labels come with the threat in the prey's senses): the `k`-th showing moves a
+/// living `hunter` body (the `k`-th in id order, round robin; none living: a grown one
+/// placed, on its heuristic) to a face about `at_m` along the ring from a grown `prey` body
+/// (the `k`-th, round robin, among the mothers of a living young first, else among all
+/// grown ones), the side alternating with `k`, at the prey's depth or, refused there, a few
+/// others across the ring and a little nearer. The hunter keeps its state and pack. `Ok`
+/// with `(hunter, prey)`; `Err` when there is no grown prey or no face takes it.
+pub fn show_hunter(sim: &mut Sim, prey: Founder, hunter: Founder, k: u64, at_m: f64) -> Result<(u64, u64), String> {
+    use cubarium_voxel_fauna::{BodySpec, Placed};
+    use cubarium_voxel_sim::edit::At;
+    let birth = sim.fauna().config().founder(prey).core.birth_body;
+    let animals = sim.fauna().view().animals;
+    let mothers: Vec<u64> = animals.iter().filter(|a| a.founder == Some(prey)).filter_map(|a| a.mother).collect();
+    let grown: Vec<_> = animals.iter().filter(|a| a.founder == Some(prey) && a.attached.is_none() && a.body >= birth).collect();
+    let with_young: Vec<_> = grown.iter().filter(|a| mothers.contains(&a.id)).collect();
+    let pick = |n: usize| (k % n.max(1) as u64) as usize;
+    let target = if with_young.is_empty() { grown.get(pick(grown.len())).copied() } else { with_young.get(pick(with_young.len())).map(|a| **a) };
+    let target = target.ok_or_else(|| format!("no grown {}", prey.name()))?;
+    let (tid, pose) = (target.id, target.pose);
+    let hunters: Vec<u64> = animals.iter().filter(|a| a.founder == Some(hunter) && a.attached.is_none()).map(|a| a.id).collect();
+    let moving = hunters.get(pick(hunters.len())).copied();
+    let c = sim.world().config();
+    let (ring, depth) = (f64::from(c.width) * c.voxel_m, f64::from(c.depth) * c.voxel_m);
+    let side = if k % 2 == 0 { 1.0 } else { -1.0 };
+    let zs = [pose.z, 0.25 * depth, 0.5 * depth, 0.75 * depth];
+    let mut last = String::from("no face");
+    for shorter in [0.0, 1.0, 2.0] {
+        for &z in &zs {
+            let d = (at_m - shorter).max(0.5);
+            let at = At::Point { x_m: (pose.x + side * d).rem_euclid(ring), y_m: pose.y_m, z_m: z.clamp(0.0, depth - 1e-6), aloft: false };
+            let r = match moving {
+                Some(h) => sim.edit(|e| e.move_animal(h, at)).map(|()| h),
+                None => sim.edit(|e| e.place_animal(hunter, at, BodySpec::default())).and_then(|p| match p {
+                    Placed::Body { id, .. } => Ok(id),
+                    Placed::Eggs { .. } => Err(format!("{} lays eggs", hunter.name())),
+                }),
+            };
+            match r {
+                Ok(h) => {
+                    if moving.is_none() {
+                        let teachers = sim.fauna().config().teachers;
+                        sim.fauna_mut().set_controller(h, cubarium_voxel_fauna::heuristic(hunter, teachers));
+                    }
+                    return Ok((h, tid));
+                }
+                Err(e) => last = e,
+            }
+        }
+    }
+    Err(last)
+}

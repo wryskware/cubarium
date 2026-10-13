@@ -517,7 +517,8 @@ fn body_subject(fauna: &crate::Fauna, me: u64, id: u64) -> Subject {
 /// - seedporter: flight → `flee_to_trees`, roost, groom, its mother → `follow_mother`, the
 ///   herd pull → `stay_with_troop`, its own steering and the walks to food → `forage`, a
 ///   rest bout → `rest`;
-/// - loftstrider: its defence layer's own labels ([`crate::defend::steer`]); else flight
+/// - loftstrider: its defence layer's own labels ([`crate::defend::steer`]); else its ground
+///   response answering a heeded alarm → `stay_with_family`, flight
 ///   standing (no forward) → `watch`, flight walking → `move_off`, the herd pull →
 ///   `stay_with_family`, its own steering standing still in a rest bout or sated → `rest`,
 ///   else its own steering → `graze`;
@@ -573,6 +574,14 @@ pub(crate) fn teacher_label(
             S::Explore => t("explore", fauna.excursions.get(&a.id).map_or(Subject::None, crate::roam::subject)),
             // YOUNG-ROAM: a mother walking to her own calf's bleat.
             S::Answer => t("go_to_calf", Subject::None),
+            // LS-TEACH: its ground response answering a heeded alarm (CALLS-REST,
+            // `calls::reaction`: to the nearest kin it knows, then head up facing the call
+            // beside it) is the family gathering, `stay_with_family`. It was read as flight:
+            // `watch` standing, `move_off` walking; but those face or leave a threat, and a body
+            // that only heard the snort has none in its record, so `watch` (which needs one)
+            // was masked (traced on the held-out training world: all 2046 masked `watch`
+            // labels, and 401 of 603 `move_off`, were this answer with no threat track).
+            S::Flee if fauna.call_answer.get(&a.id) == Some(&0) => t("stay_with_family", nearest(fauna, a.id, class::KIN)),
             S::Flee if still => t("watch", nearest(fauna, a.id, class::THREAT)),
             S::Flee => t("move_off", nearest(fauna, a.id, class::THREAT)),
             S::Heuristic | S::Search | S::Leave if herded => t("stay_with_family", nearest(fauna, a.id, class::KIN)),

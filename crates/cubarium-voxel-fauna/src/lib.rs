@@ -4396,6 +4396,12 @@ pub struct Fauna {
     /// ([`defend::steer`]), read by its intent record. Session state.
     #[serde(skip)]
     pub(crate) ls_teach: FxHashMap<u64, intent::Teach>,
+    /// LS-TEACH: the bodies whose ground response answered a heeded call at their last sample
+    /// (CALLS-REST, [`calls::reaction`]: an alarm gathers it to its kin, then head up facing
+    /// the call; a distress call draws it to the caller), with the call's kind; read by its
+    /// intent record only. Session state.
+    #[serde(skip)]
+    pub(crate) call_answer: FxHashMap<u64, u8>,
     /// YOUNG-ROAM: each young's excursion under way ([`roam::excursion`]). Session state, not
     /// saved: a load sends it back under its leash.
     #[serde(skip)]
@@ -5019,6 +5025,7 @@ impl Fauna {
             check_pruned: None,
             hound_teach: FxHashMap::default(),
             ls_teach: FxHashMap::default(),
+            call_answer: FxHashMap::default(),
             excursions: FxHashMap::default(),
             roam_tally: [roam::RoamTally::default(); Founder::COUNT],
             harm_tally: roam::HarmTally::default(),
