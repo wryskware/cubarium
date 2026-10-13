@@ -434,6 +434,7 @@ fn founder_rows() -> Vec<Row> {
         r("defence.w_go_to_calf", "logit", nonneg, "LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult)"),
         r("defence.w_guard", "logit", nonneg, "LS-DEFEND: guard's score (a pressing threat within guard_m)"),
         r("defence.w_go_to_adults", "logit", nonneg, "LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded)"),
+        r("defence.meet_young", "switch", fraction, "VH-KICKED: a hound that looks young (shorter than its lineage's intent.adult_fraction of the grown body) is a threat the defence meets: calves run from it, adults guard against, charge and kick it (false: it is not; a pup cannot strike and one kick kills it)"),
         // YOUNG-ROAM (`roam::Young`, behaviour-AI §3.5).
         r("young.pace_floor", "x adult cruise", fraction, "YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed"),
         r("young.independence_s", "s", nonneg, "YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth"),

@@ -93,6 +93,14 @@ pub struct Defence {
     pub w_go_to_calf: f64,
     pub w_guard: f64,
     pub w_go_to_adults: f64,
+    /// VH-KICKED: whether a hound that **looks young** (its sensed length under its lineage's
+    /// `intent.adult_fraction` of the grown body, [`looks_young`]) is a threat the defence meets.
+    /// Off (the loftstrider's): such a hound is no threat to the menu — no calf runs from it, no
+    /// adult goes to a calf over it, guards against it, charges it or aims a kick at it. A
+    /// Veilhound pup cannot strike (R3) and stays at its den, and a landed kick's size ratio
+    /// kills it at once; before this a family grazing by a den charged and kicked the litter
+    /// dead. On: every hound is met, as before.
+    pub meet_young: bool,
 }
 
 impl Default for Defence {
@@ -134,6 +142,7 @@ impl Defence {
         w_go_to_calf: 2.5,
         w_guard: 3.0,
         w_go_to_adults: 3.0,
+        meet_young: false,
     };
 }
 
@@ -234,6 +243,8 @@ pub(crate) struct Scene {
     /// senses that it knows as its own (recognition, §3.5).
     pub(crate) mother: Option<u64>,
     pub(crate) own: Vec<u64>,
+    /// Its [`Defence::meet_young`]: whether a young-looking hound is a threat it meets.
+    pub(crate) meet_young: bool,
 }
 
 /// **The scene** of body `i` (module note): read from its own record and calls only.
@@ -244,7 +255,11 @@ pub(crate) fn scene(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Sce
     let ring = f64::from(view.config.width) * view.config.voxel_m;
     let now = fauna.tick;
     let p = fauna.percept(a.id).copied().unwrap_or_default();
-    let threats = crate::vigil::threats(&fauna.config, &a, &p, now, ring, view.config.voxel_m);
+    let meet_young = phys.defence.meet_young;
+    let threats: Vec<Threat> = crate::vigil::threats(&fauna.config, &a, &p, now, ring, view.config.voxel_m)
+        .into_iter()
+        .filter(|t| meet_young || !p.track(t.id).is_some_and(|k| looks_young(&fauna.config, k)))
+        .collect();
     let fresh = 2 * fauna.config.perception.stagger_ticks();
     let kin: Vec<Track> = p
         .tracks()
@@ -261,7 +276,7 @@ pub(crate) fn scene(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Sce
         .filter(|c| fauna.animals.binary_search_by_key(&c.id, |o| o.id).ok().is_some_and(|j| crate::mother_body(&fauna.animals[j]) == Some(a.id)))
         .map(|c| c.id)
         .collect();
-    Some(Scene { me: a, young: crate::intent::young(fauna, &a, f), radius: body.footprint_radius(), length: body.length_m, threats, adults, calves, call, mother, own })
+    Some(Scene { me: a, young: crate::intent::young(fauna, &a, f), radius: body.footprint_radius(), length: body.length_m, threats, adults, calves, call, mother, own, meet_young })
 }
 
 /// Whether lineage `f`'s body `a` knows a grown kin (a fresh kin track that looks grown):
@@ -635,6 +650,7 @@ fn kick_target(fauna: &Fauna, k: &crate::kick::Kick, s: &Scene, ring: f64) -> Op
         .tracks()
         .iter()
         .filter(|t| t.known && t.class == class::THREAT && t.modes & SIGHT != 0 && now.saturating_sub(t.tick) <= fresh)
+        .filter(|t| s.meet_young || !looks_young(&fauna.config, t))
         .filter(|t| {
             let (dx, dz, dd) = gap(me.pose.x, me.pose.z, t.x, t.z, ring);
             dd > 1e-9 && angle_between(me.pose.heading_rad, dx.atan2(dz)) <= k.arc_deg.to_radians() && gap(ox, oz, t.x, t.z, ring).2 <= k.reach_m + radius_est(&fauna.config, t)

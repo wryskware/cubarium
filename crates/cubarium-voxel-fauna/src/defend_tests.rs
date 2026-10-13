@@ -711,3 +711,48 @@ fn the_sensed_mother_is_found_for_any_lineage_and_age() {
         assert!(!crate::nurse::dependent(&f, i), "a grown body, no nursing: the follow primitive still finds her");
     }
 }
+
+// ------------------------------------------------------------------ VH-KICKED: young hounds
+
+/// A hound made young: its body at half its lineage's `intent.adult_fraction` of the grown
+/// body, so its sensed length is under [`looks_young`]'s line whatever the knobs.
+fn make_young(f: &mut Fauna, id: u64) {
+    let p = f.config.founder(CH);
+    animal_mut(f, id).body = 0.5 * p.intent.adult_fraction * p.core.body_max;
+}
+
+/// A loftstrider family (a grown body and its calf) with a moving hound in kick reach of the
+/// adult and beside the calf: the adult's sample and the calf's. `young`: the hound looks
+/// young; `meet`: the lineage's `defence.meet_young`.
+fn young_hound_case(young: bool, meet: bool) -> (Option<&'static str>, bool, Option<&'static str>) {
+    let (w, mut f, adult, vh) = kick_scene(31, 0.0);
+    f.config.founders[LS.index()].defence.meet_young = meet;
+    if young {
+        make_young(&mut f, vh);
+    }
+    let ahead = in_reach(&f, adult, vh);
+    place(&mut f, vh, 20.0 + ahead, MID_Z, WEST);
+    let calf = strider(&mut f, &w, true, 20.0 + ahead, MID_Z + 1.5, WEST);
+    assert_eq!(looks_young(&f.config, &seen(&f, adult, vh, class::THREAT, true)), young, "the premise: its size reads as made");
+    sees(&mut f, adult, &[(calf, class::KIN, true), (vh, class::THREAT, true)]);
+    decide(&mut f, &w, adult);
+    let (adult_held, kicked) = (held(&f, adult), f.ls_teach.get(&adult).is_some_and(|t| t.kick));
+    sees(&mut f, calf, &[(adult, class::KIN, false), (vh, class::THREAT, true)]);
+    decide(&mut f, &w, calf);
+    (adult_held, kicked, held(&f, calf))
+}
+
+#[test]
+fn a_young_looking_hound_is_no_threat_the_defence_meets_unless_switched_on() {
+    // A grown hound in reach by the calf: guarded against and kicked; the calf runs.
+    let (adult, kicked, calf) = young_hound_case(false, false);
+    assert!(adult.is_some() && kicked, "a grown hound is met and kicked: {adult:?}");
+    assert_eq!(calf, Some("go_to_adults"));
+    // A young-looking one in the same place: no defence intent, no kick, no run.
+    let (adult, kicked, calf) = young_hound_case(true, false);
+    assert_eq!((adult, kicked, calf), (None, false, None), "a pup is not met");
+    // Switched on, it is met as before.
+    let (adult, kicked, calf) = young_hound_case(true, true);
+    assert!(adult.is_some() && kicked, "meet_young: kicked: {adult:?}");
+    assert_eq!(calf, Some("go_to_adults"));
+}
