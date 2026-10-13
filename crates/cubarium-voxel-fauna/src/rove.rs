@@ -34,7 +34,9 @@
 //! - **In the way.** A sample its heuristic spends on something in its way (an escape from
 //!   a refused motor or a drop, a blocked turn) is left to it, as the wall rules are; a leg
 //!   it interrupts ends, the ground just ahead joins the memory as covered, and the next
-//!   leg turns at least square to the one that ran into it. A later layer that overrides
+//!   leg turns at least square to the one that ran into it. A face its motor turns it round
+//!   from (an overhang or a roof over a wall it would climb) is in its way the same
+//!   (SNAIL-STUCK, [`turned_back`]). A later layer that overrides
 //!   a leg's answer (the flee rule, a reflex walk to water, a roost or fruit, a drop) ends
 //!   it the same way, so a leg never tugs against it.
 //! - Legs steer a body walking, flying or gliding; on a terrain face, a stem or a perch its
@@ -172,6 +174,18 @@ impl Rove {
     /// Mark `here` as covered: the nearest cell within half `cell_m` (else a new one, the
     /// faintest cell making room) gains `add` seconds and weighs at least `floor`.
     #[allow(clippy::too_many_arguments)]
+    /// The leg it was on (if any) ran into something `ahead` (a unit `(x, z)`) of `here`: it
+    /// ends, its heading is closed to the next leg, and the ground a cell ahead counts as
+    /// covered, as much as the most covered cell it remembers (at least `period_s`).
+    #[allow(clippy::too_many_arguments)]
+    fn run_into(&mut self, ahead: (f64, f64), here: (f64, f64), cell_m: f64, period_s: f64, now: u64, half_ticks: f64, ring: f64) {
+        if let Some(leg) = self.leg.take() {
+            self.blocked = Some(leg.heading);
+            let most = self.cells.iter().map(|c| faded(c.w, c.at, now, half_ticks)).fold(period_s, f64::max);
+            self.mark((here.0 + ahead.0 * cell_m, here.1 + ahead.1 * cell_m), cell_m, 0.0, most, now, half_ticks, ring);
+        }
+    }
+
     fn mark(&mut self, here: (f64, f64), cell_m: f64, add: f64, floor: f64, now: u64, half_ticks: f64, ring: f64) {
         let mut near: Option<(usize, f64)> = None;
         for (k, c) in self.cells.iter().enumerate() {
@@ -311,12 +325,7 @@ pub(crate) fn search(fauna: &mut Fauna, i: usize, actions: Actions, seek: Seek, 
         Seek::Obstacle => {
             // The leg it was on ran into something: the ground just ahead counts as
             // covered, as much as the most covered cell it remembers.
-            if let Some(leg) = r.leg.take() {
-                r.blocked = Some(leg.heading);
-                let (fx, fz) = a.pose.forward();
-                let most = r.cells.iter().map(|c| faded(c.w, c.at, now, half_ticks)).fold(period_s, f64::max);
-                r.mark((here.0 + fx * cell_m, here.1 + fz * cell_m), cell_m, 0.0, most, now, half_ticks, ring);
-            }
+            r.run_into(a.pose.forward(), here, cell_m, period_s, now, half_ticks, ring);
             None
         }
         Seek::Search => {
@@ -334,6 +343,28 @@ pub(crate) fn search(fauna: &mut Fauna, i: usize, actions: Actions, seek: Seek, 
             Some(along(&a, r.leg, actions))
         }
     }
+}
+
+/// **SNAIL-STUCK: a face turned the body back.** Body `i`, walking into a terrain face it
+/// would climb, was turned round by its motor: an overhang over the face, a roof, no room at
+/// the top ([`crate::FounderPhysiology::climbs_walls`]). The leg it was on ran into
+/// something, as one its heuristic answers as an obstacle does: it ends, the ground just
+/// ahead along it counts as covered, and the next leg turns at least square to it.
+/// `period_s` is the body's controller period.
+///
+/// Its heuristic, now facing away with nothing ahead, answered with its own search, and the
+/// leg turned it back into the face: a ripple snail in a dead end under an overhang walked
+/// into the face, was turned round and turned back to it for minutes (seed 4, body 322).
+pub(crate) fn turned_back(fauna: &mut Fauna, i: usize, period_s: f64, ring: f64) {
+    let tc = fauna.config.teachers;
+    let a = fauna.animals[i];
+    let length = crate::body_of(&fauna.config, &a).map_or(0.0, |b| b.length_m);
+    let now = fauna.tick;
+    let half_ticks = tc.search_memory_half_life_s.max(0.0) / DT;
+    let cell_m = tc.search_cell_bl.max(0.0) * length;
+    let Some(r) = fauna.rove.get_mut(&a.id) else { return };
+    let Some(heading) = r.leg.map(|l| l.heading) else { return };
+    r.run_into((heading.sin(), heading.cos()), (a.pose.x, a.pose.z), cell_m, period_s, now, half_ticks, ring);
 }
 
 /// A later layer (a flight, a reflex walk: to water, to a roost, off a ledge) replaced the
