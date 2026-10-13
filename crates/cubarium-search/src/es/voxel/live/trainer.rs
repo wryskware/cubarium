@@ -1170,3 +1170,7 @@ mod recovery_tests {
 #[cfg(test)]
 #[path = "trainer_brain_tests.rs"]
 mod brain_tests;
+
+#[cfg(test)]
+#[path = "trainer_twins_tests.rs"]
+mod twins_tests;

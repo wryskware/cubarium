@@ -451,3 +451,7 @@ pub fn measure(jobs: &[TwinJob<'_>], starts: &[TwinStart], metering: &Metering, 
     }
     Ok(out)
 }
+
+#[cfg(test)]
+#[path = "twins_tests.rs"]
+mod tests;
