@@ -1,0 +1,16 @@
+# LIVE-TWINS quick-lane smoke (ran as job 1013-013412-live-twins-smoke-5b0d): a lanternjaw on
+# `twins`, 2 generations at sigma 0.05, 64 pairs x 1 start, 2-minute twin windows.
+name = "live-twins-smoke"
+kind = "command"
+argv = ["/home/wrysk/wryskware/cubarium/runs/bin/cubarium-search-b618f3ff", "voxel-live-train",
+  "--centre", "lanternjaw=/home/wrysk/wryskware/cubarium/runs/lab/1012-154001-brest-lj-clone-then-smok-fb68/run/clone/lanternjaw-two-layer.json",
+  "--worlds", "16", "--threads", "12", "--pairs", "16", "--window-min", "10", "--generations", "2",
+  "--sigma", "0.05", "--top-up", "lanternjaw=8:0.3",
+  "--kin", "/home/wrysk/wryskware/cubarium/.claude/worktrees/live-twins/config/training/smoke/kin-twins-smoke.toml",
+  "--out", "{out}/run"]
+cwd = "/home/wrysk/wryskware/cubarium"
+quick = true
+hosts = ["desktop"]
+threads = 12
+mem_gb = 20
+done_marker = "run/centres/final-lanternjaw.json"
