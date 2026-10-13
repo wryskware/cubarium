@@ -110,6 +110,15 @@ pub struct Defence {
     /// (watch, move off, go to calf too), as LS-DEFEND shipped it — a body running to its calf
     /// kicked a hound walking home past it.
     pub kick_any_intent: bool,
+    /// VH-FEED-KICK follow-up 3: whether the aimed kick goes at a hound that is **not
+    /// closing** as sight shows it: still (not seen moving within the predation table's
+    /// `still_after_s`), or moving with its heading turned away (more than a right angle) from
+    /// the kicker and from every calf of its lineage the kicker senses. Off (the loftstrider's):
+    /// such a hound is no threat to kick, in line with VH-KICKED's young-looking hounds — a hound
+    /// walking off, turning away or standing kept still is not pressing the family; a guard
+    /// kicked hounds that were walking off it (s7: four of six kicks landed on hounds heading
+    /// away). On: any hound in reach, as before.
+    pub kick_not_closing: bool,
 }
 
 impl Default for Defence {
@@ -153,6 +162,7 @@ impl Defence {
         w_go_to_adults: 3.0,
         meet_young: false,
         kick_any_intent: false,
+        kick_not_closing: false,
     };
 }
 
@@ -627,7 +637,7 @@ pub(crate) fn steer(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option
     let mut act = plan.act;
     let kicks_now = d.kick_any_intent || plan.name == "guard";
     let target = match (s.young, phys.kick) {
-        (false, Some(kk)) if kicks_now && a.kick.phase == crate::kick::Phase::Ready => kick_target(fauna, &kk, &s, ring),
+        (false, Some(kk)) if kicks_now && a.kick.phase == crate::kick::Phase::Ready => kick_target(fauna, &kk, &s, d.kick_not_closing, ring),
         _ => None,
     };
     if target.is_some() {
@@ -651,8 +661,9 @@ pub(crate) fn kick_now(fauna: &mut Fauna, i: usize, target: u64) -> bool {
 }
 
 /// **The hound to kick** (§3.3), from what body `s.me` sees: the nearest threat it sees whose
-/// footprint (estimated from its size) its kick reaches from its origin, inside the front arc.
-fn kick_target(fauna: &Fauna, k: &crate::kick::Kick, s: &Scene, ring: f64) -> Option<u64> {
+/// footprint (estimated from its size) its kick reaches from its origin, inside the front arc;
+/// unless `not_closing` ([`Defence::kick_not_closing`]), one it sees closing ([`closing`]).
+fn kick_target(fauna: &Fauna, k: &crate::kick::Kick, s: &Scene, not_closing: bool, ring: f64) -> Option<u64> {
     let me = &s.me;
     let now = fauna.tick;
     let fresh = 2 * fauna.config.perception.stagger_ticks();
@@ -663,12 +674,24 @@ fn kick_target(fauna: &Fauna, k: &crate::kick::Kick, s: &Scene, ring: f64) -> Op
         .iter()
         .filter(|t| t.known && t.class == class::THREAT && t.modes & SIGHT != 0 && now.saturating_sub(t.tick) <= fresh)
         .filter(|t| s.meet_young || !looks_young(&fauna.config, t))
+        .filter(|t| not_closing || closing(s, t, ring))
         .filter(|t| {
             let (dx, dz, dd) = gap(me.pose.x, me.pose.z, t.x, t.z, ring);
             dd > 1e-9 && angle_between(me.pose.heading_rad, dx.atan2(dz)) <= k.arc_deg.to_radians() && gap(ox, oz, t.x, t.z, ring).2 <= k.reach_m + radius_est(&fauna.config, t)
         })
         .min_by(|p, q| gap(me.pose.x, me.pose.z, p.x, p.z, ring).2.total_cmp(&gap(me.pose.x, me.pose.z, q.x, q.z, ring).2).then(p.id.cmp(&q.id)))
         .map(|t| t.id)
+}
+
+/// **A hound seen closing** (VH-FEED-KICK follow-up 3, [`Defence::kick_not_closing`]): track
+/// `t` seen moving, its heading within a right angle of the way to body `s.me` or to a calf it
+/// senses (its step brings it nearer). Still, or heading away from all of them, it is not.
+fn closing(s: &Scene, t: &Track, ring: f64) -> bool {
+    let toward = |x: f64, z: f64| {
+        let (dx, dz, dd) = gap(t.x, t.z, x, z, ring);
+        dd > 1e-9 && angle_between(t.heading, dx.atan2(dz)) < std::f64::consts::FRAC_PI_2
+    };
+    t.modes & SIGHT != 0 && t.moving && (toward(s.me.pose.x, s.me.pose.z) || s.calves.iter().any(|c| toward(c.x, c.z)))
 }
 
 /// Whether body `s.me`'s kick would reach threat `h` now, from what it sees (the charge

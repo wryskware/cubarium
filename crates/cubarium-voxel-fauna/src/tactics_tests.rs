@@ -1638,21 +1638,29 @@ fn a_hound_keeps_clear_of_a_kicker_it_last_sensed_after_losing_it_from_its_sense
     sees(&mut f, h, &[]);
     let act = decide(&mut f, &w, &flora, h);
     assert!(act.feed == 0.0 && act.forward > 0.0, "past the expiry, its kick remembered: still away: {act:?}");
-    f.tick = kicked_at + cubarium_voxel::ticks_at_least_one(kick_memory) + 1;
+    // Sent off the carcass it fed at by a kicker it judged not worth the kicks, it gave the
+    // carcass up (follow-up 3): it eats past the kick's memory and the give-up's shun.
+    let shun = tac(&f).shun_s.max(tac(&f).rest_s);
+    f.tick = kicked_at + cubarium_voxel::ticks_at_least_one(kick_memory.max(shun)) + 1;
     sees(&mut f, h, &[]);
     assert_eq!(decide(&mut f, &w, &flora, h).feed, 1.0, "past the kick's memory it eats");
 
-    // Guard stance only: away; sensed again standing plain: it eats, and once out of its
-    // senses it is not remembered as guarding.
+    // Guard stance only: away; sensed again standing plain it is no longer kept clear of, and
+    // once out of its senses it is not remembered as guarding. (The carcass it was sent off is
+    // given up, follow-up 3: the kicker's memory is read, not the meal.)
     let (w, flora, mut f, h, ls) = kicker_scene((8.0 - inside, MID_Z), EAST);
     shows_guard(&mut f, h, ls);
     assert_eq!(decide(&mut f, &w, &flora, h).feed, 0.0, "guard stance: away");
+    let kept = |f: &Fauna| f.kickers_seen.get(&h).is_some_and(|v| v.iter().any(|k| k.id == ls));
+    assert!(kept(&f), "guard stance: remembered");
     f.tick += 1;
     sees(&mut f, h, &[(ls, class::PREY)]);
-    assert_eq!(decide(&mut f, &w, &flora, h).feed, 1.0, "sensed out of the stance: it eats");
+    let _ = decide(&mut f, &w, &flora, h);
+    assert!(!kept(&f) && keep_clear(&f, index(&f, h), &tac(&f), None, RING).is_none(), "sensed out of the stance: not kept clear of");
     f.tick += 1;
     sees(&mut f, h, &[]);
-    assert_eq!(decide(&mut f, &w, &flora, h).feed, 1.0, "then unsensed: not remembered as guarding");
+    let _ = decide(&mut f, &w, &flora, h);
+    assert!(!kept(&f) && keep_clear(&f, index(&f, h), &tac(&f), None, RING).is_none(), "then unsensed: not remembered as guarding");
 
     // The switch off: nothing remembered.
     let (w, flora, mut f, h, ls) = kicker_scene((8.0 - inside, MID_Z), EAST);
@@ -1760,44 +1768,63 @@ fn held_of(f: &Fauna, h: u64) -> (&'static str, Subject) {
     f.hound_teach.get(&h).map(|t| (t.held, t.subject)).expect("a label")
 }
 
-/// **A fed hound waits off a carcass a kicker guards; it eats once the kicker leaves**
-/// (VH-FEED-KICK follow-up 2, [`weigh_carcass`]): the hound sated (hunger 0), each expected
-/// kick costing far more than the carcass is worth to it, stands off outside the kept distance
-/// turned to the carcass (no step toward it, not feeding), labelled a give-up on the kicker,
-/// and keeps the carcass it knows. The kicker moved past its kept distance of the carcass (still
-/// guarding, still seen): the hound walks to the carcass. A carcass only sensed (the meal step's)
-/// is waited off the same. With `keep_clear` off it walks to it beside the kicker.
+/// **A fed hound gives up a carcass a kicker guards and holds off it as a hunt give-up shuns
+/// its prey** (VH-FEED-KICK follow-up 2, [`weigh_carcass`]; follow-up 3, [`give_up_carcass`]):
+/// the hound sated (hunger 0), each expected kick costing far more than the carcass is worth to
+/// it, does not go to it or feed, is labelled a give-up on the kicker, keeps the carcass in mind
+/// and shuns it, and starts its rest off (`rest_s`). The kicker then moves past its kept distance
+/// of the carcass: within `shun_s` the hound still does not go to it; in an emergency it does;
+/// past `shun_s` it walks to it. A carcass only sensed (the meal step's) is given up the same.
+/// With `keep_clear` off it walks to it beside the kicker.
 #[test]
-fn a_fed_hound_waits_off_a_guarded_carcass_and_eats_once_the_kicker_leaves() {
+fn a_fed_hound_gives_up_a_guarded_carcass_and_holds_off_it_for_the_shun() {
     let (w, flora, mut f, h, ls, site, cx) = guarded_carcass_scene(0.0);
     assert!(tac(&f).kick_chance > 0.0, "the case needs a kick expected");
     tactics_mut(&mut f).wound_cost = 1e9;
+    let given_at = f.tick;
     let act = decide(&mut f, &w, &flora, h);
-    assert!(act.forward == 0.0 && act.feed == 0.0, "it waits: {act:?}");
+    assert_eq!(act.feed, 0.0, "not feeding: {act:?}");
     let (held, subject) = held_of(&f, h);
     assert_eq!(held, "give_up");
     assert!(matches!(subject, Subject::Body { id, .. } if id == ls), "on the kicker: {subject:?}");
-    assert_eq!(f.hounds[&h].carcass, Some(site), "it keeps the carcass it knows");
+    let m = f.hounds[&h];
+    assert_eq!(m.carcass, Some(site), "it keeps the carcass in mind");
+    assert!(m.shuns(carcass_key(site), f.tick) && m.gave_up_tick == given_at, "shunned, resting off: {m:?}");
 
-    // The kicker leaves: past its kept distance of the carcass, it walks to the carcass.
+    // The kicker leaves: past its kept distance of the carcass. Past the rest, within the shun:
+    // it does not go to the carcass.
     let keep = keep_of(&f, ls);
     place(&mut f, ls, cx + keep + 0.5, MID_Z, WEST);
-    f.tick += 1;
+    let (rest, shun) = (tac(&f).rest_s, tac(&f).shun_s);
+    assert!(rest < shun, "the case needs the shun to outlast the rest");
+    f.tick = given_at + cubarium_voxel::ticks_at_least_one(rest) + 1;
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    shows_guard(&mut f, h, ls);
+    let _ = decide(&mut f, &w, &flora, h);
+    assert_ne!(held_of(&f, h).0, "feed", "shunned: it does not go to the carcass");
+    // In an emergency the shun does not hold: it goes.
+    animal_mut(&mut f, h).emergency = true;
+    let act = decide(&mut f, &w, &flora, h);
+    assert!(act.forward > 0.0 && held_of(&f, h).0 == "feed", "an emergency: it goes: {act:?}");
+    animal_mut(&mut f, h).emergency = false;
+    // Past the shun it goes.
+    f.tick = given_at + cubarium_voxel::ticks_at_least_one(shun) + 1;
     sees(&mut f, h, &[(ls, class::PREY)]);
     shows_guard(&mut f, h, ls);
     let act = decide(&mut f, &w, &flora, h);
-    assert!(act.forward > 0.0, "the kicker gone from the carcass: it goes: {act:?}");
+    assert!(act.forward > 0.0, "past the shun, the kicker gone from the carcass: it goes: {act:?}");
     assert_eq!(held_of(&f, h).0, "feed");
 
-    // The carcass only sensed, not known (the meal step's): it waits the same.
-    let (w, flora, mut f, h, ls, _, cx) = guarded_carcass_scene(0.0);
+    // The carcass only sensed, not known (the meal step's): given up the same.
+    let (w, flora, mut f, h, ls, site, cx) = guarded_carcass_scene(0.0);
     tactics_mut(&mut f).wound_cost = 1e9;
     f.hounds.entry(h).or_default().carcass = None;
     assert!(cx - 8.0 < f.config.hunt.carcass_scan_m, "the case needs the carcass in the scan");
     let act = decide(&mut f, &w, &flora, h);
-    assert!(act.forward == 0.0 && act.feed == 0.0, "sensed only: it waits: {act:?}");
+    assert_eq!(act.feed, 0.0, "sensed only: not feeding: {act:?}");
     assert_eq!(held_of(&f, h).0, "give_up");
     assert!(matches!(held_of(&f, h).1, Subject::Body { id, .. } if id == ls));
+    assert!(f.hounds[&h].shuns(carcass_key(site), f.tick), "sensed only: shunned");
 
     // The switch off: it walks to the guarded carcass.
     let (w, flora, mut f, h, _ls, _, _) = guarded_carcass_scene(0.0);

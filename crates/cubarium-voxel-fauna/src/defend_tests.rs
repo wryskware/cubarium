@@ -758,10 +758,12 @@ fn a_young_looking_hound_is_no_threat_the_defence_meets_unless_switched_on() {
 }
 
 /// A grown loftstrider with a still hound in kick reach (seen, not pressing: watched), its
-/// `defence.kick_any_intent` as given: (the intent it holds, whether it aimed a kick).
+/// `defence.kick_any_intent` as given: (the intent it holds, whether it aimed a kick). A still
+/// hound is not closing: `kick_not_closing` on, so only the intent gate decides.
 fn watched_in_reach(any: bool) -> (Option<&'static str>, bool) {
     let (w, mut f, adult, vh) = kick_scene(32, 0.0);
     f.config.founders[LS.index()].defence.kick_any_intent = any;
+    f.config.founders[LS.index()].defence.kick_not_closing = true;
     let ahead = in_reach(&f, adult, vh);
     assert!(ahead > f.config.predation.still_threat_near_m, "the premise: a still hound in reach reads as watched");
     place(&mut f, vh, 20.0 + ahead, MID_Z, WEST);
@@ -778,4 +780,51 @@ fn the_aimed_kick_is_guards_alone_unless_switched_to_any_intent() {
     let (intent, kicked) = watched_in_reach(true);
     assert_eq!(intent, Some("watch"));
     assert!(kicked, "kick_any_intent: the watched hound in reach is kicked");
+}
+
+/// A guard (a second hound pressing at it from its side, inside `guard_m` and out of the
+/// kick's reach, holds it in guard) with hound `vh` in reach ahead in its arc, seen `moving` or
+/// still and facing `heading`; with `calf`, a calf it senses just past `vh`. Its
+/// `defence.kick_not_closing` as given: (the intent it holds, the hound its aimed kick took).
+fn closing_case(moving: bool, heading: f64, calf: bool, not_closing: bool) -> (Option<&'static str>, Option<u64>) {
+    let (w, mut f, adult, vh) = kick_scene(33, 0.0);
+    f.config.founders[LS.index()].defence.kick_not_closing = not_closing;
+    let ahead = in_reach(&f, adult, vh);
+    place(&mut f, vh, 20.0 + ahead, MID_Z, heading);
+    let side = (20.0, MID_Z + 0.5 * (d(&f).guard_m + in_reach(&f, adult, vh) + kick_of(&f).reach_m));
+    let other = hound(&mut f, &w, side.0, side.1, (20.0 - side.0).atan2(MID_Z - side.1));
+    let mut bodies = vec![(vh, class::THREAT, moving), (other, class::THREAT, true)];
+    if calf {
+        let c = strider(&mut f, &w, true, 20.0 + ahead + 1.5, MID_Z, EAST);
+        bodies.push((c, class::KIN, false));
+    }
+    sees(&mut f, adult, &bodies);
+    decide(&mut f, &w, adult);
+    let a = animal(&f, adult);
+    (held(&f, adult), (a.kick.phase == Phase::Windup).then_some(a.kick.target))
+}
+
+/// **A guard kicks a hound closing on it or a calf, not one still or heading away**
+/// (VH-FEED-KICK follow-up 3, `defence.kick_not_closing` off): with a hound in reach seen walking
+/// at it, the aimed kick takes it; seen still, or walking away from the guard with no calf
+/// ahead of it, the guard holds without a kick; walking away from the guard toward a calf it
+/// senses, it is kicked. Switched on, the still and the leaving hound are kicked as before.
+#[test]
+fn a_guard_kicks_a_hound_closing_on_it_or_a_calf_and_not_one_still_or_leaving() {
+    let (intent, kick) = closing_case(true, WEST, false, false);
+    assert_eq!(intent, Some("guard"));
+    assert!(kick.is_some(), "walking at the guard: kicked");
+    let vh = kick.unwrap();
+    let (intent, kick) = closing_case(false, WEST, false, false);
+    assert_eq!(intent, Some("guard"), "the case: still held in guard by the other hound");
+    assert_eq!(kick, None, "still: not kicked");
+    let (intent, kick) = closing_case(true, EAST, false, false);
+    assert_eq!(intent, Some("guard"));
+    assert_eq!(kick, None, "walking away: not kicked");
+    let (_, kick) = closing_case(true, EAST, true, false);
+    assert_eq!(kick, Some(vh), "walking away from the guard toward a calf: kicked");
+    let (_, kick) = closing_case(false, WEST, false, true);
+    assert_eq!(kick, Some(vh), "switched on: the still hound kicked");
+    let (_, kick) = closing_case(true, EAST, false, true);
+    assert_eq!(kick, Some(vh), "switched on: the leaving hound kicked");
 }
