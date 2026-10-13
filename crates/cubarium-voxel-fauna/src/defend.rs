@@ -28,12 +28,12 @@
 //! - **guard** (adult): a pressing threat within `guard_m` of it or of the calf it stands by:
 //!   hold the guard point facing its hound, kick a hound in reach, charge one that comes
 //!   close and return. The aimed kick is guard's alone (§3.3; `kick_any_intent` widens it).
-//!
-//! A hound that looks young (a pup: it cannot strike) is no threat the menu meets unless
-//! `meet_young` (VH-KICKED).
 //! - The calm intents (**graze**, **stay with family**, **rest**) are today's skills (the
 //!   forager, the herd pull, the rhythm): with none of the above scored, [`steer`] returns
 //!   `None` and the rules below it run as before.
+//!
+//! A hound that looks young (a pup: it cannot strike) is no threat the menu meets unless
+//! `meet_young` (VH-KICKED).
 //!
 //! # What it reads (§2.1)
 //!

@@ -175,8 +175,16 @@ fn main() -> Result<(), String> {
             }
             for l in &ls {
                 if vh.iter().any(|h| gap(h.pose.x, h.pose.z, l.pose.x, l.pose.z) <= near) {
+                    let young_line = {
+                        let c = fauna.config().founder(Founder::Chorister);
+                        c.intent.adult_fraction.clamp(0.0, 1.0).cbrt() * c.adult_length_m
+                    };
+                    let threats: Vec<String> = fauna
+                        .percept(l.id)
+                        .map(|p| p.tracks().iter().filter(|t| t.known && t.class == 1).map(|t| format!("{}:{:.2}m{}", t.id, t.size_m, if t.size_m < young_line { "(young)" } else { "" })).collect())
+                        .unwrap_or_default();
                     println!(
-                        "{minute:8.3}   ls {} body {:.2} at ({:.1},{:.1}) defend {} steer {:?} kick {:?} wound {:.2}",
+                        "{minute:8.3}   ls {} body {:.2} at ({:.1},{:.1}) defend {} steer {:?} kick {:?} wound {:.2} threats [{}]",
                         l.id,
                         l.body,
                         l.pose.x,
@@ -184,7 +192,8 @@ fn main() -> Result<(), String> {
                         LOFTSTRIDER.name(usize::from(fauna.percept(l.id).map_or(0, |p| p.vigil.defend_held))),
                         fauna.steer_of(l.id),
                         l.kick.phase,
-                        l.wound
+                        l.wound,
+                        threats.join(" ")
                     );
                 }
             }
