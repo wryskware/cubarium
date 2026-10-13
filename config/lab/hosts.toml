@@ -107,7 +107,7 @@ launch_timeout_s = 900
 # the profile or access every S3 path stays off for that instance.
 s3_bucket = "cubarium-lab-360d2fe4c5"
 s3_region = "us-east-1"
-# instance_profile = "cubarium-lab-ec2"  # uncomment once the profile exists: `up` fails on a missing one
+instance_profile = "cubarium-lab-ec2"  # bucket-only role (Wrysk ran the setup 2026-10-13); `up` fails if it is deleted
 s3_timeout_s = 900          # one in-region S3 copy (a ~145 MB checkpoint takes seconds)
 
 # Spot prices are planning assumptions: the 2026-09-28 sample's $0.75/h
