@@ -251,6 +251,40 @@ fn a_loftstrider_answering_a_snort_with_no_threat_sensed_is_labelled_stay_with_f
     }
 }
 
+/// **LS-MOVEOFF: a loftstrider whose flight walk its motor refused is labelled `rest`**: an
+/// adult answering a calf's bleat walks to it (the ground response's walk, labelled `move_off`
+/// while the walk goes); once the interval ended with that walk held and its motor refusing it
+/// (EDGE's pressed clock, which the step sets from `Self.motor_delivery`), the same steering and
+/// actions are a body standing, `rest`, with no subject. A standing flight stays `watch`.
+#[test]
+fn a_loftstrider_whose_flight_walk_its_motor_refused_is_labelled_rest() {
+    let world = world(35);
+    let flora = Flora::new(FloraConfig::default());
+    let mut f = Fauna::new(config());
+    f.set_births_enabled(false);
+    let mother = body(&mut f, &world, LS, 3.0, EAST, 0.0);
+    let young = calf(&mut f, &world, 5.0, EAST);
+    animal_mut(&mut f, young).mother = Some(mother);
+    sense(&mut f, &world);
+    let i = f.animals.iter().position(|a| a.id == young).unwrap();
+    assert!(calls::emit(&mut f, i, 1));
+    calls::hear(&mut f, &world.view());
+    let act = respond(&mut f, &world, &flora, mother, CROP).expect("the mother answers her calf");
+    assert!(act.forward > 0.0 && act.feed == 0.0, "a walk");
+    assert_ne!(f.call_answer.get(&mother), Some(&0), "not a snort's gathering");
+    let m = f.animals.iter().position(|a| a.id == mother).unwrap();
+    let label = |f: &Fauna, act: Actions| crate::intent::teacher_label(f, m, LS, crate::Steer::Flee, act, false, false);
+    assert_eq!(label(&f, act).name, Some("move_off"), "walking, its motor delivering");
+    // The step's EDGE clock after one interval held forward with its motor refused.
+    f.pressed.insert(mother, LS.manifest().cadence_ticks().max(1));
+    let t = label(&f, act);
+    assert_eq!(t.name, Some("rest"), "its walk refused, it stands");
+    assert_eq!(t.subject, crate::intent::Subject::None);
+    assert_eq!(label(&f, CROP).name, Some("watch"), "a standing flight keeps its label");
+    f.pressed.remove(&mother);
+    assert_eq!(label(&f, act).name, Some("move_off"), "walking again");
+}
+
 /// A calf's bleat draws its own mother at once; another adult the same distance away comes
 /// only after `stranger_delay_s`.
 #[test]
