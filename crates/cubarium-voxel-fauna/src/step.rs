@@ -4647,6 +4647,9 @@ fn bury_corpse_into(fauna: &mut Fauna, flora: &mut Flora, a: &Animal, cause: Dep
             fauna.ledger.bites += 1;
             fauna.ledger.bites_by_food[Food::Carrion.index()] += 1;
             fauna.animals[i].bite = crate::LastBite(Some(Site { y: a.site.y + 1, ..a.site }));
+            if let Some(prey) = a.founder {
+                fauna.ledger.eaten_carrion_by_founder_prey[f.index()][prey.index()] += taken.organic;
+            }
             let taken = ingest_bite(fauna, i, flora, Food::Carrion, taken);
             fauna.ledger.eaten_carrion_by_founder[f.index()] += taken.organic;
         }
@@ -5200,6 +5203,12 @@ fn founder_feed(
         taken.organic += larvae.organic;
         taken.mineral += larvae.mineral;
         taken.energy += larvae.energy;
+    }
+    // CHECK-DIET: whose carcass this raw carrion was.
+    if let Some((prey, _)) = carcass_of
+        && prey < Founder::COUNT
+    {
+        fauna.ledger.eaten_carrion_by_founder_prey[founder.index()][prey] += taken.organic;
     }
     let taken = ingest_bite(fauna, i, flora, food, taken);
     if let Some(plant) = plant {

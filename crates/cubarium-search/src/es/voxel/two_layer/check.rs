@@ -8,6 +8,11 @@
 //! - **Holds**: from each arm's own intent records (the brain's hold, or the rules'), per
 //!   intent the share of decision samples held, the holds that ended and their mean length,
 //!   and the switches per body-minute.
+//! - **Diet and prey numbers** (topic 6, "prey switching"): per arm, what the lineage ate by
+//!   food (each prey lineage's kills and carrion, each plant or pool food class) with its
+//!   share by kills and by matter eaten, and every animal lineage's live body count at the
+//!   start, each simulated minute and the end. Read from the fauna ledger's own counters
+//!   (the hunt funnel's kills, `eaten_by_founder_food`, `eaten_carrion_by_founder_prey`).
 //! - **Per-mode competence** on the lineage's staged scenes ([`super::scenes::competence`]),
 //!   both arms on identical starts.
 //!
@@ -15,7 +20,7 @@
 
 use std::collections::BTreeMap;
 
-use cubarium_voxel_fauna::Founder;
+use cubarium_voxel_fauna::{FaunaLedger, Food, Founder};
 use cubarium_voxel_sim::Sim;
 use cubarium_voxel_sim::mode_scenes::{self, ModeScene};
 use serde::Serialize;
@@ -48,6 +53,128 @@ pub struct LiveArm {
     pub energy_end: f64,
     /// The share of the lineage's body-seconds with its eating latch on.
     pub hungry_share: f64,
+    /// What the lineage ate over the arm, by food ([`diet`]).
+    pub diet: Vec<DietItem>,
+    /// The simulated seconds at which `numbers` were read: the start, each minute, the end.
+    pub numbers_at_s: Vec<u64>,
+    /// Every animal lineage's live founder bodies at `numbers_at_s` (lineages with no body
+    /// at any of them left out).
+    pub numbers: Vec<LineageCount>,
+}
+
+/// One food in a lineage's diet over an arm (or summed over a check's arms).
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct DietItem {
+    /// A prey lineage's name (its kills and the carrion of its carcasses), `carrion` for
+    /// carrion with no carcass record, or a non-animal food class's name (`foliage`,
+    /// `litter`, `larva`, ...).
+    pub food: String,
+    /// Kills of that prey lineage by the lineage (zero for a food class).
+    pub kills: u64,
+    /// Raw organic matter withdrawn, before bite spillage: the unit the check's energy reads in.
+    pub eaten: f64,
+    /// This food's share of the lineage's kills, and of its matter eaten (each zero when
+    /// the lineage killed or ate nothing; otherwise each sums to 1 over the diet).
+    pub kill_share: f64,
+    pub eaten_share: f64,
+}
+
+/// One lineage's live founder bodies over an arm.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct LineageCount {
+    pub lineage: String,
+    pub counts: Vec<usize>,
+}
+
+/// One lineage's live founder bodies at the start and end, summed over a check's seeds.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct LineageNumbers {
+    pub lineage: String,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// **Lineage `f`'s diet between two ledger readings**: per prey lineage its kills (the hunt
+/// funnel's killed stage) and the raw carrion of that lineage's carcasses it ate; carrion
+/// with no carcass record as `carrion`; every other food class it ate by name. Shares by
+/// kills and by matter eaten, each summing to 1 when anything was killed or eaten.
+pub fn diet(before: &FaunaLedger, after: &FaunaLedger, f: Founder) -> Vec<DietItem> {
+    let i = f.index();
+    let killed = cubarium_voxel_fauna::perception::KILLED;
+    let mut items = Vec::new();
+    let mut carrion_known = 0.0;
+    for g in Founder::ALL {
+        let kills = after.funnel[i][g.index()][killed].saturating_sub(before.funnel[i][g.index()][killed]);
+        let eaten = (after.eaten_carrion_by_founder_prey[i][g.index()] - before.eaten_carrion_by_founder_prey[i][g.index()]).max(0.0);
+        carrion_known += eaten;
+        if kills > 0 || eaten > 0.0 {
+            items.push(DietItem { food: g.name().to_string(), kills, eaten, ..Default::default() });
+        }
+    }
+    for food in Food::ALL {
+        let raw = (after.eaten_by_founder_food[i][food.index()] - before.eaten_by_founder_food[i][food.index()]).max(0.0);
+        // Carrion already booked to a carcass's lineage is not counted twice; what is left
+        // beyond the rounding of the same sums had no carcass record.
+        let eaten = if food == Food::Carrion { raw - carrion_known } else { raw };
+        if eaten > 1e-9 * raw {
+            items.push(DietItem { food: food.name().to_string(), eaten, ..Default::default() });
+        }
+    }
+    shares(&mut items);
+    items
+}
+
+/// Fill each item's shares of the items' kills and matter eaten.
+fn shares(items: &mut [DietItem]) {
+    let kills: u64 = items.iter().map(|d| d.kills).sum();
+    let eaten: f64 = items.iter().map(|d| d.eaten).sum();
+    for d in items {
+        d.kill_share = if kills > 0 { d.kills as f64 / kills as f64 } else { 0.0 };
+        d.eaten_share = if eaten > 0.0 { d.eaten / eaten } else { 0.0 };
+    }
+}
+
+/// Several arms' diets summed by food, shares recomputed.
+fn sum_diets<'a>(diets: impl IntoIterator<Item = &'a [DietItem]>) -> Vec<DietItem> {
+    let mut out: Vec<DietItem> = Vec::new();
+    for d in diets.into_iter().flatten() {
+        match out.iter_mut().find(|o| o.food == d.food) {
+            Some(o) => {
+                o.kills += d.kills;
+                o.eaten += d.eaten;
+            }
+            None => out.push(DietItem { food: d.food.clone(), kills: d.kills, eaten: d.eaten, ..Default::default() }),
+        }
+    }
+    shares(&mut out);
+    out
+}
+
+/// Every lineage's live founder bodies, in [`Founder::ALL`] order.
+pub fn lineage_counts(sim: &Sim) -> [usize; Founder::COUNT] {
+    let mut n = [0; Founder::COUNT];
+    for a in sim.fauna().view().animals {
+        if let Some(g) = a.founder {
+            n[g.index()] += 1;
+        }
+    }
+    n
+}
+
+/// Several arms' numbers summed by lineage at their start and end.
+fn sum_numbers<'a>(arms: impl IntoIterator<Item = &'a LiveArm>) -> Vec<LineageNumbers> {
+    let mut out: Vec<LineageNumbers> = Vec::new();
+    for c in arms.into_iter().flat_map(|a| &a.numbers) {
+        let (start, end) = (c.counts.first().copied().unwrap_or(0), c.counts.last().copied().unwrap_or(0));
+        match out.iter_mut().find(|o| o.lineage == c.lineage) {
+            Some(o) => {
+                o.start += start;
+                o.end += end;
+            }
+            None => out.push(LineageNumbers { lineage: c.lineage.clone(), start, end }),
+        }
+    }
+    out
 }
 
 /// One intent's holds in one arm.
@@ -97,6 +224,14 @@ pub struct CheckReport {
     pub deaths_brain: u64,
     pub holds_heuristic: Holds,
     pub holds_brain: Holds,
+    /// The lineage's diet summed over the matched seeds, each arm ([`diet`]): the topic 6
+    /// watch on a brain overeating one prey.
+    pub diet_heuristic: Vec<DietItem>,
+    pub diet_brain: Vec<DietItem>,
+    /// Every animal lineage's live founder bodies at each arm's start and end, summed over
+    /// the matched seeds (per-minute counts are on each [`LiveArm`]).
+    pub numbers_heuristic: Vec<LineageNumbers>,
+    pub numbers_brain: Vec<LineageNumbers>,
     pub scenes: Vec<SceneCheck>,
     /// Seeds or scenes the founding refused, with the reason.
     pub skipped: Vec<String>,
@@ -178,11 +313,19 @@ fn live_arm(mut sim: Sim, seed: u64, f: Founder, driver: Option<&EpisodeDriver>,
         crate::es::voxel::live::install_centres(sim.fauna_mut(), &[(f, d.clone())]);
     }
     let (bodies_start, energy_start, deaths_start) = lineage(&sim, f);
+    let ledger_start = *sim.fauna().view().ledger;
+    let mut numbers_at_s = vec![0];
+    let mut counts = vec![lineage_counts(&sim)];
     let hz = u64::from(cubarium_voxel_fauna::TICK_HZ);
     let (mut hungry, mut present) = (0usize, 0usize);
     for t in 0..seconds * hz {
         sim.step();
         holds.observe(&sim, f);
+        let s = (t + 1) / hz;
+        if (t + 1) % hz == 0 && s % 60 == 0 && s < seconds {
+            numbers_at_s.push(s);
+            counts.push(lineage_counts(&sim));
+        }
         if t % hz == 0 {
             for a in sim.fauna().view().animals.iter().filter(|a| a.founder == Some(f)) {
                 present += 1;
@@ -192,6 +335,13 @@ fn live_arm(mut sim: Sim, seed: u64, f: Founder, driver: Option<&EpisodeDriver>,
     }
     holds.body_seconds += present as f64;
     let (bodies_end, energy_end, deaths_end) = lineage(&sim, f);
+    numbers_at_s.push(seconds);
+    counts.push(lineage_counts(&sim));
+    let numbers = Founder::ALL
+        .into_iter()
+        .filter(|g| counts.iter().any(|c| c[g.index()] > 0))
+        .map(|g| LineageCount { lineage: g.name().to_string(), counts: counts.iter().map(|c| c[g.index()]).collect() })
+        .collect();
     LiveArm {
         seed,
         bodies_start,
@@ -200,6 +350,9 @@ fn live_arm(mut sim: Sim, seed: u64, f: Founder, driver: Option<&EpisodeDriver>,
         energy_start,
         energy_end,
         hungry_share: if present > 0 { hungry as f64 / present as f64 } else { 0.0 },
+        diet: diet(&ledger_start, sim.fauna().view().ledger, f),
+        numbers_at_s,
+        numbers,
     }
 }
 
@@ -284,6 +437,10 @@ pub fn check(
         gain_per_body_brain_minus_heuristic: mean(paired),
         deaths_heuristic: h_arms.iter().map(|a| a.deaths).sum(),
         deaths_brain: b_arms.iter().map(|a| a.deaths).sum(),
+        diet_heuristic: sum_diets(h_arms.iter().map(|a| a.diet.as_slice())),
+        diet_brain: sum_diets(b_arms.iter().map(|a| a.diet.as_slice())),
+        numbers_heuristic: sum_numbers(&h_arms),
+        numbers_brain: sum_numbers(&b_arms),
         heuristic: h_arms,
         brain: b_arms,
         holds_heuristic: h_holds.finish(menu),
@@ -298,7 +455,7 @@ pub fn check(
 pub fn summary_line(r: &CheckReport) -> String {
     let scenes: Vec<String> = r.scenes.iter().map(|s| format!("{} {:.2}/{:.2}", s.intent, s.brain, s.heuristic)).collect();
     format!(
-        "# check {} gen {}: gain/body brain {:+.5} heuristic {:+.5} (paired {:+.5}); deaths {}/{}; hungry {:.2}; switches/body-min {:.2}/{:.2}; scenes brain/rules {}",
+        "# check {} gen {}: gain/body brain {:+.5} heuristic {:+.5} (paired {:+.5}); deaths {}/{}; hungry {:.2}; switches/body-min {:.2}/{:.2}; scenes brain/rules {}; diet brain [{}] rules [{}]; prey brain [{}] rules [{}]",
         r.lineage,
         r.generation,
         r.gain_per_body_brain,
@@ -309,6 +466,26 @@ pub fn summary_line(r: &CheckReport) -> String {
         r.brain.iter().map(|a| a.hungry_share).sum::<f64>() / r.brain.len().max(1) as f64,
         r.holds_brain.switches_per_body_min,
         r.holds_heuristic.switches_per_body_min,
-        scenes.join(", ")
+        scenes.join(", "),
+        diet_text(&r.diet_brain),
+        diet_text(&r.diet_heuristic),
+        prey_text(&r.diet_brain, &r.numbers_brain),
+        prey_text(&r.diet_heuristic, &r.numbers_heuristic),
     )
+}
+
+/// `food k<kill share> e<eaten share>` per food, eaten share first in size.
+fn diet_text(d: &[DietItem]) -> String {
+    let mut d: Vec<&DietItem> = d.iter().collect();
+    d.sort_by(|a, b| b.eaten_share.total_cmp(&a.eaten_share));
+    d.iter().map(|x| format!("{} k{:.2} e{:.2}", x.food, x.kill_share, x.eaten_share)).collect::<Vec<_>>().join(", ")
+}
+
+/// `lineage start→end` for each animal lineage in the diet.
+fn prey_text(d: &[DietItem], n: &[LineageNumbers]) -> String {
+    n.iter()
+        .filter(|c| d.iter().any(|x| x.food == c.lineage))
+        .map(|c| format!("{} {}->{}", c.lineage, c.start, c.end))
+        .collect::<Vec<_>>()
+        .join(", ")
 }

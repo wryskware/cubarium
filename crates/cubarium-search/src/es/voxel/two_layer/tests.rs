@@ -1270,3 +1270,35 @@ fn the_learners_own_hold_teaches_the_top_to_switch_where_the_teachers_only_teach
     eprintln!("switch agreement on intent 1: learner's hold {with_learner:.3}, teacher's hold {with_teacher:.3}");
     assert!(with_learner > with_teacher, "the learner's own hold teaches the switch ({with_learner} vs {with_teacher})");
 }
+
+// ------------------------------------------------------------------ CHECK-DIET
+
+/// The check's diet: a lineage that killed and ate a prey shows that prey with a share in
+/// (0, 1]; carrion with no carcass record and plant food are their own items; shares sum to
+/// 1; another lineage's eating is not in it.
+#[test]
+fn the_check_diet_reads_prey_and_food_shares() {
+    use super::check::diet;
+    use cubarium_voxel_fauna::{FaunaLedger, Food, perception::KILLED};
+    let (lj, prey, other) = (Founder::Lanternjaw.index(), Founder::Blind.index(), Founder::Browser.index());
+    let before = FaunaLedger::default();
+    let mut after = before;
+    after.funnel[lj][prey][KILLED] = 2;
+    after.eaten_carrion_by_founder_prey[lj][prey] = 3.0;
+    after.eaten_by_founder_food[lj][Food::Carrion.index()] = 4.0;
+    after.eaten_by_founder_food[lj][Food::Foliage.index()] = 0.5;
+    after.funnel[other][prey][KILLED] = 5;
+    after.eaten_by_founder_food[other][Food::Foliage.index()] = 9.0;
+    let d = diet(&before, &after, Founder::Lanternjaw);
+    let item = |name: &str| d.iter().find(|x| x.food == name);
+    let p = item(Founder::Blind.name()).expect("the prey is in its diet");
+    assert_eq!(p.kills, 2);
+    assert!(p.eaten_share > 0.0 && p.eaten_share <= 1.0 && p.kill_share > 0.0 && p.kill_share <= 1.0, "{p:?}");
+    assert!(item("carrion").is_some_and(|x| x.eaten > 0.0 && x.kills == 0), "unattributed carrion: {d:?}");
+    assert!(item("foliage").is_some(), "plant food: {d:?}");
+    assert!(item(Founder::Browser.name()).is_none(), "nothing it did not eat or kill: {d:?}");
+    let (ks, es) = (d.iter().map(|x| x.kill_share).sum::<f64>(), d.iter().map(|x| x.eaten_share).sum::<f64>());
+    assert!((ks - 1.0).abs() < 1e-12 && (es - 1.0).abs() < 1e-12, "shares sum to 1: {ks} {es}");
+    // The window is the difference: the same reading twice is an empty diet.
+    assert!(diet(&after, &after, Founder::Lanternjaw).is_empty());
+}

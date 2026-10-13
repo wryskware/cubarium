@@ -3377,6 +3377,13 @@ pub struct FaunaLedger {
     pub healed_by_founder: [f64; Founder::COUNT],
     /// Carrion taken by each lineage's mouths, gross organic matter: who ate the carcasses.
     pub eaten_carrion_by_founder: [f64; Founder::COUNT],
+    /// (CHECK-DIET) Carrion withdrawn by `[eater][carcass]` lineage, raw organic matter
+    /// before any bite spillage (as [`FaunaLedger::eaten_by_founder_food`]): whose bodies
+    /// each lineage ate. A bite of a carrion pool with no carcass record is not here, so a
+    /// row sums to at most the eater's carrion in `eaten_by_founder_food`. A diagnostic
+    /// only: skipped in the positional save so old worlds load unchanged, zero after a load.
+    #[serde(skip)]
+    pub eaten_carrion_by_founder_prey: [[f64; Founder::COUNT]; Founder::COUNT],
     /// The `respired_out` share that was a **hunt**: strikes and a lit lure.
     pub respired_hunt_out: f64,
     /// The `respired_out` share that was **healing** a wound.
