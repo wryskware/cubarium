@@ -1,0 +1,18 @@
+# CALF-PLACE batch, seeds 5-8 (design/handoffs/calf-place-2026-10-13.md, step 4): the wide
+# terrarium on main's config, one calf an hour old beside every grown loftstrider, 3 world
+# hours, hourly checkpoints kept (check_min=3, then every 60 min: m3, m63, m123, m180).
+# Four worlds x 2 threads fit one eidolon L3 group (10 threads).
+# Submit from the worktree root: scripts/lab/lab submit config/scenarios/calves/batch-b.toml
+kind = "batch"
+name = "calf-place-3h-b"
+hosts = ["eidolon"]
+parallel = 4
+est_h = 3.0
+binary = { tree = ".", commit = "HEAD" }
+args = [
+  "--arm", "calves=edit={job}/inputs/required/ls-calf-1h.toml",
+  "--config", "config/desktop/terrarium-wide.toml",
+  "--required", "config/scenarios/calves/required-wide-calves.toml",
+  "--seeds", "5-8", "--hours", "3", "--threads", "2",
+  "--stage", "check_min=3 segment_min=60 keep=5",
+]

@@ -153,7 +153,8 @@ class Batch(Kind):
                 name, _, extra = value.partition("=")
                 tokens = shlex.split(extra)
                 for token_index, token in enumerate(tokens):
-                    if token.startswith(("policy=", "genome=", "load=")):
+                    # edit=: a scenario file (CALF-PLACE), staged like a policy.
+                    if token.startswith(("policy=", "genome=", "load=", "edit=")) and "{job}" not in token:
                         prefix, _, path = token.rpartition("=")
                         source = ctx.path(spec, path).resolve(strict=True)
                         file_inputs(source, f"{{job}}/inputs/arm-{name}/{source.name}", files)
