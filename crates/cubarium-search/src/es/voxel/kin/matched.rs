@@ -431,6 +431,34 @@ pub fn run_assigned<S: Scene>(
     kin: &KinConfig,
     observe: &mut dyn FnMut(&Sim),
 ) -> Result<AssignedOutcome, String> {
+    run_assigned_with(scene, assign, table, kin, AssignOptions::default(), observe)
+}
+
+/// What [`run_assigned_with`] meters a copy by beyond [`run_assigned`]'s defaults (no
+/// curiosity, empty familiarity, the tissue reward, newborns on the scene's factory).
+#[derive(Clone, Default)]
+pub struct AssignOptions {
+    /// Each lineage's curiosity, as the live window has it.
+    pub curiosity: Curiosity,
+    /// The bodies' familiarity at the start (the live world's, for a live start).
+    pub memory: Memory,
+    /// The live window's stomach-aware reward switch.
+    pub stomach_aware_reward: bool,
+    /// A lineage whose newborns get a candidate of the table the tick they are born (the
+    /// birth factory is replaced for the copy); `None`: newborns take the scene's factory.
+    pub newborns: Option<(Founder, usize)>,
+}
+
+/// [`run_assigned`] under `options` (LIVE-TWINS: a live start's copy metered as the live
+/// window meters it, the whole lineage's newborns on the copy's candidate).
+pub fn run_assigned_with<S: Scene>(
+    scene: &S,
+    assign: &[(u64, usize)],
+    table: &VariantTable,
+    kin: &KinConfig,
+    options: AssignOptions,
+    observe: &mut dyn FnMut(&Sim),
+) -> Result<AssignedOutcome, String> {
     let mut copy = scene.open()?;
     for &(id, c) in assign {
         if c >= table.len() {
@@ -440,16 +468,26 @@ pub fn run_assigned<S: Scene>(
             return Err(format!("body {id} is not in the scene"));
         }
     }
+    if let Some((f, c)) = options.newborns {
+        if c >= table.len() {
+            return Err(format!("candidate {c} is not in a table of {}", table.len()));
+        }
+        let t = table.clone();
+        copy.sim_mut()
+            .fauna_mut()
+            .set_founder_factory(f, Arc::new(move || -> Box<dyn Controller> { t.controller(c) }));
+    }
     let tables = vec![None; Founder::COUNT];
     let mut w = Window::begin_kin(
         copy.sim_mut(),
         &tables,
         &[0; Founder::COUNT],
         scene.ticks(),
-        &Curiosity::default(),
-        Memory::default(),
+        &options.curiosity,
+        options.memory,
         kin,
     );
+    w.stomach_aware_reward = options.stomach_aware_reward;
     while !w.done() {
         let mark = w.before_step(copy.sim());
         if !copy.step() {

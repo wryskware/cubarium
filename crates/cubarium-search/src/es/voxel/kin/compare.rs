@@ -9,8 +9,9 @@
 //!   its members' kin-weighted scores, compared **raw** across worlds (no within-world
 //!   normalising, which would zero a world holding one family).
 //! - `matched`: each pair's two signs come from the matched runner ([`super::matched`]).
+//! - `twins`: each pair's `(d̄/2, −d̄/2)` from its all-sign twins ([`super::twins`]).
 //!
-//! **Missing signs are never scored as zero returns** on `family` and `matched`: a pair
+//! **Missing signs are never scored as zero returns** on `family`, `matched` and `twins`: a pair
 //! whose `+` or `−` has no score is left out of the update ([`PairScores`],
 //! [`ascend_pairs`]).
 
