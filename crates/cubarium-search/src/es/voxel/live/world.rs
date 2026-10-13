@@ -274,6 +274,75 @@ mod tests {
         let why = got.err().expect("the refused terrain is an Err");
         assert!(why.contains("rejected"), "{why}");
     }
+
+    /// A flat soil ring (support at y = 2), 24 m around and 8 m deep, with no bodies.
+    fn flat_sim() -> super::Sim {
+        use cubarium_voxel::{Command, Material};
+        let (w, d, v) = (96u32, 32u32, 0.25);
+        let mut world = cubarium_voxel::World::empty(cubarium_voxel::Config { width: w, height: 16, depth: d, voxel_m: v, ..cubarium_voxel::Config::default() });
+        for z in 0..d {
+            for x in 0..i64::from(w) {
+                for y in 1..=2 {
+                    world.apply(Command::SetMaterial { x, y, z, material: Material::Soil });
+                }
+            }
+        }
+        let flora = cubarium_voxel_flora::Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(v));
+        let fauna = cubarium_voxel_fauna::Fauna::new(cubarium_voxel_fauna::FaunaConfig::default());
+        super::Sim::new(world, flora, fauna, super::SimConfig::with_threads(1), None)
+    }
+
+    fn place(sim: &mut super::Sim, f: super::Founder, x_m: f64, z_m: f64) -> u64 {
+        use cubarium_voxel_sim::edit::At;
+        let at = At::Point { x_m, y_m: 0.75, z_m, aloft: false };
+        match sim.edit(|e| e.place_animal(f, at, cubarium_voxel_fauna::BodySpec::default())).expect("placed") {
+            cubarium_voxel_fauna::Placed::Body { id, .. } => id,
+            other => panic!("not a body: {other:?}"),
+        }
+    }
+
+    fn ring_gap(sim: &super::Sim, a: u64, b: u64) -> f64 {
+        let c = sim.world().config();
+        let ring = f64::from(c.width) * c.voxel_m;
+        let v = sim.fauna().view();
+        let (p, q) = (v.animal(a).expect("a").pose, v.animal(b).expect("b").pose);
+        let dx = (q.x - p.x).rem_euclid(ring);
+        dx.min(ring - dx).hypot(q.z - p.z)
+    }
+
+    /// LS-TEACH: a shown hunter is moved to about `at_m` from a grown prey body, a mother of a
+    /// living young before one without; the sides alternate; with no hunter living, one is
+    /// placed there.
+    #[test]
+    fn a_shown_hunter_stands_at_its_distance_from_a_mother_first() {
+        use super::Founder::{Chorister as VH, Loftstrider as LS};
+        let mut sim = flat_sim();
+        let lone = place(&mut sim, LS, 4.0, 4.0);
+        let mother = place(&mut sim, LS, 16.0, 4.0);
+        let region = cubarium_voxel_sim::edit::Region { x: [56, 72], z: [0, 31] };
+        let calved = sim.edit(|e| e.calve(LS, 1, 600.0, None, Some(region)));
+        assert_eq!(calved.calves.len(), 1, "{:?}", calved.refused);
+        let hound = place(&mut sim, VH, 10.0, 7.0);
+        let at_m = 3.0;
+        let snap = 2.0 * sim.world().config().voxel_m;
+        let mut sides = Vec::new();
+        for k in 0..2 {
+            let (h, prey) = super::show_hunter(&mut sim, LS, VH, k, at_m).expect("shown");
+            assert_eq!((h, prey), (hound, mother), "the living hunter, to the mother");
+            let gap = ring_gap(&sim, hound, mother);
+            assert!((gap - at_m).abs() <= snap + 0.5, "k {k}: {gap} m from her, wanted {at_m}");
+            sides.push(sim.fauna().view().animal(hound).unwrap().pose.x > sim.fauna().view().animal(mother).unwrap().pose.x);
+        }
+        assert_ne!(sides[0], sides[1], "the sides alternate");
+        assert_ne!(lone, mother);
+        // No hunter living: one is placed, as near.
+        sim.edit(|e| e.remove_animal(hound)).expect("removed");
+        let (placed, prey) = super::show_hunter(&mut sim, LS, VH, 0, at_m).expect("placed");
+        assert_ne!(placed, hound);
+        assert_eq!(prey, mother);
+        assert_eq!(sim.fauna().view().animal(placed).and_then(|a| a.founder), Some(VH));
+        assert!((ring_gap(&sim, placed, mother) - at_m).abs() <= snap + 0.5);
+    }
 }
 
 /// **A training top-up** (BRAIN-FIX step 4, `--top-up LINEAGE=N[:FULLNESS]`): after the
