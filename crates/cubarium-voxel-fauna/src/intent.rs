@@ -519,7 +519,8 @@ fn body_subject(fauna: &crate::Fauna, me: u64, id: u64) -> Subject {
 ///   rest bout → `rest`;
 /// - loftstrider: its defence layer's own labels ([`crate::defend::steer`]); else flight
 ///   standing (no forward) → `watch`, flight walking → `move_off`, the herd pull →
-///   `stay_with_family`, its own steering → `graze`, a rest bout → `rest`;
+///   `stay_with_family`, its own steering standing still in a rest bout or sated → `rest`,
+///   else its own steering → `graze`;
 /// - Veilhound: the pack tactic's own reading ([`crate::Fauna::pack_hint`]: rest, den,
 ///   feed, stalk, drive — the flankers too —, else search); its own steering → `search`;
 /// - lanternjaw (BRAIN-FIX step 2), from the patrol's own state ([`crate::hunt::steer`],
@@ -575,7 +576,14 @@ pub(crate) fn teacher_label(
             S::Flee if still => t("watch", nearest(fauna, a.id, class::THREAT)),
             S::Flee => t("move_off", nearest(fauna, a.id, class::THREAT)),
             S::Heuristic | S::Search | S::Leave if herded => t("stay_with_family", nearest(fauna, a.id, class::KIN)),
-            S::Heuristic if resting => t("rest", Subject::None),
+            // CLONE-AGREE: its `rest` is a body standing that takes no food — still in a rest
+            // bout, or still with its eating latch off (sated: the latch off, it takes no
+            // bite, `step::gut_bite`). Its forager stands a sated body with its mouth asking
+            // (`feed` on), so that stand was labelled `graze` (traced on the held-out training
+            // world: 12603 of 13046 graze-labelled samples were still, latched off, taking
+            // nothing). Walking, or still and hungry (a forage pause), it grazes; walking on
+            // through a rest bout too, as the seedporter's.
+            S::Heuristic if still && (resting || !a.eating) => t("rest", Subject::None),
             S::Heuristic | S::Search | S::Leave => t("graze", Subject::None),
             _ => Teach::default(),
         },

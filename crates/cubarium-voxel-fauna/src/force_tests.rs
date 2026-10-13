@@ -124,3 +124,29 @@ fn a_seedporter_walking_through_a_rest_bout_is_labelled_forage() {
     assert_eq!(name(&f, stay), Some("rest"), "still in a rest bout");
     assert_eq!(name(&f, stay + 0.25), Some("forage"), "walking through a rest bout");
 }
+
+/// **The loftstrider's `rest` is a body standing that takes no food** (CLONE-AGREE): still and
+/// sated (its eating latch off, so it takes no bite) or still in a rest bout, it is labelled
+/// `rest`; walking, still and hungry, or walking on through a rest bout, `graze`.
+#[test]
+fn a_sated_loftstrider_standing_is_labelled_rest_and_a_walking_or_hungry_one_graze() {
+    let (_, _, mut f, ids) = scene();
+    let (id, founder) = ids[2];
+    assert_eq!(founder, Founder::Loftstrider);
+    let i = f.animals.iter().position(|a| a.id == id).expect("the loftstrider");
+    let stay = f.config.teachers.forage_stay_forward;
+    let name = |f: &Fauna, forward: f64| {
+        // Its forager's stand asks with the mouth (`feed` on), sated or not.
+        let held = crate::Actions { forward, turn: 0.0, feed: 1.0 };
+        crate::intent::teacher_label(f, i, founder, Steer::Heuristic, held, false, false).name
+    };
+    f.animals[i].rest_ticks = 0;
+    f.animals[i].eating = false;
+    assert_eq!(name(&f, stay), Some("rest"), "sated and still");
+    assert_eq!(name(&f, stay + 0.25), Some("graze"), "sated and walking");
+    f.animals[i].eating = true;
+    assert_eq!(name(&f, stay), Some("graze"), "hungry and still: a forage pause");
+    f.animals[i].rest_ticks = 10;
+    assert_eq!(name(&f, stay), Some("rest"), "still in a rest bout");
+    assert_eq!(name(&f, stay + 0.25), Some("graze"), "walking through a rest bout");
+}

@@ -33,7 +33,11 @@
 //!    bodies of the lineage under each arm. A first read, not a verdict.
 //!
 //! One JSON summary in `out/summary.json` and a per-mode table on stdout; the clones' files in
-//! `out/`.
+//! `out/`. `confusion=1` (CLONE-AGREE) also prints the two-layer top's confusion matrix
+//! (label row, pick column) on the held-out live teacher records and, in sample, on the
+//! training teacher records, and adds both to the summary as `confusion`; `dump=1` also
+//! writes every scored held-out live label to `out/heldout_picks.jsonl` (label, pick, the
+//! hold before, the observation) for reading which senses separate a confused pair.
 
 
 use cubarium_search::es::voxel::live::{self, balance, ecology::EcologyParams, world};
@@ -210,6 +214,28 @@ fn label_counts(rs: &[TrajectoryRecord], names: &[&str]) -> serde_json::Value {
         }
     }
     json!(names.iter().enumerate().map(|(k, n)| (n.to_string(), json!({"held": held[k], "proposed": proposed[k]}))).collect::<serde_json::Map<_, _>>())
+}
+
+/// A confusion matrix as text: one row per label with any count, its picks by intent.
+/// `masked`: per label, the labels its intent mask ruled out (not in the matrix).
+fn confusion_text(title: &str, names: &[&str], m: &[Vec<usize>], masked: &[usize]) -> String {
+    let used: Vec<usize> = (0..names.len()).filter(|&k| m[k].iter().sum::<usize>() > 0 || m.iter().any(|r| r[k] > 0) || masked[k] > 0).collect();
+    let short = |n: &str| n.chars().take(7).collect::<String>();
+    let mut out = format!("# {title}: label (row) -> two-layer pick (column); masked: labels the mask ruled out\n{:16} {:>7} {:>7}", "label", "n", "masked");
+    for &k in &used {
+        out += &format!(" {:>7}", short(names[k]));
+    }
+    for &r in &used {
+        let n: usize = m[r].iter().sum();
+        if n == 0 && masked[r] == 0 {
+            continue;
+        }
+        out += &format!("\n{:16} {:>7} {:>7}", names[r], n, masked[r]);
+        for &k in &used {
+            out += &format!(" {:>7}", m[r][k]);
+        }
+    }
+    out
 }
 
 fn mean(xs: impl Iterator<Item = f64>) -> f64 {
@@ -421,6 +447,35 @@ fn main() {
         eprintln!("# live closed loop {:.0} s", t0.elapsed().as_secs_f64());
     }
 
+    let confusion = (num(&args, "confusion", 0u8) > 0).then(|| {
+        let held_teacher = teacher(&held_live);
+        let live = per_mode(&two, &arb, &theta2, &held_teacher, names.len());
+        if num(&args, "dump", 0u8) > 0 {
+            use std::io::Write;
+            let mut channels = vec![String::new(); two.observation];
+            for m in f.manifest().modules.iter() {
+                for k in 0..m.width {
+                    if let Some(c) = channels.get_mut(m.offset + k) {
+                        *c = format!("{}.{}", m.name, m.channels.get(k).copied().unwrap_or("?"));
+                    }
+                }
+            }
+            std::fs::write(out.join("obs_channels.json"), json!({"intents": names, "channels": channels}).to_string()).expect("channels");
+            let mut w = std::io::BufWriter::new(std::fs::File::create(out.join("heldout_picks.jsonl")).expect("dump file"));
+            for &[r, t, label, pick] in &live.picks {
+                let s = &held_teacher[r].samples[t];
+                let before = if t > 0 { Some(held_teacher[r].samples[t - 1].held.intent) } else { None };
+                let row = json!({"record": r, "t": t, "label": label, "pick": (pick != usize::MAX).then_some(pick), "before": before, "obs": s.observation});
+                writeln!(w, "{row}").expect("dump");
+            }
+        }
+        let fit_on = per_mode(&two, &arb, &theta2, &teacher(&train), names.len());
+        println!("{}", confusion_text("held-out live teacher", &names, &live.confusion, &live.masked_labels));
+        println!("{}", confusion_text("training teacher (in sample)", &names, &fit_on.confusion, &fit_on.masked_labels));
+        json!({"intents": names, "held_out_live": live.confusion, "held_out_live_masked": live.masked_labels,
+               "training": fit_on.confusion, "training_masked": fit_on.masked_labels})
+    });
+
     let summary = json!({
         "founder": f.name(),
         "bodies": bodies, "fullness": fullness, "also": also.iter().map(|t| json!({"founder": t.founder.name(), "bodies": t.bodies, "fullness": t.fullness})).collect::<Vec<_>>(), "record_s": record_s, "closed_s": closed_s, "alt_period_s": alt_period_s, "alt_len_s": alt_len_s,
@@ -433,6 +488,7 @@ fn main() {
         "held_out": held_out,
         "competence": competence,
         "live_closed_loop": live_arms,
+        "confusion": confusion,
         "skipped": skipped,
         "wall_s": t0.elapsed().as_secs_f64(),
     });
