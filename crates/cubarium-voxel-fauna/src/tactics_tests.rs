@@ -1324,3 +1324,96 @@ fn the_den_hold_still_holds_a_sated_breeder() {
     let (act, label) = decide_walking(&mut f, &w, &flora, b);
     assert_eq!((act, label), (Actions::REST, "rest"), "a sated breeder rests at its den");
 }
+
+// ------------------------------------------------------------------ VH-TEACH: the Reach block
+
+/// The arena with two rock walls across its whole depth (columns 52–54 and 100–102): a pen
+/// between them the rest of the ring cannot walk into.
+fn penned(seed: u64) -> World {
+    let mut w = arena(seed);
+    wall(&mut w, (52, 54), (0, D - 1), 8);
+    wall(&mut w, (100, 102), (0, D - 1), 8);
+    w
+}
+
+/// Hound `me`'s record with `t` on its Prey slot.
+fn on_prey_slot(f: &mut Fauna, me: u64, t: Track) {
+    set_percept(f, me, &[t]);
+    f.percepts.get_mut(&me).expect("its record").best[usize::from(class::PREY)] = t;
+}
+
+/// **VH-TEACH, the Reach block reads what the rules read**: `prey` is the choice's own reach
+/// ([`reachable`]) for the prey on its Prey slot — a calf in the open reads a way, the same
+/// calf in a pen it cannot walk into none; `prey_lost` is its shun of that prey, until the
+/// shun ends; `den` is a way home on its pack's den route field — at the den, from open
+/// ground, and none from inside the pen, where the walk home refuses too ([`must_walk_home`]).
+#[test]
+fn the_reach_block_reads_the_ways_and_the_lost_chase_the_tactic_reads() {
+    for walled in [false, true] {
+        let w = if walled { penned(23) } else { arena(23) };
+        let view = w.view();
+        let mut f = Fauna::new(config());
+        let h = pack(&mut f, &w, 1)[0];
+        place(&mut f, h, 10.0, MID_Z, EAST);
+        let calf = strider(&mut f, &w, true, 17.0, MID_Z, EAST);
+        let fresh = f.config.manifest(CH).fresh_s;
+        let t = seen(&f, h, calf, class::PREY);
+        on_prey_slot(&mut f, h, t);
+        let i = index(&f, h);
+        assert_eq!(reach(&f, i, &view, &t, fresh), [0.0; 3], "walled {walled}: no route graph built yet, no way known");
+
+        f.pack_routes(&view, CH);
+        super::warm_den_paths(&mut f);
+        let a = f.animals[i];
+        let phys = *f.config.founder(CH);
+        let (pk, hunter) = (phys.pack.unwrap(), phys.active_hunter().unwrap());
+        let rule = reachable(&mut f, &view, CH, &pk, &phys.body_at(a.body), &hunter, &a, &t);
+        assert_eq!(rule, !walled, "the fixture: the calf is reachable only in the open");
+        let r = reach(&f, i, &view, &t, fresh);
+        assert_eq!(r[1], f64::from(rule), "walled {walled}: Reach.prey is the choice's reach");
+        assert_eq!(r[0], 1.0, "walled {walled}: open ground outside the pen has a way home");
+        assert_eq!(r[2], 0.0, "not lost");
+
+        let shun = cubarium_voxel::ticks_at_least_one(tac(&f).shun_s);
+        f.hounds.entry(h).or_default().shun(calf, f.tick + shun);
+        assert_eq!(reach(&f, i, &view, &t, fresh)[2], 1.0, "lost within its shun");
+        let mut later = seen(&f, h, calf, class::PREY);
+        f.tick += shun;
+        later.tick = f.tick;
+        on_prey_slot(&mut f, h, later);
+        assert_eq!(reach(&f, i, &view, &later, fresh)[2], 0.0, "the shun over");
+
+        // The den: on its face, and (walled) from inside the pen.
+        let den = f.pack(animal(&f, h).pack.unwrap().pack).unwrap().den;
+        let (dx, dz) = crate::pack::centre(den, VOXEL_M);
+        place(&mut f, h, dx, dz, EAST);
+        assert_eq!(reach(&f, i, &view, &later, fresh)[0], 1.0, "at its den");
+        if walled {
+            place(&mut f, h, 17.0, MID_Z + 2.0, EAST);
+            animal_mut(&mut f, h).eating = false;
+            assert_eq!(reach(&f, i, &view, &later, fresh)[0], 0.0, "inside the pen: no way home");
+            assert!(!crate::pack::must_walk_home(&mut f, i, &view), "and the walk home refuses");
+        }
+    }
+}
+
+/// **VH-TEACH, the warm den field is the walk home's own**: [`super::warm_den_paths`] caches
+/// the field [`Fauna::den_path`] serves for the same graph and den node (the walk home reads
+/// that very field, not a recomputed one), equal to a fresh computation, and builds no graph.
+#[test]
+fn the_warmed_den_field_is_the_one_the_walk_home_reads() {
+    let w = penned(29);
+    let view = w.view();
+    let mut f = Fauna::new(config());
+    let h = pack(&mut f, &w, 1)[0];
+    let own = animal(&f, h).pack.unwrap().pack;
+    super::warm_den_paths(&mut f);
+    assert!(f.pack_routes.is_empty() && f.den_paths.is_empty(), "no graph built, nothing warmed");
+    let graph = f.pack_routes(&view, CH);
+    super::warm_den_paths(&mut f);
+    let goal = graph.face(f.pack(own).unwrap().den).expect("the den on the graph");
+    let warmed = f.den_paths.get(&own).expect("warmed").field.clone();
+    let (_, served) = f.den_path(&view, CH, own, goal);
+    assert!(std::sync::Arc::ptr_eq(&warmed, &served), "den_path serves the warmed field");
+    assert_eq!(*served, graph.distances(goal, u32::MAX), "the field a fresh computation gives");
+}
