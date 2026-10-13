@@ -434,6 +434,30 @@ fn matched_copies_change_only_the_focal() {
 }
 
 #[test]
+fn an_assigned_copy_meters_as_the_focal_copy_does() {
+    let scene = engage(1.0);
+    let copy = scene.open().unwrap();
+    let focals = scene.focals(&copy, Founder::Loftstrider);
+    drop(copy);
+    let t = table(Founder::Loftstrider, 2);
+    let kin = KinConfig::default();
+    // One body assigned: the focal copy's scores, every body.
+    let one = matched::run_copy(&scene, matched::CopyPlan { focal: focals[0], candidate: Some(2) }, Some(&t), &kin).unwrap();
+    let mut ticks = 0u64;
+    let a = matched::run_assigned(&scene, &[(focals[0], 2)], &t, &kin, &mut |_| ticks += 1).unwrap();
+    assert_eq!(a.scores, one.scores, "one assigned body meters as run_copy's focal");
+    assert_eq!(ticks, a.ticks, "the observer reads every tick");
+    assert_eq!(a.metered.len(), a.scores.len());
+    // Every focal-eligible body on one candidate.
+    let all: Vec<(u64, usize)> = focals.iter().map(|&f| (f, 3)).collect();
+    let b = matched::run_assigned(&scene, &all, &t, &kin, &mut |_| {}).unwrap();
+    assert!(focals.iter().all(|f| b.scores.contains_key(f)), "every assigned body is metered");
+    // A candidate past the table, or a body not in the scene, is an error, not a silent copy.
+    assert!(matched::run_assigned(&scene, &[(focals[0], t.len())], &t, &kin, &mut |_| {}).is_err());
+    assert!(matched::run_assigned(&scene, &[(u64::MAX, 0)], &t, &kin, &mut |_| {}).is_err());
+}
+
+#[test]
 fn a_null_pair_reports_its_gap() {
     let scene = engage(1.0);
     let copy = scene.open().unwrap();
