@@ -30,6 +30,8 @@ window_s = 120.0
 pairs = 1024
 starts = 1
 nulls = 1
+carrier_share = 1.0
+stranger_weight = 1.0
 
 [seedporter]
 comparison = "twins"
@@ -39,3 +41,5 @@ window_s = 120.0
 pairs = 1024
 starts = 1
 nulls = 1
+carrier_share = 1.0
+stranger_weight = 1.0
