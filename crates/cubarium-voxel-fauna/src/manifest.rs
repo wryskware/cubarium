@@ -881,6 +881,13 @@ const CALLS2_CHANNELS: [&str; 12] =
 /// its den and a sated one to rest; without it a brain could not tell that walk from a search.
 const RHYTHM_CHANNELS: [&str; 1] = ["rest_bout"];
 const MODULE_RHYTHM: Module = tail("Rhythm", &RHYTHM_CHANNELS);
+/// VH-TEACH: what the Veilhound knows of the ways it can walk and the chases it lost
+/// ([`crate::pack::tactics::reach`]): a walking way home to its den, a walk to the prey on its
+/// `Prey` slot within a chase, and whether it lost that prey within its shun. The tactic
+/// rests a sated hound with no way home where it stands (it walks the others home) and passes
+/// over a prey it cannot reach or just lost (it searches on); no other channel carried either.
+const REACH_CHANNELS: [&str; 3] = ["den", "prey", "prey_lost"];
+const MODULE_REACH: Module = tail("Reach", &REACH_CHANNELS);
 const MODULE_CALLS1: Module = tail("Calls", &CALLS1_CHANNELS);
 const MODULE_CALLS2: Module = tail("Calls", &CALLS2_CHANNELS);
 
@@ -1022,8 +1029,8 @@ const LANTERNJAW_MODULES: [Module; 15] = layout([
 ]);
 /// The Veilhound: v2's 37, then its body state, prey, kin (packmates), carcass, four
 /// scents, tremor, its pack (breeder, pup, target by call, feast), its den (always known),
-/// the shore, the calls and its rest bout.
-const CHORISTER_MODULES: [Module; 19] = layout([
+/// the shore, the calls, its rest bout and its ways (home, to its prey, a lost chase).
+const CHORISTER_MODULES: [Module; 20] = layout([
     MODULE_SELF,
     MODULE_CONTACT4,
     MODULE_WET,
@@ -1043,6 +1050,7 @@ const CHORISTER_MODULES: [Module; 19] = layout([
     MODULE_PLACE_SHORE,
     MODULE_CALLS2,
     MODULE_RHYTHM,
+    MODULE_REACH,
 ]);
 
 /// The two shapes the search runtime is compiled for until P3 makes it generic: the

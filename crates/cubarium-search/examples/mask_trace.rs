@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! mask_trace founder=loftstrider seeds=9 seconds=600 bodies=8 [also=LINEAGE=N[:FULLNESS],...] \
-//!     [scenario=PATH] [hound_every_s=S hound_m=M] [intents=watch,guard] [lines=1]
+//!     [scenario=PATH] [hound_every_s=S hound_m=M] [intents=watch,guard] [lines=1] [fullness=F]
 //! ```
 
 use cubarium_search::es::voxel::live::{ecology::EcologyParams, world};
@@ -31,6 +31,9 @@ fn main() -> Result<(), String> {
         .unwrap_or_default();
     let scenario = arg(&args, "scenario").map(|p| cubarium_voxel_sim::edit::Scenario::read(std::path::Path::new(p))).transpose()?;
     let lines = arg(&args, "lines").is_some();
+    // VH-TEACH: the top-up's stores as a fraction of capacity, as `two_layer_clone fullness=`
+    // (a Veilhound clone's worlds are founded hungry, `fullness=0.3`); unset, a placed body's default.
+    let fullness: Option<f64> = arg(&args, "fullness").and_then(|v| v.parse().ok());
     // LS-MOVEOFF: what the body is doing at the sample (speed, state, rest bout, eating latch,
     // the nearest threat track's range) beside its record.
     let detail = arg(&args, "detail").is_some();
@@ -47,11 +50,19 @@ fn main() -> Result<(), String> {
     let mut counts: BTreeMap<(String, bool, String), usize> = BTreeMap::new();
     for seed in seeds {
         let eco = EcologyParams::defaults();
-        let (mut sim, _) = world::try_found_world(&world::training_config(), seed, eco.fauna().founder_counts(), &eco)?;
+        // A terrain seed the training world refuses is skipped with a note, as the clone does.
+        let mut sim = match world::try_found_world(&world::training_config(), seed, eco.fauna().founder_counts(), &eco) {
+            Ok((sim, _)) => sim,
+            Err(why) => {
+                eprintln!("# skipped seed {seed}: {why}");
+                continue;
+            }
+        };
+        eprintln!("# seed {seed}");
         for t in &also {
             world::top_up(&mut sim, *t);
         }
-        world::top_up(&mut sim, world::TopUp { founder: f, bodies, fullness: None });
+        world::top_up(&mut sim, world::TopUp { founder: f, bodies, fullness });
         if let Some(s) = &scenario {
             let r = sim.edit(|e| s.apply(e));
             eprintln!("# seed {seed}: scenario {:?} refused {:?}", r.applied, r.refused);

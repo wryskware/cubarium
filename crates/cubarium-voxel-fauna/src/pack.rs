@@ -381,6 +381,74 @@ fn pack_wants(adults: &[Animal]) -> bool {
     !adults.is_empty() && (2 * wanting >= adults.len() || adults.iter().any(|b| b.emergency))
 }
 
+/// The node pack body `a` starts its way home from on `graph`, with the steps to it: its
+/// own node (within its disc's radius, no steps), else the entry of a short walk onto the
+/// graph (`pit_search_m`, PIT). `None`: off the graph with no way onto it.
+fn home_node(view: &VoxelView<'_>, graph: &crate::encounter::RouteGraph, phys: &crate::FounderPhysiology, t: &Pack, a: &Animal) -> Option<(usize, u32)> {
+    let v = view.config.voxel_m;
+    let geometry = phys.body_at(a.body);
+    let h = phys.active_hunter()?;
+    let (radius, _) = node_radii(&geometry, &h, v);
+    match graph.node_near(a.site, (a.pose.x, a.pose.z), radius) {
+        Some(from) => Some((from, 0)),
+        None => {
+            let reach = (t.pit_search_m / v).ceil().min(f64::from(u32::MAX)) as u32;
+            let (_, entry, steps) = graph.way_on_path(view, a.site, (a.pose.x, a.pose.z),
+                geometry.footprint_radius(), geometry.headroom_voxels(v), phys.step_limits(v),
+                phys.wade_depth_m(&geometry), radius, reach)?;
+            Some((entry, steps))
+        }
+    }
+}
+
+/// VH-TEACH: **whether pack body `a` knows a walking way home** — it is at its den (on the
+/// den's level within `rest_radius_m`, where [`must_walk_home`] stops), or its pack's den
+/// route field holds the node it starts from ([`home_node`], the field [`must_walk_home`]
+/// reads). Its knowledge of the ground it walks, read only: the lineage's route graph as last
+/// built and the field [`warm_den_paths`] keeps current; neither built yet reads no way. Not
+/// the walk's reserve check: the brain reads its reserve on its own channel. The Veilhound's
+/// `Reach.den` sense: the tactic sends a sated hound home only along such a way and rests
+/// one with none where it stands, which no other channel told apart.
+pub(crate) fn den_way(fauna: &Fauna, a: &Animal, view: &VoxelView<'_>) -> bool {
+    let (Some(m), Some(t), Some(founder)) = (a.pack, table(fauna, a), a.founder) else {
+        return false;
+    };
+    let Some(den) = fauna.pack(m.pack).map(|p| p.den) else {
+        return false;
+    };
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let (cx, cz) = centre(den, v);
+    if a.site.y == den.y && distance(a, cx, cz, ring) <= t.rest_radius_m.min(t.den_radius_m) {
+        return true;
+    }
+    let phys = fauna.config.founder(founder);
+    let Some((_, graph)) = fauna.pack_routes.get(&founder.index()) else { return false };
+    let Some(to) = graph.face(den) else { return false };
+    let Some(path) = fauna.den_paths.get(&m.pack).filter(|p| std::sync::Arc::ptr_eq(&p.graph, graph) && p.goal == to) else {
+        return false;
+    };
+    home_node(view, graph, phys, &t, a).is_some_and(|(from, _)| path.field.contains_key(&from))
+}
+
+/// VH-TEACH: every pack's den route field ([`Fauna::den_path`]) brought up to its lineage's
+/// route graph as last built, before a controller stage's observations read it ([`den_way`]).
+/// It never builds or rebuilds a graph (their schedule is the tactic's), and the field it
+/// caches is the one [`Fauna::den_path`] would compute for the same graph and den node, so
+/// no rule reads anything different.
+pub(crate) fn warm_den_paths(fauna: &mut Fauna) {
+    for k in 0..fauna.packs.len() {
+        let (id, lineage, den) = (fauna.packs[k].id, fauna.packs[k].lineage, fauna.packs[k].den);
+        let Some(graph) = fauna.pack_routes.get(&lineage.index()).map(|(_, g)| g.clone()) else { continue };
+        let Some(goal) = graph.face(den) else { continue };
+        if fauna.den_paths.get(&id).is_some_and(|p| std::sync::Arc::ptr_eq(&p.graph, &graph) && p.goal == goal) {
+            continue;
+        }
+        let field = std::sync::Arc::new(graph.distances(goal, u32::MAX));
+        fauna.den_paths.insert(id, crate::PackPath { graph, goal, steps: u32::MAX, field });
+    }
+}
+
 /// Both the circadian gate and the post-meal tactic use this route/reserve decision.
 pub(crate) fn must_walk_home(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> bool {
     let a = fauna.animals[i];
@@ -403,20 +471,9 @@ pub(crate) fn must_walk_home(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) 
     let founder = a.founder.expect("a pack lineage");
     let phys = *fauna.config.founder(founder);
     let geometry = phys.body_at(a.body);
-    let h = phys.active_hunter().expect("a pack hunter");
-    let (radius, _) = node_radii(&geometry, &h, v);
     let graph = fauna.pack_routes(view, founder);
     let Some(to) = graph.face(den) else { return false };
-    let (from, recovery_steps) = match graph.node_near(a.site, (a.pose.x, a.pose.z), radius) {
-        Some(from) => (from, 0),
-        None => {
-            let reach = (t.pit_search_m / v).ceil().min(f64::from(u32::MAX)) as u32;
-            let Some((_, entry, steps)) = graph.way_on_path(view, a.site, (a.pose.x, a.pose.z),
-                geometry.footprint_radius(), geometry.headroom_voxels(v), phys.step_limits(v),
-                phys.wade_depth_m(&geometry), radius, reach) else { return false };
-            (entry, steps)
-        }
-    };
+    let Some((from, recovery_steps)) = home_node(view, &graph, &phys, &t, &a) else { return false };
     if flooded(view, &phys, &t, den) {
         return false;
     }
