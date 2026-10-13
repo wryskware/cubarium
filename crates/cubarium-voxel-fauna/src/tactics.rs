@@ -136,9 +136,13 @@ pub struct Tactics {
     /// **VH-FEED-KICK: keep clear of a kicker** ([`keep_clear`]). On: a grown hound that senses
     /// a kicker it saw kick (or felt kick it) within `kick_memory_s`, or sees in guard stance,
     /// nearer than `clear_lengths` of that kicker's lengths where it senses it, or last sensed
-    /// it within its subject's expiry (`intent.subject_lost_s`: walking away puts the kicker
+    /// it within its subject's expiry (`intent.subject_lost_s`, or `kick_memory_s` of a kick from
+    /// it; [`remembers`]: walking away puts the kicker
     /// behind it, out of sight; [`note_kickers`]), walks straight away from it before anything else — eating, resting, the walk home, a give-up's rest — unless the
-    /// kicker is of the lineage it is hunting (the chase's own `dc` rule meets those). Off: as
+    /// kicker is of the lineage it is hunting (the chase's own `dc` rule meets those). A carcass
+    /// within that distance of such a kicker is weighed as the hunt weighs a kick
+    /// ([`weigh_carcass`]): not worth it, the hound waits off it; worth it, it goes, not kept
+    /// clear of those kickers. Off: as
     /// before (a hound fed, rested and walked home through a guarding mother's kicks). A switch.
     pub keep_clear: bool,
     /// ...the distance it keeps, in the kicker's lengths as it sees them (centre to centre).
@@ -744,13 +748,8 @@ pub(crate) fn assess(config: &crate::FaunaConfig, tac: &Tactics, pk: &Pack, me: 
     let hounds = 1 + mates.iter().filter(|m| gap(me.x, me.z, m.x, m.z, ring).2 <= pk.pack_radius_m).count() as u32;
     let p_kill = 1.0 - (1.0 - p_one).powi(hounds as i32);
     // Risk: the kickers about it.
-    let cooling = |k: &Track| mem.kick_seen(k.id).is_some_and(|at| now.saturating_sub(at) as f64 * DT <= tac.kick_recovery_s);
-    let expected_kicks: f64 = grown
-        .iter()
-        .filter(|k| kicker(tac, k, me.len) && !cooling(k))
-        .map(|k| tac.kick_chance * if facing_pack(k) { 1.0 + tac.kick_facing_gain } else { 1.0 } * if guarding(k) { 1.0 + tac.kick_guard_gain } else { 1.0 })
-        .sum();
-    let risk = expected_kicks * tac.wound_cost * (1.0 + me.wound) * (1.0 - tac.hunger_relief * me.hunger).clamp(0.0, 1.0);
+    let expected_kicks: f64 = grown.iter().filter(|k| kicker(tac, k, me.len) && !recovering(tac, mem, k, now)).map(|k| kicks_expected(tac, k, facing_pack(k))).sum();
+    let risk = kick_risk(tac, me, expected_kicks);
     let raw = if tac.meat_by_mass { body_est(config, t) / me.body.max(1e-9) } else { (len / me.len.max(1e-6)).powf(tac.meat_exp) };
     // Usable meals (VH-FIX): no more than the hounds at hand can eat before it is gone — its
     // own room taken for each packmate it senses (their guts are not sensed).
@@ -780,6 +779,24 @@ pub(crate) fn assess(config: &crate::FaunaConfig, tac: &Tactics, pk: &Pack, me: 
         in_group,
         hounds,
     }
+}
+
+/// Whether kicker `k` is taken as recovering from a kick hound memory `mem` saw (or felt) within
+/// `kick_recovery_s`: no kick expected from it.
+fn recovering(tac: &Tactics, mem: &Hound, k: &Track, now: u64) -> bool {
+    mem.kick_seen(k.id).is_some_and(|at| now.saturating_sub(at) as f64 * DT <= tac.kick_recovery_s)
+}
+
+/// The kicks kicker `k` is expected to land: `kick_chance`, × `(1 + kick_facing_gain)` seen
+/// `facing` a hound, × `(1 + kick_guard_gain)` in guard stance.
+fn kicks_expected(tac: &Tactics, k: &Track, facing: bool) -> f64 {
+    tac.kick_chance * if facing { 1.0 + tac.kick_facing_gain } else { 1.0 } * if guarding(k) { 1.0 + tac.kick_guard_gain } else { 1.0 }
+}
+
+/// What `expected` kicks cost hound `me`: × `wound_cost`, × `(1 + own wound)`, × `(1 −
+/// hunger_relief × hunger)` (a starving hound risks more).
+fn kick_risk(tac: &Tactics, me: &Me, expected: f64) -> f64 {
+    expected * tac.wound_cost * (1.0 + me.wound) * (1.0 - tac.hunger_relief * me.hunger).clamp(0.0, 1.0)
 }
 
 /// The window a hound judges it has (the pack seam, §11.4 split): its own size and its
@@ -1100,7 +1117,8 @@ fn clears(fauna: &Fauna, tac: &Tactics, t: &Track, len: f64, mem: &Hound, now: u
 /// **The kickers it remembers** (VH-FEED-KICK, [`crate::Fauna::kickers_seen`]) for hound `i`,
 /// each sample before [`keep_clear`]: every kicker it senses now that it keeps clear of
 /// ([`clears`]) is remembered as sensed (one it senses that no longer qualifies is forgotten),
-/// and one not sensed for its subject's expiry (`subject_lost_s`) is forgotten. Walking away
+/// and one not sensed for its subject's expiry (`subject_lost_s`) is forgotten unless its kick
+/// is still remembered ([`remembers`]). Walking away
 /// from a kicker turns its back on it: a still kicker behind it is neither seen nor heard,
 /// and with only what it sensed this sample the hound stopped, turned back to its carcass
 /// and ate under the hoof (s7: kicked three times, never moving). Off with the switch.
@@ -1121,7 +1139,7 @@ pub(crate) fn note_kickers(fauna: &mut Fauna, i: usize, tac: &Tactics) {
         .map(|p| p.tracks().iter().filter(|t| t.known && t.class == class::PREY && now.saturating_sub(t.tick) <= fresh).copied().collect())
         .unwrap_or_default();
     let mut kept: Vec<Track> = fauna.kickers_seen.get(&a.id).cloned().unwrap_or_default();
-    kept.retain(|k| age_s(k, now) <= lost && !sensed.iter().any(|t| t.id == k.id));
+    kept.retain(|k| remembers(tac, &mem, k, now, lost) && !sensed.iter().any(|t| t.id == k.id));
     kept.extend(sensed.iter().filter(|t| clears(fauna, tac, t, len, &mem, now)).copied());
     if kept.is_empty() {
         fauna.kickers_seen.remove(&a.id);
@@ -1130,16 +1148,18 @@ pub(crate) fn note_kickers(fauna: &mut Fauna, i: usize, tac: &Tactics) {
     }
 }
 
-/// **Keep clear of a kicker** (VH-FEED-KICK, [`Tactics::keep_clear`]) for hound `i`, from its
-/// own record and its memory of the kickers it last sensed ([`note_kickers`]): those it
-/// keeps clear of ([`clears`]) standing nearer than `clear_lengths` of their own length,
-/// where it senses them now or last sensed them — except those of lineage `hunting`, the one
-/// its hunt is on. `Some`: walk straight away from them (each weighted by how far inside its
-/// distance the hound stands), feeding off, with the nearest as the subject.
-pub(crate) fn keep_clear(fauna: &Fauna, i: usize, tac: &Tactics, hunting: Option<u8>, ring: f64) -> Option<(Actions, Track)> {
-    if !tac.keep_clear {
-        return None;
-    }
+/// Whether a hound with memory `mem` still remembers where kicker `k` stood, unsensed since:
+/// within its subject's expiry `lost` of last sensing it, or (follow-up 2) while it remembers
+/// a kick from it (`kick_memory_s`). Kicked, walked clear and forgetting where the hoof stood
+/// after `subject_lost_s` while still remembering the kick, it walked back to its carcass by
+/// the family and was kicked again (s7, m203 save: h104, 13 s after its first kick).
+fn remembers(tac: &Tactics, mem: &Hound, k: &Track, now: u64, lost: f64) -> bool {
+    age_s(k, now) <= lost || mem.kick_seen(k.id).is_some_and(|at| now.saturating_sub(at) as f64 * DT <= tac.kick_memory_s)
+}
+
+/// The kickers hound `i` keeps clear of ([`clears`]) as it senses them now, then those it
+/// remembers ([`note_kickers`], [`remembers`]) and does not sense now.
+fn kickers_kept(fauna: &Fauna, i: usize, tac: &Tactics) -> Vec<Track> {
     let a = &fauna.animals[i];
     let now = fauna.tick;
     let len = Me::of(fauna, a).len;
@@ -1149,11 +1169,31 @@ pub(crate) fn keep_clear(fauna: &Fauna, i: usize, tac: &Tactics, hunting: Option
     let sensed = sensed.iter().filter(|t| now.saturating_sub(t.tick) <= fresh);
     let lost = a.founder.map_or(0.0, |f| fauna.config.founder(f).intent.subject_lost_s);
     let remembered = fauna.kickers_seen.get(&a.id).map_or(&[][..], |v| v.as_slice());
-    let remembered = remembered.iter().filter(|k| age_s(k, now) <= lost && !fauna.percept(a.id).is_some_and(|p| p.tracks().iter().any(|t| t.id == k.id && now.saturating_sub(t.tick) <= fresh)));
+    let remembered = remembered.iter().filter(|k| remembers(tac, &mem, k, now, lost) && !fauna.percept(a.id).is_some_and(|p| p.tracks().iter().any(|t| t.id == k.id && now.saturating_sub(t.tick) <= fresh)));
+    sensed.chain(remembered).filter(|t| clears(fauna, tac, t, len, &mem, now)).copied().collect()
+}
+
+/// **Keep clear of a kicker** (VH-FEED-KICK, [`Tactics::keep_clear`]) for hound `i`, from its
+/// own record and its memory of the kickers it last sensed ([`note_kickers`]): those it
+/// keeps clear of ([`clears`]) standing nearer than `clear_lengths` of their own length,
+/// where it senses them now or last sensed them — except those of lineage `hunting`, the one
+/// its hunt is on. `Some`: walk straight away from them (each weighted by how far inside its
+/// distance the hound stands), feeding off, with the nearest as the subject.
+pub(crate) fn keep_clear(fauna: &Fauna, i: usize, tac: &Tactics, hunting: Option<u8>, ring: f64) -> Option<(Actions, Track)> {
+    keep_clear_but(fauna, i, tac, hunting, ring, &[])
+}
+
+/// [`keep_clear`] but for the kickers `dared`: those over a carcass the hound judges worth
+/// their kicks ([`weigh_carcass`]).
+fn keep_clear_but(fauna: &Fauna, i: usize, tac: &Tactics, hunting: Option<u8>, ring: f64, dared: &[u64]) -> Option<(Actions, Track)> {
+    if !tac.keep_clear {
+        return None;
+    }
+    let a = &fauna.animals[i];
     let (mut sx, mut sz) = (0.0, 0.0);
     let mut nearest: Option<(f64, Track)> = None;
-    for t in sensed.chain(remembered) {
-        if Some(t.lineage) == hunting || !clears(fauna, tac, t, len, &mem, now) {
+    for t in kickers_kept(fauna, i, tac) {
+        if Some(t.lineage) == hunting || dared.contains(&t.id) {
             continue;
         }
         let keep = tac.clear_lengths * t.size_m;
@@ -1167,7 +1207,7 @@ pub(crate) fn keep_clear(fauna: &Fauna, i: usize, tac: &Tactics, hunting: Option
             sz -= dz / d * w;
         }
         if nearest.is_none_or(|(nd, n)| d < nd || (d == nd && t.id < n.id)) {
-            nearest = Some((d, *t));
+            nearest = Some((d, t));
         }
     }
     let (_, k) = nearest?;
@@ -1178,6 +1218,76 @@ pub(crate) fn keep_clear(fauna: &Fauna, i: usize, tac: &Tactics, hunting: Option
         a.pose.heading_rad + PI
     };
     Some((head(a, away, 1.0, 0.0), k))
+}
+
+/// **A carcass under a kicker, weighed** (VH-FEED-KICK follow-up 2): what hound `i` makes of
+/// carcass `s` (carrion `carrion` there) with kickers it keeps clear of ([`kickers_kept`])
+/// standing within `clear_lengths` of their lengths of it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Weighed {
+    /// The kickers over it, and the one nearest the hound (its subject while it waits).
+    pub over: Vec<u64>,
+    pub kicker: Track,
+    /// Its value: the meals it can use of it, less the walk to it, less the kicks' cost.
+    pub value: f64,
+    /// Worth the kicks: it goes (and is not kept clear of those kickers).
+    pub dare: bool,
+}
+
+/// **Weigh a carcass under a kicker the way the hunt weighs a kick** (VH-FEED-KICK follow-up 2,
+/// with [`Tactics::keep_clear`]). `None`: no kicker it keeps clear of stands within
+/// `clear_lengths` of its lengths of carcass `s`. Else its value as [`assess`] values a prey
+/// that is already dead (`p_kill` 1): the meals it can use (`carrion` over its own body, at
+/// most its usable meals), less `chase_cost_per_m` of the walk to it, less the risk of the
+/// kickers over it ([`kicks_expected`]; one recovering from a kick counts too, unlike the hunt's
+/// strike, as a meal outlasts the recovery), costed by [`kick_risk`]: a starving hound risks
+/// more, a wounded one less. It dares on a
+/// value of at least `commit_value` when the hunt would not give up on it ([`give_up`]: its
+/// wound, winded, or the value under `give_up_value`). Otherwise it waits it out (wolves wait
+/// off a carcass a mother guards): kicked and walked clear, it was walked straight back to
+/// eat beside the family and kicked dead on the return (s7, m203 save: h104, h102).
+pub(crate) fn weigh_carcass(fauna: &Fauna, i: usize, tac: &Tactics, s: Site, carrion: f64, v: f64, ring: f64) -> Option<Weighed> {
+    if !tac.keep_clear {
+        return None;
+    }
+    let (cx, cz) = centre(s, v);
+    let over: Vec<Track> = kickers_kept(fauna, i, tac).into_iter().filter(|t| gap(t.x, t.z, cx, cz, ring).2 < tac.clear_lengths * t.size_m).collect();
+    if over.is_empty() {
+        return None;
+    }
+    let a = &fauna.animals[i];
+    let me = Me::of(fauna, a);
+    let lost = a.founder.map_or(0.0, |f| fauna.config.founder(f).intent.subject_lost_s);
+    let mates = mates_of(fauna, a.id, tac, lost);
+    let facing_pack = |k: &Track| faces(k, me.x, me.z, tac.facing_deg, ring) || mates.iter().any(|m| faces(k, m.x, m.z, tac.facing_deg, ring));
+    // Every kicker over it counts, one recovering from a kick too: a meal outlasts a kick's
+    // recovery (the hunt's exception is for a strike's moment).
+    let expected: f64 = over.iter().map(|k| kicks_expected(tac, k, facing_pack(k))).sum();
+    let risk = kick_risk(tac, &me, expected);
+    let meat = (carrion.max(0.0) / me.body.max(1e-9)).min(me.usable);
+    let value = meat - tac.chase_cost_per_m * gap(me.x, me.z, cx, cz, ring).2 - risk;
+    let dare = value >= tac.commit_value && give_up(tac, &me, value, 0.0).is_none();
+    let kicker = *over
+        .iter()
+        .map(|t| (gap(me.x, me.z, t.x, t.z, ring).2, t))
+        .min_by(|p, q| p.0.total_cmp(&q.0).then(p.1.id.cmp(&q.1.id)))
+        .map(|(_, t)| t)
+        .expect("not empty");
+    Some(Weighed { over: over.iter().map(|t| t.id).collect(), kicker, value, dare })
+}
+
+/// Hound `i` holds off carcass `s`: it weighs it ([`weigh_carcass`]) and does not dare. The
+/// kicker it waits on.
+fn holds_off(fauna: &Fauna, i: usize, tac: &Tactics, fv: &FloraView<'_>, s: Site, v: f64, ring: f64) -> Option<Track> {
+    let carrion = fv.ground_at(s).map_or(0.0, |g| g.carrion);
+    weigh_carcass(fauna, i, tac, s, carrion, v, ring).filter(|w| !w.dare).map(|w| w.kicker)
+}
+
+/// Waiting off carcass `s`: standing, turned to watch it (and the kickers over it).
+fn wait_off(a: &Animal, s: Site, v: f64, ring: f64) -> Actions {
+    let (x, z) = centre(s, v);
+    let (dx, dz, d) = gap(a.pose.x, a.pose.z, x, z, ring);
+    if d > 1e-9 { head(a, dx.atan2(dz), 0.0, 0.0) } else { Actions::REST }
 }
 
 /// **A hunt cue heard** (§11.2): the freshest one's point, if any.
@@ -1442,7 +1552,30 @@ pub(crate) fn tactic(
     // out of the rest or the walk home; on a hunt, from any kicker but the hunted lineage's.
     note_kickers(fauna, i, &tac);
     let hunting = memory(fauna, id).target.and_then(|t| fauna.percept(id).and_then(|p| p.track(t)).map(|k| k.lineage));
-    if let Some((act, k)) = keep_clear(fauna, i, &tac, hunting, ring) {
+    // Follow-up 2: a hungry hound off a hunt that judges the carcass it would feed at worth the
+    // kicks of the kickers over it ([`weigh_carcass`]) goes, and is not kept clear of them.
+    let dared: Vec<u64> = {
+        let mem = memory(fauna, id);
+        let resting_off = mem.gave_up_tick > 0 && now.saturating_sub(mem.gave_up_tick) as f64 * DT < tac.rest_s;
+        let feeds = a.eating && (a.emergency || !wants_rest(fauna, i, clock_on, daylight)) && !mem.committed && !resting_off;
+        let scan = fauna.config.hunt.carcass_scan_m.max(0.0);
+        let site = feeds.then(|| mem.carcass.filter(|&s| feast_left(s))).flatten().or_else(|| {
+            feeds.then(|| fauna.percept(id).and_then(|p| {
+                p.carcass_sites()
+                    .filter(|&s| feast_left(s))
+                    .map(|s| {
+                        let (x, z) = centre(s, v);
+                        (distance(&a, x, z, ring), s)
+                    })
+                    .filter(|&(d, _)| d <= scan)
+                    .min_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)))
+                    .map(|(_, s)| s)
+            }))
+            .flatten()
+        });
+        site.and_then(|s| weigh_carcass(fauna, i, &tac, s, fv.ground_at(s).map_or(0.0, |g| g.carrion), v, ring)).filter(|w| w.dare).map(|w| w.over).unwrap_or_default()
+    };
+    if let Some((act, k)) = keep_clear_but(fauna, i, &tac, hunting, ring, &dared) {
         label(fauna, id, "give_up", Subject::of_track(&k));
         return Some(clamp(fauna, act));
     }
@@ -1483,6 +1616,15 @@ pub(crate) fn tactic(
                 })
                 .collect();
             sites.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
+            // Follow-up 2: one under a kicker not worth its kicks is left out; with only
+            // those, it waits off the nearest.
+            let held_off: Vec<(Site, Track)> = sites.iter().filter_map(|&(_, s)| holds_off(fauna, i, &tac, fv, s, v, ring).map(|k| (s, k))).collect();
+            if !sites.is_empty() && held_off.len() == sites.len() {
+                let (s, k) = held_off[0];
+                label(fauna, id, "give_up", Subject::of_track(&k));
+                return Some(clamp(fauna, wait_off(&a, s, v, ring)));
+            }
+            sites.retain(|(_, s)| !held_off.iter().any(|(h, _)| h == s));
             if let Some(&(_, s)) = sites.first() {
                 label(fauna, id, "feed", Subject::None);
                 if at_feast(s) {
@@ -1593,6 +1735,11 @@ pub(crate) fn tactic(
             fauna.hounds.insert(id, mem);
         }
         if let Some(s) = known {
+            // Follow-up 2: a carcass under a kicker not worth its kicks: wait it out off it.
+            if let Some(k) = holds_off(fauna, i, &tac, fv, s, v, ring) {
+                label(fauna, id, "give_up", Subject::of_track(&k));
+                return Some(clamp(fauna, wait_off(&a, s, v, ring)));
+            }
             if at_feast(s) {
                 let call = call_kind(fauna, i, REGROUP_HOWL);
                 teach(fauna, id, "feed", "feed", Subject::None, call);
@@ -1607,7 +1754,34 @@ pub(crate) fn tactic(
             }
         }
         if mem.target.is_none() {
-            if let Some(go) = crate::hunt::meal_step(fauna, i, view, fv) {
+            // Follow-up 2: the carcasses it senses under a kicker not worth its kicks are left
+            // out; with only those, it waits off the nearest.
+            let scan = fauna.config.hunt.carcass_scan_m.max(0.0);
+            let mut sensed: Vec<(f64, Site)> = fauna
+                .percept(id)
+                .map(|p| {
+                    p.carcass_sites()
+                        .filter(|&s| feast_left(s))
+                        .map(|s| {
+                            let (x, z) = centre(s, v);
+                            (distance(&a, x, z, ring), s)
+                        })
+                        .filter(|&(d, _)| d <= scan)
+                        .collect()
+                })
+                .unwrap_or_default();
+            sensed.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
+            let held_off: Vec<(Site, Track)> = sensed.iter().filter_map(|&(_, s)| holds_off(fauna, i, &tac, fv, s, v, ring).map(|k| (s, k))).collect();
+            let step = if held_off.is_empty() {
+                crate::hunt::meal_step(fauna, i, view, fv)
+            } else if let Some(&(_, s)) = sensed.iter().find(|(_, s)| !held_off.iter().any(|(h, _)| h == s)) {
+                crate::hunt::meal_step_to(fauna, i, view, fv, s)
+            } else {
+                let (s, k) = held_off[0];
+                label(fauna, id, "give_up", Subject::of_track(&k));
+                return Some(clamp(fauna, wait_off(&a, s, v, ring)));
+            };
+            if let Some(go) = step {
                 // The carcass it fed at becomes one it knows.
                 let site = crate::body::mouth_pool_site(fv, &crate::body::mouth_columns(view, &a.pose, &geometry), a.site.y, crate::Food::Carrion).map(|(s, _)| s);
                 if let Some(s) = site.filter(|&s| feast_left(s)) {
