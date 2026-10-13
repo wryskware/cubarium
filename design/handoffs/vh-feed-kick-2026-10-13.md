@@ -87,3 +87,24 @@ may risk it. No new numbers if the hunt's terms cover it; otherwise knob + regis
 Mechanism tests (fed hound waits; starving hound goes; the kicker leaves -> it eats). Re-run the
 s7 trace from m203 and from m183 (quick lane) and the s4 one from m183; hand back as before.
 Branch `vh-feed-kick` after `git merge main` (fast-forward).
+
+## Follow-up 3 (parent, 2026-10-13 ~16:20)
+
+Merged ac187d02 (08edddea, a7422eae). Re-checks: s7 m183 2 dead (102@204.498, 104@204.602),
+s7 m203 1 dead (102@204.923), s4 m183 1 dead (107@208.860, Resting under a guard while labelled
+`give_up`). Three things, each a bug fix only if the evidence says absurd:
+1. **Hold-off after a carcass give-up** (parent's call): a hound that gave up a carcass under a
+   kicker holds off it the way a hunt give-up shuns its prey (`rest_s`/`shun_s`, reuse; no new
+   number), unless `emergency`. Mechanism test.
+2. **s4 h107**: why does a give_up-labelled hound stay Resting under a guard? (turning in place
+   inside reach since forward is 0 past 60°, `pack.rs:719 head`?) If a hound inside a kicker's
+   judged reach (`kick_reach_fraction`) cannot step away because it must turn first, say what a
+   small fix is (e.g. a slow step away while it turns) and do it if contained in the hound's
+   steer; otherwise say so and stop.
+3. **Loftstrider guard aims at still or retreating hounds** (`defend.rs` `kick_target`): a hound
+   that is not pressing (still, or moving away from the calf/guard as the loftstrider senses it)
+   is not a threat, in line with VH-KICKED's "young-looking hounds are not threats". If the guard
+   kicks those, make it not (a serde switch like `defence.kick_any_intent`, registry row), with a
+   mechanism test. The kick's reach, damage and recovery stay as decided.
+Re-run s7 (m183, m203) and s4 (m183). The m183 s7 trace overran the 15-min quick cap twice: submit
+it non-quick (`est_h`, `timeout_h`). Branch `vh-feed-kick` after `git merge main` (fast-forward).
