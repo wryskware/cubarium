@@ -2186,7 +2186,33 @@ fn check_tree(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<
     let aim = crate::treecheck::aim_of(fauna, a.id);
     let cands = crate::treecheck::order(&near, aim, |host| crate::treecheck::recall(fauna, a.id, host, now, memory));
     let walk: Vec<(f64, u64, Site)> = cands.iter().map(|c| (c.0, c.2.0, c.2.1)).collect();
-    let (go, k) = walk_to_stand(fauna, i, view, fv, &walk, search, 1.0, crate::Steer::Check)?;
+    // **The aim holds** (ECO-INT): a host it set out for that is still a candidate (in range,
+    // a host, not remembered empty) and not given up by a pressed walk is the only one it
+    // walks to. Where its route graph offers no way there from here (a ledge whose walkable
+    // area does not join the host's, a route past the detour bound), it walks straight at it,
+    // as a body off its graph does: down off the ledge, a glide from a high one. A wall in
+    // the way presses, and the pressed walk gives the aim up (`teachers.press_replan_s`).
+    // It was: any host it could route to this sample took the aim's place, so a body going
+    // up and down ledges replaced its walk every second or two.
+    let shunned = fauna.walk_shunned(a.id, a.founder?);
+    let held = match cands.first() {
+        Some(c) if aim == Some(c.1) && !shunned.contains(&c.2.0) => Some(0),
+        _ => None,
+    };
+    let (go, k) = match held {
+        Some(k) => match walk_to_stand(fauna, i, view, fv, &walk[..1], search, 1.0, crate::Steer::Check) {
+            Some(got) => got,
+            None => {
+                let v = view.config.voxel_m;
+                let ring = f64::from(view.config.width) * v;
+                let site = walk[k].2;
+                let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v, ring);
+                fauna.walking_to(a.id, walk[k].1, crate::Steer::Check);
+                (walk_toward(&a, dx, dz, 1.0), k)
+            }
+        },
+        None => walk_to_stand(fauna, i, view, fv, &walk, search, 1.0, crate::Steer::Check)?,
+    };
     crate::treecheck::aim(fauna, a.id, cands[k].1);
     if let Some(face) = cands[k].2.2
         && let Some(into) = wall_approach(fauna, i, view, fv, face, walk[k].1, crate::Steer::Check)

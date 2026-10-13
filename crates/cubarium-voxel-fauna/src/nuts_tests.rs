@@ -501,6 +501,89 @@ fn a_tree_remembered_with_food_is_checked_before_an_unchecked_one_at_equal_dista
     assert_eq!(first(false), Some(west), "remembered fed to the west, it goes west");
 }
 
+/// The fixture plain, 14 m tall, with a soil terrace 1.25 m high (five voxels over the
+/// plain's surface) on columns `0..TERRACE` across the whole depth: a walkable area of its
+/// own, not joined to the plain on the route graph (too high a step), and high enough that a
+/// glider walking off its edge glides down.
+const TERRACE: i64 = 32;
+fn terraced() -> World {
+    let (width, depth) = (96u32, 24u32);
+    let mut w = World::empty(VoxelConfig {
+        width,
+        height: 56,
+        depth,
+        voxel_m: V,
+        seed: 29,
+        day: DayClock { start_hour: 12.0, ..DayClock::default() },
+        ..VoxelConfig::default()
+    });
+    let m = cubarium_voxel::Materials::DEFAULT;
+    let cap = m.pore_capacity(Material::Soil) * w.config().voxel_volume();
+    let fc = m.field_capacity(Material::Soil);
+    for z in 0..depth {
+        for x in 0..i64::from(width) {
+            let top = if x < TERRACE { 7 } else { 2 };
+            for y in 1..=top {
+                w.apply(WorldCommand::AddWater { x, y, z, volume_m3: fc * cap });
+                w.apply(WorldCommand::SetMaterial { x, y, z, material: Material::Soil });
+            }
+        }
+    }
+    w
+}
+
+/// **A seedporter that sets out for a host keeps that aim until it arrives** (ECO-INT, the
+/// wide-world thrash: check walks replaced every second or two as bodies went up and down
+/// ledges, the aimed tree dropping off the route graph from the ledge and another taking its
+/// place). On a terrace, aimed at a tree on the plain below (in range, but on no route from
+/// the terrace) with an unchecked tree on the terrace itself, it keeps the aim: it walks
+/// toward it, off the edge, down, to the tree, climbs it and eats. No walk is replaced.
+#[test]
+fn a_check_walk_keeps_its_aim_until_it_arrives_though_its_route_is_lost_on_a_ledge() {
+    let mut w = terraced();
+    let mut flora = Flora::new(nut_flora());
+    let up = vaulttree(&mut flora, &w, 2);
+    let below = vaulttree(&mut flora, &w, 48);
+    grow(&mut flora, &mut w, 200);
+    // The terrace tree is eaten out (not known so: an unchecked host); the aimed one hangs nuts.
+    assert!(flora.take_stand_fruit(up, 1e9).is_some(), "fixture: the crop is taken");
+    grow(&mut flora, &mut w, 2);
+    assert_eq!(fruit(&flora, up), 0.0, "fixture: the terrace tree is empty");
+    assert!(fruit(&flora, below) > 0.0, "fixture: the aimed tree hangs nuts");
+    assert!(up.y > below.y, "fixture: one tree on the terrace, one on the plain");
+    let mut f = Fauna::new(config());
+    f.set_births_enabled(false);
+    let id = on_ground(&mut f, &w, 2.0, EAST, HUNGRY);
+    let a = animal(&f, id);
+    assert_eq!(a.site.y, up.y, "fixture: the body stands on the terrace");
+    let g = f.config.founder(SP).glider.expect("a glider");
+    assert!(centre(below).0 - a.pose.x < g.check_search_m, "fixture: the aim is in the check's range");
+    let below_id = crate::larva::LarvaHost::Stand(stand_id(&flora, below));
+    {
+        let m = f.tree_checks.entry(id).or_default();
+        m.aim = Some(below_id);
+        m.aim_since = 0;
+    }
+    let mut first_stand = None;
+    for _ in 0..8000 {
+        step(&mut f, &w, &mut flora);
+        if first_stand.is_none()
+            && let (MobilityMode::Climb | MobilityMode::Perched, Some(PerchAnchor::Stand { site, .. })) =
+                (animal(&f, id).mobility.mode, animal(&f, id).mobility.perch.map(|p| p.anchor))
+        {
+            first_stand = Some(site);
+        }
+        if nuts_eaten(&f) > 0.0 {
+            break;
+        }
+    }
+    let t = f.check_tally();
+    assert_eq!(t.switches, 0, "no check walk was replaced on the way: {t:?}");
+    assert_eq!(first_stand, Some(below), "the first tree it climbs is the one it set out for");
+    assert!(nuts_eaten(&f) > 0.0, "it eats there: {:?}", animal(&f, id).mobility);
+    assert!(t.checks >= 1 && t.found >= 1, "its arrival is a check that found food: {t:?}");
+}
+
 // ------------------------------------------------------------------ precedence
 
 /// **A sated seedporter does not check.**
