@@ -4481,6 +4481,12 @@ pub struct Fauna {
     /// not saved: after a load a young goes by what it senses until it senses her again.
     #[serde(skip)]
     pub(crate) mother_seen: FxHashMap<u64, Track>,
+    /// VH-FEED-KICK: per Veilhound, the kickers it keeps clear of as it last sensed them
+    /// ([`pack::tactics::keep_clear`]): walking away puts a kicker behind it, out of sight, and
+    /// it keeps clear of where it last sensed it for its subject's expiry. Session state, not
+    /// saved: after a load it goes by what it senses.
+    #[serde(skip)]
+    pub(crate) kickers_seen: FxHashMap<u64, Vec<Track>>,
     /// EDGE: per body, the flight (its `Vigil::flee_tick`) in which it was cornered: the rest
     /// of that flight goes by its route graph. Session state: not saved.
     #[serde(skip)]
@@ -5087,6 +5093,7 @@ impl Fauna {
             host_switch: HostSwitchTally::default(),
             walk_shun: FxHashMap::default(),
             mother_seen: FxHashMap::default(),
+            kickers_seen: FxHashMap::default(),
             route_flee: FxHashMap::default(),
             forage: FxHashMap::default(),
             rove: FxHashMap::default(),

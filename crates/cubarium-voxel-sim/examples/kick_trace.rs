@@ -113,8 +113,21 @@ fn main() -> Result<(), String> {
             });
             let m = fauna.hound(h.id).copied().unwrap_or_default();
             let nl = ls.iter().map(|l| (l.id, gap(h.pose.x, h.pose.z, l.pose.x, l.pose.z))).min_by(|p, q| p.1.total_cmp(&q.1));
+            // VH-FEED-KICK follow-up: what keep_clear reads, the loftstrider tracks in its
+            // percept (id, age in ticks, senses, stance, length, distance) and its kick memory.
+            let tracks: Vec<String> = fauna
+                .percept(h.id)
+                .map(|p| {
+                    p.tracks()
+                        .iter()
+                        .filter(|t| t.known && Founder::ALL.get(usize::from(t.lineage)) == Some(&Founder::Loftstrider))
+                        .map(|t| format!("{}:age{}:m{}:st{}:L{:.1}:d{:.1}", t.id, view.tick.saturating_sub(t.tick), t.modes, t.stance, t.size_m, gap(h.pose.x, h.pose.z, t.x, t.z)))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let kicks: Vec<String> = m.kicks.iter().flatten().map(|(k, at)| format!("{k}@-{}", view.tick.saturating_sub(*at))).collect();
             format!(
-                "hound {} body {:.2} pup {pup} breeder {} gest {} intent {} eating {} emerg {} state {:?} wound {:.2} reserve {:.2} den_d {:.1} tgt {:?} com {} at ({:.1},{:.1}) hd {:.0} near_ls {:?} held {:?} steer {:?} carcass {}",
+                "hound {} body {:.2} pup {pup} breeder {} gest {} intent {} eating {} emerg {} state {:?} wound {:.2} reserve {:.2} den_d {:.1} tgt {:?} com {} at ({:.1},{:.1}) hd {:.0} near_ls {:?} held {:?} steer {:?} carcass {} lstracks [{}] kickmem [{}]",
                 h.id,
                 h.body,
                 h.pack.and_then(|m| fauna.pack(m.pack)).is_some_and(|p| p.breeder == Some(h.id)),
@@ -135,6 +148,8 @@ fn main() -> Result<(), String> {
                 h.founder_state.held,
                 fauna.steer_of(h.id),
                 carcass_near(h),
+                tracks.join(" "),
+                kicks.join(" "),
             )
         };
         // Kicks resolving: a kicker whose windup ended this tick.
