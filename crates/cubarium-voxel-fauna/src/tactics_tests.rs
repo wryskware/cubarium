@@ -1147,3 +1147,180 @@ fn a_body_that_turns_to_face_the_hound_reads_facing_from_its_next_sighting() {
     // The neighbour's assessment counts the same one facing body.
     assert_eq!(assess_of(&f, i, b).expect("seen").assess.facing, 1);
 }
+
+// ------------------------------------------------------------------ VH-HOLD: the breeder's den hold
+
+/// A pack of `n` on the arena, the first hound its breeder carrying a litter, standing at the
+/// den's centre, hungry with its reserve at `1 − hunger` of its cap; the others placed by the
+/// case. Returns the world, plants, fauna, the hounds (breeder first) and the den's centre.
+fn whelping(n: usize, hunger: f64) -> (World, Flora, Fauna, Vec<u64>, (f64, f64)) {
+    let w = arena(13);
+    let flora = Flora::new(FloraConfig::default());
+    let mut f = Fauna::new(config());
+    let hs = pack(&mut f, &w, n);
+    let own = animal(&f, hs[0]).pack.expect("a pack member").pack;
+    let den = f.pack(own).expect("the pack's record").den;
+    f.pack_mut(own).expect("the pack's record").breeder = Some(hs[0]);
+    let (dx, dz) = centre(den, VOXEL_M);
+    place(&mut f, hs[0], dx, dz, EAST);
+    let a = animal(&f, hs[0]);
+    let cap = crate::body::effective_config(&f.config, &a).reserve_of(a.body);
+    let b = animal_mut(&mut f, hs[0]);
+    b.reproduction.escrow = Some(crate::Escrow { young: 1, ..crate::Escrow::default() });
+    b.reserve = (1.0 - hunger) * cap;
+    b.eating = true;
+    b.emergency = false;
+    (w, flora, f, hs, (dx, dz))
+}
+
+/// One sample of hound `me`'s tactic over its own heuristic walking on (`held`), and the intent
+/// it was labelled with.
+fn decide_walking(f: &mut Fauna, w: &World, flora: &Flora, me: u64) -> (Actions, &'static str) {
+    let held = Actions { forward: 1.0, turn: 0.0, feed: 0.0 };
+    let i = index(f, me);
+    let act = tactic(f, i, &w.view(), &flora.view(), false, 1.0, held, None).expect("a pack body samples");
+    (act, f.hound_teach.get(&me).map_or("", |t| t.held))
+}
+
+/// Packmate `mate` as hound `me` sees it now, walking (`moving`) or standing.
+fn kin_seen(f: &Fauna, me: u64, mate: u64, moving: bool) -> Track {
+    Track { moving, ..seen(f, me, mate, class::KIN) }
+}
+
+/// **A held breeder leaves with packmates it sees leave** (VH-HOLD; §2.1: a visible departure,
+/// not the pack's bookkeeping). The breeder is hungry but short of `whelp_leave_hunger`, so the
+/// den hold would keep it. Its packmate standing at the den, or walking back toward it, or
+/// walking away but still inside the den radius: it stays (resting, labelled `den`). The
+/// packmate seen walking away from the den outside the den radius: it leaves and walks after it.
+/// Not seen (only heard), or the switch off: it stays.
+#[test]
+fn a_held_breeder_joins_a_packmate_it_sees_leave() {
+    let probe = Fauna::new(config());
+    let t = tac(&probe);
+    let pk = probe.config.founder(CH).pack.expect("the pack table");
+    assert!(t.whelp_leave_hunger > 0.0 && t.whelp_join_hunt, "the premise: a hold to break, the switch on");
+    let hunger = 0.5 * t.whelp_leave_hunger;
+    let (w, flora, mut f, hs, (dx, dz)) = whelping(2, hunger);
+    let (b, mate) = (hs[0], hs[1]);
+    // Out past the den radius and the follow radius both.
+    let out = dx + pk.den_radius_m + pk.follow_radius_m + 1.0;
+    let inside = dx + 0.5 * pk.den_radius_m;
+    let held = |f: &mut Fauna, mate_x: f64, heading: f64, moving: bool, modes: u8| {
+        place(f, mate, mate_x, dz, heading);
+        let k = Track { modes, ..kin_seen(f, b, mate, moving) };
+        set_percept(f, b, &[k]);
+        decide_walking(f, &w, &flora, b)
+    };
+    // Its packmate at the den, standing.
+    let (act, label) = held(&mut f, inside, EAST, false, SIGHT);
+    assert_eq!((act, label), (Actions::REST, "den"), "held while its packmate stands at the den");
+    // Walking away, but still inside the den radius.
+    let (act, label) = held(&mut f, inside, EAST, true, SIGHT);
+    assert_eq!((act, label), (Actions::REST, "den"), "held while its packmate is still at the den");
+    // Outside the den radius, walking back toward it.
+    let (act, label) = held(&mut f, out, WEST, true, SIGHT);
+    assert_eq!((act, label), (Actions::REST, "den"), "held while its packmate comes home");
+    // Outside the den radius, standing.
+    let (act, label) = held(&mut f, out, EAST, false, SIGHT);
+    assert_eq!((act, label), (Actions::REST, "den"), "held while its packmate stands off the den");
+    // Outside the den radius, walking away, but only heard.
+    let (act, label) = held(&mut f, out, EAST, true, crate::perception::HEARING);
+    assert_eq!((act, label), (Actions::REST, "den"), "a departure it does not see does not move it");
+    // Outside the den radius, walking away, seen: it leaves and walks after it.
+    let (act, label) = held(&mut f, out, EAST, true, SIGHT);
+    assert_ne!(label, "den", "released: {act:?}");
+    assert!(act.forward > 0.0, "it walks: {act:?}");
+    let (ax, az) = (animal(&f, b).pose.x, animal(&f, b).pose.z);
+    let want = bearing((ax, az), (out, dz));
+    let turn_toward = angle_between(animal(&f, b).pose.heading_rad + act.turn, want) <= angle_between(animal(&f, b).pose.heading_rad, want) + 1e-9;
+    assert!(turn_toward, "it turns toward its packmate: {act:?}");
+    // The switch off: hunger alone breaks the hold.
+    let mut off = f.clone();
+    off.config.founders[CH.index()].pack.as_mut().expect("the pack table").tactics.whelp_join_hunt = false;
+    let (act, label) = held(&mut off, out, EAST, true, SIGHT);
+    assert_eq!((act, label), (Actions::REST, "den"), "the switch off: held");
+}
+
+/// **A held breeder leaves with a hunt cue it hears** (VH-HOLD; §2.1: a hunt call), hungry
+/// short of `whelp_leave_hunger`, nobody in sight; a cue older than the calls' keep does not.
+#[test]
+fn a_held_breeder_leaves_with_a_hunt_cue_it_hears() {
+    let probe = Fauna::new(config());
+    let t = tac(&probe);
+    let keep = probe.config.founder(CH).calls.keep_s;
+    let pk = probe.config.founder(CH).pack.expect("the pack table");
+    assert!(t.whelp_leave_hunger > 0.0 && t.whelp_join_hunt && t.heed_cue, "the premise");
+    let (w, flora, mut f, hs, (dx, dz)) = whelping(1, 0.5 * t.whelp_leave_hunger);
+    let b = hs[0];
+    let at = (dx + pk.den_radius_m + t.follow_m + 2.0, dz);
+    set_percept(&mut f, b, &[]);
+    let (act, label) = decide_walking(&mut f, &w, &flora, b);
+    assert_eq!((act, label), (Actions::REST, "den"), "held with nothing sensed");
+    let now = f.tick + cubarium_voxel::ticks_at_least_one(2.0 * keep);
+    f.tick = now;
+    let cue = |tick: u64| crate::calls::CallRecord { kind: HUNT_CUE as u8, x: at.0, z: at.1, tick, ..Default::default() };
+    f.heard.insert(b, crate::calls::Heard { records: vec![cue(now - cubarium_voxel::ticks_at_least_one(2.0 * keep))] });
+    set_percept(&mut f, b, &[]);
+    let (act, label) = decide_walking(&mut f, &w, &flora, b);
+    assert_eq!((act, label), (Actions::REST, "den"), "a stale cue does not move it");
+    f.heard.insert(b, crate::calls::Heard { records: vec![cue(now)] });
+    set_percept(&mut f, b, &[]);
+    let (act, label) = decide_walking(&mut f, &w, &flora, b);
+    assert_ne!(label, "den", "released: {act:?}");
+    assert!(act.forward > 0.0, "it walks toward the cue: {act:?}");
+}
+
+/// **A hungry breeder is not held forever** (VH-HOLD): its packmates hunted out of its sight
+/// and came back sated — they lie at the den, still, and it hears no cue — so nothing it senses
+/// is a hunt to join. Hungry short of `whelp_leave_hunger` it holds; at it, its own hunger
+/// releases it, and it hunts on its own (its own heuristic's walk, labelled `search`), whatever
+/// the join switch.
+#[test]
+fn a_hungry_breeder_whose_packmates_came_back_sated_is_released_by_its_own_hunger() {
+    let probe = Fauna::new(config());
+    let t = tac(&probe);
+    assert!(t.whelp_leave_hunger > 0.0 && t.whelp_leave_hunger < 1.0, "the premise: a hunger to reach");
+    for join in [true, false] {
+        for (hunger, released) in [(0.5 * t.whelp_leave_hunger, false), (t.whelp_leave_hunger, true), (0.5 * (1.0 + t.whelp_leave_hunger), true)] {
+            let (w, flora, mut f, hs, (dx, dz)) = whelping(3, hunger);
+            f.config.founders[CH.index()].pack.as_mut().expect("the pack table").tactics.whelp_join_hunt = join;
+            let b = hs[0];
+            for (k, &m) in hs[1..].iter().enumerate() {
+                place(&mut f, m, dx + 0.5, dz + 0.5 * k as f64, WEST);
+                let a = animal_mut(&mut f, m);
+                a.eating = false;
+                a.emergency = false;
+            }
+            let tracks: Vec<Track> = hs[1..].iter().map(|&m| kin_seen(&f, b, m, false)).collect();
+            set_percept(&mut f, b, &tracks);
+            let (act, label) = decide_walking(&mut f, &w, &flora, b);
+            if released {
+                assert_eq!(label, "search", "hunger {hunger}, join {join}: released ({act:?})");
+                assert!(act.forward > 0.0, "hunger {hunger}, join {join}: it walks on ({act:?})");
+            } else {
+                assert_eq!((act, label), (Actions::REST, "den"), "hunger {hunger}, join {join}: held");
+            }
+        }
+    }
+}
+
+/// **The den hold still holds a sated breeder** (PIT-2 kept): carrying a litter but not
+/// wanting food, it rests at the den even with every release a hungry one would take — a
+/// packmate seen leaving, a fresh hunt cue, and its reserve as low as a hungry one's release.
+#[test]
+fn the_den_hold_still_holds_a_sated_breeder() {
+    let probe = Fauna::new(config());
+    let t = tac(&probe);
+    let pk = probe.config.founder(CH).pack.expect("the pack table");
+    let (w, flora, mut f, hs, (dx, dz)) = whelping(2, t.whelp_leave_hunger);
+    let (b, mate) = (hs[0], hs[1]);
+    animal_mut(&mut f, b).eating = false;
+    let out = dx + pk.den_radius_m + pk.follow_radius_m + 1.0;
+    place(&mut f, mate, out, dz, EAST);
+    let k = kin_seen(&f, b, mate, true);
+    set_percept(&mut f, b, &[k]);
+    let cue = crate::calls::CallRecord { kind: HUNT_CUE as u8, x: out, z: dz, tick: f.tick, ..Default::default() };
+    f.heard.insert(b, crate::calls::Heard { records: vec![cue] });
+    let (act, label) = decide_walking(&mut f, &w, &flora, b);
+    assert_eq!((act, label), (Actions::REST, "rest"), "a sated breeder rests at its den");
+}
