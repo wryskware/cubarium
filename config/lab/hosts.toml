@@ -10,6 +10,14 @@ progress_s = 60       # kind progress cadence and liveness checks
 probe_s = 300         # remote host probes (reachability, load, L3 groups, linger)
 remote_poll_s = 30    # remote task polls
 quick_timeout_min = 15 # quick tasks (quick = true, `lab quick`) are killed past this; a larger timeout_h is capped
+# Transfers run in worker threads, never on the daemon loop (design/lab-daemon.md, Execution).
+upload_floor_mb_s = 0.5     # an upload may take upload_base_s + its bytes at this floor rate. Note:
+                            # Wrysk's upload is under ~2.2 MB/s (2026-10-12); a fixed 600 s cut every
+                            # 0.8-1.9 GB checkpoint resume and spent its retry. Lower it for a worse line.
+upload_base_s = 60          # fixed allowance per upload (ssh setup, small files)
+transport_backoff_s = 30    # a host whose staging failed waits this long, doubling per failure in a row
+transport_backoff_max_s = 900 # the longest such wait
+fetch_workers = 3           # output mirrors (rsync home) in flight at once, all hosts together
 # kind_paths = ["~/lab-kinds"]   # extra kind plugin dirs (also $LAB_KIND_PATH)
 
 [build]
@@ -93,6 +101,14 @@ launcher = "setsid"
 ready_file = "/var/tmp/ready"
 status_s = 60
 launch_timeout_s = 900
+# Optional S3 (private bucket; lifecycle expires ckpt/ after 21 days, bin/ after 60, multipart after 1).
+# Instances reach it only through the instance profile's role; labd never holds AWS credentials. At
+# host-up labd checks on the instance that its aws cli can list the bucket (`ec2-s3` event); without
+# the profile or access every S3 path stays off for that instance.
+s3_bucket = "cubarium-lab-360d2fe4c5"
+s3_region = "us-east-1"
+# instance_profile = "cubarium-lab-ec2"  # uncomment once the profile exists: `up` fails on a missing one
+s3_timeout_s = 900          # one in-region S3 copy (a ~145 MB checkpoint takes seconds)
 
 # Spot prices are planning assumptions: the 2026-09-28 sample's $0.75/h
 # scaled proportionally as 0.75 * cpus / 64, not live quotes.

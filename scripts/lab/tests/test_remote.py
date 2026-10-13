@@ -161,11 +161,14 @@ class RemoteTests(test_lab.LabCase):
         remote.external_load = True
         local.external_threads = local.usable - 2
         remote.external_threads = remote.usable - 3
-        with patch.object(daemon, "local_load"):
+        # Both host loads are hand-built here; real host probes must not replace the
+        # remote capacity with this machine's live load while placement is tested.
+        with patch.object(daemon, "local_load"), patch.object(daemon, "probe_hosts"):
             jobs = [self.submit(dict(kind="command", argv=["true"], **extra)) for extra in
                     ({}, {"hosts": ["fake"]}, {"hosts": ["far"]}, {"local_only": True})]
             for job in jobs:
-                self.assertEqual(self.finished(daemon, job)[0], "done")
+                state, reason = self.finished(daemon, job)
+                self.assertEqual(state, "done", reason)
         self.assertEqual([daemon.job(job).tasks["run"].host for job in jobs], ["far", "fake", "far", "fake"])
         task = Task(name="local", argv=["true"], local_only=True, hosts=["far"])
         self.assertIsNone(fits(task, remote, Usage()))

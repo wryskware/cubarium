@@ -2,9 +2,10 @@
 # Graviton offload hosts for training (mode A: the whole trainer runs on the AWS host).
 # Runbook and cost matrix: docs/graviton-training.md. Stateless: hosts are found by tag.
 #
-#   up [-n COUNT] [-t TYPES] [--ondemand] [--hours H] [--dry-run]
+#   up [-n COUNT] [-t TYPES] [--ondemand] [--hours H] [--iam-instance-profile NAME] [--dry-run]
 #        launch COUNT hosts. TYPES is a comma list tried in order (default
-#        c7g.16xlarge,c6g.16xlarge): the first type with capacity wins.
+#        c7g.16xlarge,c6g.16xlarge): the first type with capacity wins. A named instance
+#        profile (labd: [ec2] instance_profile) lets the host's aws cli reach labd's S3 bucket.
 #   ship                 build natively on the first host from the working tree (tracked files,
 #                        uncommitted edits included), save the binary to
 #                        target/aarch64-graviton2/, push it to every host
@@ -19,7 +20,7 @@
 #
 # Cost guards: spot by default; each host powers itself off after --hours (default 12) and
 # instance-initiated shutdown TERMINATES it; EBS is delete-on-terminate. ssh is admitted from
-# this machine's current public IP only; no IAM role on the hosts.
+# this machine's current public IP only; no IAM role on the hosts unless --iam-instance-profile names one.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -86,7 +87,7 @@ ensure_sg() {
 }
 
 cmd_up() {
-	local count=1 types=c7g.16xlarge,c6g.16xlarge market=spot hours=12 dry=()
+	local count=1 types=c7g.16xlarge,c6g.16xlarge market=spot hours=12 dry=() profile=
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		-n) count=$2; shift 2 ;;
@@ -94,6 +95,7 @@ cmd_up() {
 		--ondemand) market=ondemand; shift ;;
 		--dry-run) dry=(--dry-run); shift ;;
 		--hours) hours=$2; shift 2 ;;
+		--iam-instance-profile) profile=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 		esac
 	done
@@ -117,6 +119,7 @@ EOF
 			--block-device-mappings 'DeviceName=/dev/xvda,Ebs={VolumeSize=40,VolumeType=gp3,DeleteOnTermination=true}'
 			--user-data "file://$ud"
 			--tag-specifications "ResourceType=instance,Tags=[{Key=project,Value=$TAG},{Key=Name,Value=$TAG}]")
+		[ -n "$profile" ] && args+=(--iam-instance-profile "Name=$profile")
 		[ "$market" = spot ] && args+=(--instance-market-options 'MarketType=spot,SpotOptions={SpotInstanceType=one-time,InstanceInterruptionBehavior=terminate}')
 		echo "trying $count x $type ($market)..." >&2
 		if out=$(aws_ ec2 run-instances "${dry[@]}" "${args[@]}" --query 'Instances[].InstanceId' --output text 2>&1); then
@@ -236,5 +239,5 @@ fetch) shift; cmd_fetch "$@" ;;
 status) cmd_status ;;
 ssh) shift; cmd_ssh "$@" ;;
 down) cmd_down ;;
-*) sed -n '2,26p' "$0"; exit 2 ;;
+*) sed -n '2,23p' "$0"; exit 2 ;;
 esac

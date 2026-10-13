@@ -6,17 +6,14 @@ from pathlib import Path
 import subprocess
 import sys
 
+try:
+    from .transfer import newest_checkpoint
+except ImportError:  # Uploaded alongside transfer.py and invoked as a standalone script.
+    from transfer import newest_checkpoint
+
 
 def latest_checkpoint(run):
-    candidates = []
-    for path in (Path(run) / "ckpt").glob("m*/minute"):
-        try:
-            minute = float(path.read_text())
-        except (OSError, ValueError):
-            continue
-        if math.isfinite(minute) and minute >= 0:
-            candidates.append((minute, path.parent))
-    return max(candidates, key=lambda item: item[0], default=(None, None))
+    return newest_checkpoint(Path(run) / "ckpt") or (None, None)
 
 
 def prepare_census(path, minute):

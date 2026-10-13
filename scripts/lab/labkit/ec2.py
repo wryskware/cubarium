@@ -16,6 +16,11 @@ Sustained low fill moves checkpointed tails to free local capacity using the sam
 x86_64 binary, then the normal drain downs the host. Approval estimates include a greedy
 fill profile, mean busy share and idle dollars; these are information, not approval gates.
 `up` also gets --hours ceil(max_hours), so the host's own shutdown timer is a second guard.
+
+S3 (optional: `s3_bucket`, `s3_region`, `instance_profile` in [ec2]): `up` attaches the
+instance profile when one is named; at host-up labd checks on the instance whether its aws cli
+can list the bucket and records that per instance (`ec2-s3` event). Only a capable instance
+copies checkpoints to `ckpt/` at each remote probe, pulls them on resume, and uses `bin/`.
 """
 
 import json
@@ -34,6 +39,7 @@ from .census_resume import latest_checkpoint
 from . import budget as budget_mod
 from . import providers
 from .kinds.build import Build
+from . import transfer
 
 AUTH = re.compile(r"ExpiredToken|expired|Unable to locate credentials|InvalidClientTokenId|AuthFailure|"
                   r"sso|SignatureDoesNotMatch|could not be found in the credential", re.I)
@@ -205,6 +211,31 @@ class Ec2Pool:
                               price_usd_h=info.get("spot_usd_h", 0.0)))
         return hosts
 
+    def s3(self, host_name):
+        """(bucket, region) when host_name is this instance and it can list the bucket; else None:
+        without a bucket configured or without access, every S3 path is off."""
+        bucket = self.cfg.get("s3_bucket")
+        if host_name != "ec2" or not bucket or not self.s.get("s3"):
+            return None
+        return bucket, self.cfg.get("s3_region", "us-east-1")
+
+    def probe_s3(self):
+        """At host-up: can this instance's aws cli (its instance role) list the bucket?"""
+        bucket = self.cfg.get("s3_bucket")
+        if not bucket:
+            self.s.pop("s3", None)
+            return
+        region = self.cfg.get("s3_region", "us-east-1")
+        try:
+            done = self.d.transports["ec2"].run(transfer.s3_probe_script(bucket, region), timeout=60)
+            capable, detail = done.returncode == 0 and "S3-OK" in done.stdout, (done.stdout + done.stderr).strip()
+        except (OSError, subprocess.SubprocessError) as error:
+            capable, detail = False, str(error)
+        self.s["s3"] = capable
+        self.save()
+        self.d.events.emit("ec2-s3", instance=self.s.get("instance"), bucket=bucket, capable=capable,
+                           detail=None if capable else detail[-300:])
+
     def make_host(self, ip):
         name, info = self.type_info(self.s.get("type"))
         host = Host(name="ec2", kind="ec2", arch=info.get("arch", "aarch64"), cpus=info.get("cpus", 64),
@@ -248,7 +279,8 @@ class Ec2Pool:
         return result
 
     def on_ec2(self):
-        return self.d.store.q("SELECT * FROM tasks WHERE state='running' AND host='ec2'")
+        return self.d.store.q("SELECT * FROM tasks WHERE host='ec2' AND (state='running' OR "
+                              "(state='pending' AND reason LIKE 'start uncertain:%'))")
 
     def pending_builds(self, tasks):
         """Include required builds before the provider jobs have been planned, once per key."""
@@ -351,7 +383,8 @@ class Ec2Pool:
     def launch(self):
         name, info = self.type_info(self.s["type"])
         types = ",".join(filter(None, [name, info.get("fallback")]))
-        done = self.script("up", "-n", "1", "-t", types, "--hours", str(math.ceil(self.s["max_hours"])))
+        profile = ["--iam-instance-profile", self.cfg["instance_profile"]] if self.cfg.get("instance_profile") else []
+        done = self.script("up", "-n", "1", "-t", types, "--hours", str(math.ceil(self.s["max_hours"])), *profile)
         text = done.stdout + done.stderr
         if done.returncode:
             if AUTH.search(text):
@@ -371,6 +404,7 @@ class Ec2Pool:
             self.s["type"] = launched_type[1]
         self.s["price_usd_h"] = float(self.type_info(self.s["type"])[1].get("spot_usd_h", 0))
         self.forget_host()
+        self.s.pop("s3", None)  # a new instance proves its own S3 access at host-up
         self.s.update(state="launching", instance=match[0] if match else None, launched=self.d.clock(), ip=None)
         self.d.events.emit("ec2-launching", approval=self.s.get("approval"), instance=self.s["instance"],
                            instance_type=self.s["type"])
@@ -421,6 +455,7 @@ class Ec2Pool:
                                action="instance may still be up: renew the AWS login and run scripts/aws-graviton.sh down")
             self.save()
             return False
+        self.d.drop_stages(host="ec2", reason=f"ec2 down: {reason}")
         for row in self.on_ec2():
             self.d.task_lost(row, f"ec2 down: {reason}")
         self.forget_host()
@@ -462,7 +497,7 @@ class Ec2Pool:
             self.save()
         if now - self.s["tail_since"] < float(self.cfg.get("tail_hold_min", 10)) * 60:
             return
-        # Each check rsyncs every EC2 task's output in the daemon loop; not every 2 s tick.
+        # Progress reads the mirror the background fetches keep; the stop below fetches once more.
         if not self.d._due("ec2-tail-check", float(self.cfg.get("tail_check_s", 120))):
             return
         self.d.local_load()
@@ -477,7 +512,6 @@ class Ec2Pool:
             if not task.resume_argv or not task.est_h or task.est_h <= 0:
                 continue
             try:
-                self.d.fetch_task(row)
                 progress = tail_progress(task)
             except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
                 self.d.log(f"tail progress {row['job']}/{row['name']}: {error}")
@@ -563,12 +597,14 @@ class Ec2Pool:
             self.ended("instance gone while labd was down", hours, usd)
             self.d.events.emit("host-down", host="ec2", reason="instance gone while labd was down",
                                instance=self.s.get("instance"), hours=round(hours, 3), est_usd=round(usd, 2))
+            self.d.drop_stages(host="ec2", reason="ec2 instance gone")
             for row in self.on_ec2():
                 self.d.task_lost(row, "ec2 instance gone")
             self.s = dict(state="idle")
             self.save()
         elif self.host and self.s["state"] == "up":
-            self.probe_host()
+            if self.probe_host() and "s3" not in self.s:
+                self.probe_s3()
         for instance in rows:
             if instance != self.s.get("instance"):
                 self.d.events.emit("ec2-orphan", instance=instance, reason="tagged host labd did not launch")
@@ -617,6 +653,7 @@ class Ec2Pool:
                 self.s["state"] = "up"
                 self.save()
                 self.d.events.emit("host-up", host="ec2", instance=self.s.get("instance"), ip=row["ip"])
+                self.probe_s3()
             elif self.d.clock() - self.s.get("launched", 0) > float(self.cfg.get("launch_timeout_s", 900)):
                 self.down("instance never became ready")
         elif state == "up":
@@ -634,6 +671,7 @@ class Ec2Pool:
                     self.ended("spot loss", hours, usd)
                     self.d.events.emit("host-down", host="ec2", reason="spot loss", instance=self.s.get("instance"),
                                        hours=round(hours, 3), est_usd=round(usd, 2))
+                    self.d.drop_stages(host="ec2", reason="spot loss")
                     for row in self.on_ec2():
                         self.d.task_lost(row, "spot loss")
                     self.host = None

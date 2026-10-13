@@ -33,6 +33,14 @@ class LocalTransport:
     def put_dir(self, local, remote, timeout=600):
         self.get(local, remote, timeout)
 
+    def put_files(self, local, remote, files, timeout=600):
+        """Copy the listed files (relative to local) under remote, keeping their relative paths."""
+        if not files or str(local) == str(remote):
+            return
+        subprocess.run(["mkdir", "-p", str(remote)], check=True)
+        subprocess.run(["cp", "-a", "--reflink=auto", "--parents", "--", *files, str(remote)], cwd=str(local),
+                       check=True, timeout=timeout, capture_output=True)
+
 
 class SshTransport:
     """ssh HOST 'bash -s' with the script on stdin: works under a fish login shell."""
@@ -64,6 +72,16 @@ class SshTransport:
         subprocess.run(["rsync", "-a", "-e", self._rsh(), f"{local}/", f"{self.address}:{remote}/"],
                        check=True, timeout=timeout, capture_output=True)
 
+    def put_files(self, local, remote, files, timeout=600):
+        """rsync only the listed files (relative to local); a resume never sends old checkpoints."""
+        if not files:
+            return
+        done = self.run(f"mkdir -p {shlex.quote(str(remote))}")
+        if done.returncode:
+            raise RuntimeError(f"mkdir {remote}: {done.stderr.strip()[-300:]}")
+        subprocess.run(["rsync", "-a", "--files-from=-", "-e", self._rsh(), f"{local}/", f"{self.address}:{remote}/"],
+                       input="\n".join(files) + "\n", text=True, check=True, timeout=timeout, capture_output=True)
+
 
 def write_file(transport, path, text):
     if not transport.remote:
@@ -74,6 +92,14 @@ def write_file(transport, path, text):
     done = transport.run(f"mkdir -p \"$(dirname {q})\" && cat > {q}.tmp <<'LABD_EOF'\n{text}\nLABD_EOF\nmv {q}.tmp {q}\n")
     if done.returncode:
         raise RuntimeError(f"cannot write {path}: {done.stderr.strip()[-300:]}")
+
+
+class LaunchError(RuntimeError):
+    """A launcher's start script failed; returncode 255 is ssh itself (the host, not the task)."""
+
+    def __init__(self, message, returncode):
+        super().__init__(message)
+        self.returncode = returncode
 
 
 class Launcher:
@@ -104,7 +130,7 @@ class Launcher:
                     result[unit] = (json.loads(payload), False)
                 except ValueError:
                     result[unit] = (None, True)
-            else:
+            elif word != "UNKNOWN":
                 result[unit] = (None, word == "ALIVE")
         return result
 
@@ -122,7 +148,7 @@ class SystemdLauncher(Launcher):
                 self.python, str(taskwrap), str(launch_path)]
         done = self.transport.run(shlex.join(argv) + "\n", timeout=30)
         if done.returncode:
-            raise RuntimeError(f"systemd-run failed: {done.stderr.strip()[-400:]}")
+            raise LaunchError(f"systemd-run failed: {done.stderr.strip()[-400:]}", done.returncode)
 
     def alive_check(self, unit, lab_dir):
         return (f'state=$(systemctl --user is-active "{unit}.service" 2>/dev/null); '
@@ -145,15 +171,16 @@ class SetsidLauncher(Launcher):
                   f"</dev/null >>{q(str(lab_dir))}/wrap.log 2>&1\n")
         done = self.transport.run(script, timeout=30)
         if done.returncode:
-            raise RuntimeError(f"setsid launch failed: {done.stderr.strip()[-400:]}")
+            raise LaunchError(f"setsid launch failed: {done.stderr.strip()[-400:]}", done.returncode)
 
     def alive_check(self, unit, lab_dir):
         # The wrapper writes pid.json right after starting its child; before that a fresh
-        # launch is still alive, so count a missing pid file younger than 60 s as alive.
+        # launch may still be starting. An unknown answer keeps a normal task running and
+        # an uncertain start pending; neither adoption nor relaunch is justified yet.
         return (f'p=$(sed -n \'s/.*"wrapper": \\([0-9]*\\).*/\\1/p\' "{lab_dir}/pid.json" 2>/dev/null); '
                 f'if [ -n "$p" ] && grep -q taskwrap /proc/$p/cmdline 2>/dev/null; then echo "{unit} ALIVE"; '
                 f'elif [ -z "$p" ] && [ -n "$(find "{lab_dir}" -maxdepth 1 -name launch.json -newermt "-60 seconds" 2>/dev/null)" ]; '
-                f'then echo "{unit} ALIVE"; else echo "{unit} DEAD"; fi')
+                f'then echo "{unit} UNKNOWN"; else echo "{unit} DEAD"; fi')
 
     def stop(self, unit, lab_dir):
         q = shlex.quote(str(lab_dir))

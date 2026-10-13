@@ -1,24 +1,30 @@
 """labd: ingest specs, plan, resolve inputs, preflight, place, launch, reconcile, finish.
 
-The loop is single-threaded except for preflights and host probes (thread pool); all
-state lives in sqlite plus each job's output dir, so the daemon can stop and restart at
-any point. Tasks are separate systemd units and keep running while it is down; on start
-the first poll reconciles them from their rc.json files and unit states.
+The loop is single-threaded except for preflights, host probes and stop hooks (thread pool)
+and transfers: remote launch uploads (staging) and output mirrors run in transfer workers,
+which hand their results back through a queue the loop drains (labkit/transfer.py). Only the
+loop writes the store. All state lives in sqlite plus each job's output dir, so the daemon can
+stop and restart at any point; a stage in flight is in memory only, so its task is still
+`pending` after a restart and stages again. Tasks are separate systemd units and keep running
+while it is down; on start the first poll reconciles them from their rc.json files and unit states.
 """
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 import fcntl
 import glob
 import hashlib
 import json
 import os
 from pathlib import Path
+import queue
 import re
 import shlex
 import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 
@@ -30,18 +36,20 @@ from .store import TERMINAL, Events, Store, atomic_write, new_id
 from . import budget
 from .ec2 import Ec2Pool, estimate
 from . import providers
+from . import transfer
 from .stops import evaluate, run_hook, validate_rules
 
 ACTIVE = ("submitted", "inputs", "preflight", "running", "aborting")
 QUICK_LIMIT = "exceeded the quick limit"
 QUICK_SLACK_S = 5    # an end this close to the cap counts as the cap (systemd RuntimeMaxSec vs our tick)
+UNCERTAIN_START = "start uncertain:"
 
 
 def quick_limit_reason(task, elapsed_s):
     return (f"{QUICK_LIMIT}: ran {elapsed_s / 60:.1f} min against a {task.timeout_h * 60:g} min cap "
             f"([lab] quick_timeout_min or the task's timeout_h); this was not a quick task, "
             f"resubmit it without quick")
-TOOLS = ("taskwrap.py", "snaprun.py", "census_resume.py")
+TOOLS = ("taskwrap.py", "snaprun.py", "census_resume.py", "transfer.py")
 
 
 def unit_name(job, task):
@@ -50,6 +58,23 @@ def unit_name(job, task):
 
 def safe_key(key):
     return re.sub(r"[^A-Za-z0-9_.-]", "_", key)[:180]
+
+
+@dataclass
+class Stage:
+    """A remote launch whose uploads are running in a transfer worker. Its task stays
+    `pending` in the store and is charged to the host in memory until finish_stage."""
+    key: tuple
+    token: int
+    host: str
+    group: int
+    task: Task
+    spec: dict
+    start: dict
+    after: list
+    ops: list
+    nbytes: int
+    transport: object
 
 
 class Daemon:
@@ -64,6 +89,21 @@ class Daemon:
         self.clock = clock
         self.log = log or (lambda message: print(message, file=sys.__stdout__, flush=True))
         self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="labd")
+        # Transfers: one stage per remote host at a time (the home line is the bottleneck) and
+        # at most [lab] fetch_workers output mirrors; results come back through self.done.
+        self.fetch_limit = max(1, int(self.inv.get("fetch_workers", 3)))
+        self.xfer = ThreadPoolExecutor(max_workers=self.fetch_limit + len(self.inv.hosts) + 2,
+                                       thread_name_prefix="labd-xfer")
+        self.done = queue.SimpleQueue()
+        self.staging = {}
+        self.stage_seq = 0
+        self.fetches = {}
+        self.fetched = {}
+        self.fetch_waiting = {}
+        self.fetch_epoch = {}
+        self.fetch_seen = {}
+        self.fetch_seq = 0
+        self.backoff = {}
         self.preflights = {}
         self.stop_hooks = {}
         self.probes = {}
@@ -309,8 +349,9 @@ class Daemon:
         self.store.update("jobs", dict(id=job_id), state="aborting", reason=reason,
                           summary=json.dumps(dict(final=final)))
         self.preflights.pop(job_id, None)
+        self.drop_stages(job=job_id)
         for row in self.store.q("SELECT * FROM tasks WHERE job=? AND state IN ('pending', 'running')", job_id):
-            if row["state"] == "running":
+            if row["state"] == "running" or (row["reason"] or "").startswith(UNCERTAIN_START):
                 self.stop_task(row, "cancelled", reason)
             else:
                 self.store.update("tasks", dict(job=job_id, name=row["name"]), state="skipped", reason=reason)
@@ -476,7 +517,8 @@ class Daemon:
 
     # ------------------------------------------------------------------ tasks
     def poll_tasks(self, force=False):
-        rows = self.store.q("SELECT * FROM tasks WHERE state='running'")
+        rows = self.store.q("SELECT * FROM tasks WHERE state='running' OR "
+                            "(state='pending' AND reason LIKE 'start uncertain:%')")
         by_host = {}
         for row in rows:
             by_host.setdefault(row["host"], []).append(row)
@@ -494,15 +536,18 @@ class Daemon:
                 continue
             for row in items:
                 rc, alive = states.get(row["unit"], (None, True))
+                if (row["reason"] or "").startswith(UNCERTAIN_START):
+                    if row["unit"] not in states:
+                        continue  # A missing probe answer is not evidence that the start failed.
+                    if not self.reconcile_start(row, rc, alive):
+                        continue
+                    row = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", row["job"], row["name"])
                 if rc is not None:
                     self.task_ended(row, rc)
                 elif not alive:
                     self.task_lost(row, "unit/process gone without rc.json")
                 elif host.kind != "local":
-                    try:
-                        self.fetch_task(row)
-                    except Exception as error:  # noqa: BLE001
-                        self.log(f"progress fetch {row['job']}/{row['name']}: {error}")
+                    self.fetch_async(row)  # off the loop; S3 checkpoint copies ride along
 
     def task_ended(self, row, rc):
         job = self.job(row["job"])
@@ -511,10 +556,12 @@ class Daemon:
         host = self.host(row["host"])
         reason = None
         if host and host.kind != "local":
-            try:
-                self.fetch_task(row, final=True)
-            except Exception as error:  # noqa: BLE001
-                self.log(f"fetch {job.id}/{view.name}: {error}; will retry")
+            fetched = self.fetch_result(row, final=True)
+            if fetched is None:
+                self.fetch_async(row, final=True)  # a later poll finishes the task
+                return
+            if not fetched[0]:
+                self.log(f"fetch {job.id}/{view.name}: {fetched[1]}; will retry")
                 return  # Keep the rc and remote outputs until a complete fetch succeeds.
         code = rc.get("rc", 1)
         state = "done" if code == 0 else ("cancelled" if rc.get("cancelled") else "failed")
@@ -546,6 +593,7 @@ class Daemon:
         moving, fetched = replacement is not None, True
         task = Task.from_dict(json.loads(row["spec"]))
         host = self.host(row["host"])
+        self.fence_fetch(row)
         if moving:
             try:
                 self.launchers[row["host"]].stop(row["unit"], self.lab_dir(row))
@@ -701,6 +749,17 @@ class Daemon:
         spec = view.task.liveness
         host = self.host(row["host"])
         out = view.out
+        live = json.loads(row["live"] or "{}")
+        now = self.clock()
+        if host and host.kind != "local" and spec.get("minute_file"):
+            seen = self.fetch_seen.get((job.id, view.name))
+            if seen is None or seen[0][:3] != (row["started"], False, row["host"]) \
+                    or seen[0][3] == live.get("fetch"):
+                # Time spent waiting for a mirror cannot be evidence of a stalled simulator.
+                live["since"] = now
+                self.store.update("tasks", dict(job=job.id, name=view.name), live=json.dumps(live))
+                return
+            live["fetch"] = seen[0][3]
         if host and host.kind != "local" and not spec.get("minute_file"):
             script = (f"find {shlex.quote(self.remote_out(host, job, view))} -type f -printf '%s %T@\\n' 2>/dev/null"
                       " | awk '{n++; s+=$1; if ($2>m) m=$2} END {print n+0, s+0, m+0}'\n")
@@ -714,12 +773,11 @@ class Daemon:
                 signature = None
         else:
             signature = Context.output_signature([str(out / p) for p in spec.get("paths", ["**/*"])])
-        live = json.loads(row["live"] or "{}")
-        now = self.clock()
         if signature is not None and signature != live.get("sig"):
-            live = dict(sig=signature, since=now)
+            live.update(sig=signature, since=now)
             self.store.update("tasks", dict(job=job.id, name=view.name), live=json.dumps(live))
             return
+        self.store.update("tasks", dict(job=job.id, name=view.name), live=json.dumps(live))
         since = live.get("since") or row["started"] or now
         if now - since >= float(spec.get("stall_min", 30)) * 60:
             reason = f"stalled: no output growth for {spec.get('stall_min', 30)} min"
@@ -731,24 +789,164 @@ class Daemon:
         relative = view.out.relative_to(job.out)
         return f"{host.root}/jobs/{job.id}/{relative.as_posix()}"
 
+    def mirror_args(self, row, final):
+        """What a mirror of this task's outputs needs, read on the daemon thread."""
+        host = self.host(row["host"])
+        job = self.job(row["job"])
+        view = job.tasks[row["name"]]
+        return dict(host=host.name, transport=self.transports[host.name], remote=self.remote_out(host, job, view),
+                    local=view.out, batch=view.task.meta.get("remote_paths", {}) if view.task.meta.get("batch") else None,
+                    lab=(self.lab_dir(row), job.out / ".lab" / view.name) if final else None)
+
+    @staticmethod
+    def mirror(args):
+        """rsync a task's outputs home (only changed files); no store access, so a worker may run it."""
+        args["transport"].get(args["remote"], args["local"])
+        manifest_path = Path(args["local"]) / "batch/batch.json"
+        if args["batch"] is not None and manifest_path.is_file():
+            manifest = json.loads(manifest_path.read_text())
+            manifest["lab_paths"] = args["batch"]
+            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+        if args["lab"]:
+            args["transport"].get(*args["lab"])
+
     def fetch_task(self, row, final=False):
-        """Mirror outputs before hooks read them; rsync transfers only changed files."""
+        """Mirror outputs now (blocking): only a loss, a tail move and EC2 down use this."""
+        self.fence_fetch(row)
         host = self.host(row["host"])
         if not host or host.kind == "local":
             return
-        job = self.job(row["job"])
-        view = job.tasks[row["name"]]
-        remote = self.remote_out(host, job, view)
-        transport = self.transports[host.name]
-        transport.get(remote, view.out)
-        if view.task.meta.get("batch") and (view.out / "batch/batch.json").is_file():
-            manifest_path = view.out / "batch/batch.json"
-            manifest = json.loads(manifest_path.read_text())
-            manifest["lab_paths"] = view.task.meta.get("remote_paths", {})
-            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
-        if final:
-            lab = self.lab_dir(row)
-            transport.get(lab, job.out / ".lab" / view.name)
+        self.mirror(self.mirror_args(row, final))
+
+    def fence_fetch(self, row):
+        """Invalidate earlier mirrors before another attempt takes ownership of the outputs."""
+        key = (row["job"], row["name"])
+        self.fetch_epoch[key] = self.fetch_epoch.get(key, 0) + 1
+        self.fetch_waiting.pop(key, None)
+        self.fetched.pop(key, None)
+        self.fetch_seen.pop(key, None)
+
+    def fetch_async(self, row, final=False):
+        """Mirror a remote task's outputs in a transfer worker; at most one per task and
+        [lab] fetch_workers in all. On an S3-capable instance a progress mirror also copies
+        each run's newest mirrored checkpoint to S3 (in-region). False when not started."""
+        key = (row["job"], row["name"])
+        if key in self.fetches and (not final or self.fetches[key][1]):
+            return False
+        previous = self.fetch_waiting.get(key)
+        self.fetch_waiting[key] = (dict(row), final or bool(previous and previous[1]))
+        self.start_fetches()
+        return key in self.fetches
+
+    def start_fetches(self):
+        """FIFO service across polls/hosts, with final mirrors ahead of progress mirrors."""
+        for key, (row, final) in sorted(list(self.fetch_waiting.items()), key=lambda item: not item[1][1]):
+            if len(self.fetches) >= self.fetch_limit:
+                break
+            if key in self.fetches:
+                continue
+            del self.fetch_waiting[key]
+            current = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", *key)
+            if current is None or (current["started"], current["host"]) != (row["started"], row["host"]) \
+                    or (not final and current["state"] != "running"):
+                continue
+            self.start_fetch(row, final)
+
+    def start_fetch(self, row, final):
+        key = (row["job"], row["name"])
+        args = self.mirror_args(row, final)
+        s3 = None if final else self.ec2.s3(args["host"])
+        if s3:
+            args.update(s3=s3, job=row["job"], task=row["name"], timeout=float(self.inv.ec2.get("s3_timeout_s", 900)),
+                        known=self.store.kv_get(f"s3ckpt:{row['job']}:{row['name']}", {}))
+        self.fetch_seq += 1
+        token = (row["started"], final, row["host"], self.fetch_seq, self.fetch_epoch.get(key, 0))
+        self.fetches[key] = token
+        self.xfer.submit(self._fetch_worker, key, token, args)
+
+    def _fetch_worker(self, key, token, args):
+        pushed, error = {}, None
+        stage = None
+        publish = []
+        try:
+            # Separate inodes even when cp falls back from reflinks: no worker can mutate
+            # the live outputs. Seeding preserves rsync's incremental network transfers.
+            stage = Path(tempfile.mkdtemp(prefix=".lab-fetch-", dir=Path(args["local"]).parent))
+            staged = dict(args)
+            staged["local"] = stage / "out"
+            staged["local"].mkdir()
+            if Path(args["local"]).is_dir():
+                subprocess.run(["cp", "-a", "--reflink=auto", f"{args['local']}/.", str(staged["local"])],
+                               check=True, capture_output=True, timeout=270)
+            publish.append((staged["local"], Path(args["local"])))
+            if args["lab"]:
+                staged["lab"] = (args["lab"][0], stage / "lab")
+                publish.append((stage / "lab", Path(args["lab"][1])))
+            self.mirror(staged)
+            if staged.get("s3"):
+                pushed = self.push_checkpoints(staged)
+        except Exception as failure:  # noqa: BLE001
+            error = f"{type(failure).__name__}: {failure}"
+        self.done.put(("fetch", key, token, args["host"], error, pushed, stage, publish))
+
+    @staticmethod
+    def push_checkpoints(args):
+        """Copy each run's newest checkpoint that home just mirrored (so S3 is never ahead of
+        home's census) to S3 from the instance, unless S3 already has it."""
+        _, checkpoints, _ = transfer.resume_plan(args["local"])
+        items = [(rel, item[1]) for rel, item in sorted(checkpoints.items()) if args["known"].get(rel) != item[1]]
+        if not items:
+            return {}
+        bucket, region = args["s3"]
+        done = args["transport"].run(transfer.s3_push_script(bucket, region, args["job"], args["task"],
+                                                             args["remote"], items), timeout=args["timeout"])
+        return transfer.parse_pushed(done.stdout)
+
+    def finish_fetch(self, key, token, host, error, pushed, stage, publish):
+        valid = self.fetches.get(key) == token and self.fetch_epoch.get(key, 0) == token[4]
+        if self.fetches.get(key) == token:
+            del self.fetches[key]
+        row = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", *key)
+        valid = valid and row is not None and (row["started"], row["host"]) == (token[0], token[2])
+        try:
+            if not valid:
+                return
+            if error is None:
+                # The daemon owns publication as well as sqlite. Rename files only after
+                # accepting this attempt's token; a fenced worker leaves no live writes.
+                for source, target in publish:
+                    target.mkdir(parents=True, exist_ok=True)
+                    for path in sorted(source.rglob("*")):
+                        destination = target / path.relative_to(source)
+                        if path.is_dir():
+                            destination.mkdir(parents=True, exist_ok=True)
+                        else:
+                            os.replace(path, destination)
+                self.fetch_seen[key] = (token, self.clock())
+        except Exception as failure:  # noqa: BLE001
+            error = f"publish: {type(failure).__name__}: {failure}"
+        finally:
+            if stage is not None:
+                shutil.rmtree(stage)
+        if token[1]:  # a final fetch: the next tick polls that host again and finishes the task there
+            self.fetched[key] = (token, error)
+            self.timers.pop(f"poll:{host}", None)
+        if error:
+            self.log(f"fetch {key[0]}/{key[1]}: {error}")
+        if pushed:
+            mark = f"s3ckpt:{key[0]}:{key[1]}"
+            self.store.kv_set(mark, dict(self.store.kv_get(mark, {}), **pushed))
+            self.events.emit("s3-checkpoint", job=key[0], task=key[1], host=host, checkpoints=pushed)
+
+    def fetch_result(self, row, final):
+        """(ok, error) of the last finished mirror of this kind for this attempt, consumed; None if
+        none finished yet."""
+        key = (row["job"], row["name"])
+        result = self.fetched.get(key)
+        if result is None or result[0][:3] != (row["started"], final, row["host"]):
+            return None
+        del self.fetched[key]
+        return (result[1] is None, result[1])
 
     def cleanup_task(self, row):
         host = self.host(row["host"])
@@ -764,9 +962,13 @@ class Daemon:
 
     def usage(self):
         usage = {h.name: Usage() for h in self.hosts()}
-        for row in self.store.q("SELECT host, grp, spec FROM tasks WHERE state='running'"):
+        for row in self.store.q("SELECT host, grp, spec FROM tasks WHERE state='running' OR "
+                                "(state='pending' AND reason LIKE 'start uncertain:%')"):
             if row["host"] in usage:
                 usage[row["host"]].add(Task.from_dict(json.loads(row["spec"])), row["grp"])
+        for stage in self.staging.values():  # a staging task holds its place
+            if stage.host in usage:
+                usage[stage.host].add(stage.task, stage.group)
         return usage
 
     def schedule(self):
@@ -794,6 +996,8 @@ class Daemon:
         reservations = {}
         now = self.clock()
         for row, task in rows:
+            if (row["job"], row["name"]) in self.staging or (row["reason"] or "").startswith(UNCERTAIN_START):
+                continue
             priority = row["jp"] + task.priority
             key = dict(job=row["job"], name=row["name"])
             self.store.update("tasks", key, reason=None)
@@ -808,9 +1012,15 @@ class Daemon:
                 local_first and h.kind != "local",
                 -(h.usable - usage[h.name].threads - (h.external_threads if h.external_load else 0))))
             for host in candidates:
+                if host.kind != "local" and self.backing_off(host.name):
+                    continue  # repeated transport failures: treated as down until the backoff ends
                 group = fits(task, host, usage[host.name], live_mem if host.kind == "local" else None)
                 if group is None:
                     continue
+                if host.kind != "local" and self.stage_busy(host.name):
+                    # One upload at a time per remote host; the task keeps its choice of host.
+                    self.store.update("tasks", key, reason=f"waiting for the upload slot on {host.name}")
+                    break
                 # A quick task never waits behind a reservation (its own pool is above usable).
                 if host.name in reservations and not task.quick:
                     if any(priority >= reserved_priority or deadline is None or task.est_h is None
@@ -854,7 +1064,7 @@ class Daemon:
                 return end
         return None
 
-    def ensure_tools(self, host, transport):
+    def ensure_tools(self, host, transport, after=None):
         if host.name in self.tools:
             return
         for name in TOOLS:
@@ -862,138 +1072,354 @@ class Daemon:
         transport.put(self.ctx.run_study, f"{host.root}/tools/run-study.py")
         for name in ("batch.py", "study_contract.py"):
             transport.put(self.ctx.repo / "scripts/studies" / name, f"{host.root}/tools/studies/{name}")
-        self.tools.add(host.name)
+        if after is None:
+            self.tools.add(host.name)
+        else:
+            after.append(("tools", host.name))
 
+    # ------------------------------------------------------------------ launch and staging
     def launch(self, row, task, host, group):
+        """Local hosts launch now. A remote launch is prepared here against a Recorder and
+        staged: a transfer worker uploads, then `finish_stage` (daemon thread) starts it.
+        True means the task holds its place (running or staging)."""
+        if (row["reason"] or "").startswith(UNCERTAIN_START):
+            return False  # Reconciliation must precede even writes to launch.json or outputs.
         job = self.job(row["job"])
         view = job.tasks[row["name"]]
-        transport = self.transports[host.name]
-        launcher = self.launchers[host.name]
-        try:
-            local_out = view.out
-            local_out.mkdir(parents=True, exist_ok=True)
-            if host.kind == "local":
-                out, jobdir, tools = str(local_out), str(job.out), str(self.ctx.lab_dir)
-                run_study = str(self.ctx.run_study)
-                inputs = {k: str(self.ctx.artifact(k)) for k in task.inputs}
-            else:
-                if not host.root:
-                    raise RuntimeError(f"host {host.name} has no root")
-                self.ensure_tools(host, transport)
-                out, jobdir = self.remote_out(host, job, view), f"{host.root}/jobs/{job.id}"
-                tools = run_study = f"{host.root}/tools"
-                run_study += "/run-study.py"
-                inputs = {}
-                for key in task.inputs:
-                    source = self.ctx.artifact(key)
-                    remote = f"{host.root}/artifacts/{safe_key(key)}/{source.name}"
-                    mark = f"uploaded:{host.name}:{key}"
-                    if self.store.kv_get(mark) != host.root:
-                        transport.put(source, remote)
-                        self.store.kv_set(mark, host.root)
-                    inputs[key] = remote
-                if any(local_out.iterdir()):
-                    transport.put_dir(local_out, out)  # retries and an explicit resume both carry checkpoints
-            lab = f"{jobdir}/.lab/{task.name}"
-
-            replacements = {}
-            if host.kind != "local":
-                replacements[str(job.out)] = jobdir
-                replacements[str(self.ctx.repo / "scripts/studies/batch.py")] = f"{tools}/studies/batch.py"
-                replacements.update({str(self.ctx.artifact(k)): v for k, v in inputs.items()})
-
-            def subst(value):
-                value = str(value)
-                for source in sorted(replacements, key=len, reverse=True):
-                    value = value.replace(source, replacements[source])
-                value = str(value).replace("{out}", out).replace("{job}", jobdir).replace("{lab}", tools)
-                value = value.replace("{python}", launcher.python)
-                return re.sub(r"\{input:([^}]+)\}", lambda m: inputs[m[1]], value)
-
-            if host.kind != "local":
-                for source, destination in task.files.items():
-                    remote = os.path.normpath(subst(destination))
-                    if not Path(remote).is_relative_to(Path(jobdir)):
-                        raise ValueError(f"staged input escapes remote job root: {destination}")
-                    if Path(source).is_dir():
-                        transport.put_dir(source, remote)
-                    else:
-                        transport.put(source, remote)
-                    replacements[str(source)] = remote
-            # Saved batch commands/identities contain absolute paths from the previous host.
-            manifest_path = local_out / "batch/batch.json"
-            current_paths = dict(replacements)
-            for previous_key, current_key in task.meta.get("moved_binaries", {}).items():
-                previous_binary = self.ctx.artifact(previous_key)
-                if previous_binary:
-                    current_paths[str(previous_binary)] = inputs[current_key]
-            # Staged census arguments carry vitals/config paths from the previous host.
-            for source, previous in task.meta.get("remote_paths", {}).items():
-                replacements[previous] = current_paths.get(source, source)
-            replacements.update(current_paths)
-            if task.resume_argv:
-                argfiles = [local_out / "run/args", *local_out.glob("batch/*/s*/run/args")]
-                for argfile in argfiles:
-                    if argfile.is_file():
-                        relocated = subst(argfile.read_text())
-                        write_file(transport, f"{out}/{argfile.relative_to(local_out)}", relocated)
-            if task.meta.get("batch") and manifest_path.is_file():
-                manifest = json.loads(manifest_path.read_text())
-                for source, previous in manifest.get("lab_paths", task.meta.get("remote_paths", {})).items():
-                    replacements[previous] = current_paths.get(source, source)
-
-                def relocate(value):
-                    if isinstance(value, str):
-                        return subst(value)
-                    if isinstance(value, list):
-                        return [relocate(v) for v in value]
-                    if isinstance(value, dict):
-                        return {subst(k): relocate(v) for k, v in value.items()}
-                    return value
-
-                manifest = relocate(manifest)
-                if task.meta.get("moved_binaries"):
-                    # Only home_task can authorize this: the exact source commit is unchanged.
-                    binary = self.ctx.artifact(next(k for k in task.inputs if k.startswith("binary:")))
-                    manifest["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
-                manifest["lab_paths"] = current_paths
-                write_file(transport, f"{out}/batch/batch.json", json.dumps(manifest, indent=2))
-            if task.resume_argv:
-                task.meta["remote_paths"] = current_paths
-
-            env = {}
-            if host.kind == "local":
-                env = {k: os.environ[k] for k in ("PATH", "HOME", "USER", "LANG", "CARGO_HOME", "RUSTUP_HOME")
-                       if k in os.environ}
-            env.update({k: subst(v) for k, v in task.env.items()})
-            argv = task.remote_argv if host.kind != "local" and task.remote_argv else task.argv
-            spec = dict(argv=[subst(a) for a in argv], cwd=subst(task.cwd) if task.cwd else out,
-                        env=env, stdout=subst(task.stdout or "{out}/stdout.log"),
-                        stderr=subst(task.stderr or "{out}/stderr.log"), lab_dir=lab,
-                        group=group if group >= 0 else None,
-                        cpus=host.groups[group] if host.kind == "local" and group >= 0 else None,
-                        idle=host.idle, rlimit_as_gb=task.rlimit_as_gb, run_study=run_study,
-                        hidden_script=str(self.paths.repo / "scripts/hidden.sh") if task.hidden else None)
-            if task.hidden and host.kind != "local":
-                raise RuntimeError("hidden tasks run only on the local host")
-            write_file(transport, f"{lab}/launch.json", json.dumps(spec, indent=1))
-            transport.run(f"mkdir -p {shlex.quote(spec['cwd'])} {shlex.quote(out)}\n")
-            unit = unit_name(job.id, task.name)
-            self.store.update("tasks", dict(job=job.id, name=task.name), state="running", host=host.name,
-                              grp=group, unit=unit, launcher=launcher.name, started=self.clock(),
-                              attempts=row["attempts"] + 1, live=json.dumps(dict(since=self.clock())),
-                              spec=json.dumps(task.to_dict()))
-            launcher.start(unit, f"{lab}/launch.json", lab, spec["cwd"], mem_gb=host.max_mem_gb,
-                           timeout_h=task.timeout_h, taskwrap=f"{tools}/taskwrap.py")
-        except Exception as error:  # noqa: BLE001
-            self.store.update("tasks", dict(job=job.id, name=task.name), state="failed", host=host.name,
-                              reason=f"launch: {error}", finished=self.clock())
-            self.events.emit("task-failed", job=job.id, task=task.name, host=host.name, reason=f"launch: {error}")
-            self.after_task(job.id, task.name)
+        remote = host.kind != "local"
+        key = (job.id, task.name)
+        if remote and key in self.staging:
             return False
-        self.events.emit("started", job=job.id, task=task.name, host=host.name,
+        transport = transfer.Recorder() if remote else self.transports[host.name]
+        try:
+            spec, start, after = self.prepare(job, view, task, host, group, transport)
+        except Exception as error:  # noqa: BLE001
+            self.launch_failed(job.id, task.name, host.name, f"launch: {error}")
+            return False
+        if not remote:
+            return self.start_unit(row["attempts"], job.id, task, host, group, spec, start)
+        self.stage_seq += 1
+        stage = Stage(key=key, token=self.stage_seq, host=host.name, group=group, task=task, spec=spec,
+                      start=start, after=after, ops=transport.ops, nbytes=transport.bytes(),
+                      transport=self.transports[host.name])
+        self.staging[key] = stage
+        megabytes = stage.nbytes / 1e6
+        self.store.update("tasks", dict(job=job.id, name=task.name),
+                          reason=f"staging on {host.name}: uploading {megabytes:.1f} MB")
+        self.events.emit("staging", job=job.id, task=task.name, host=host.name, mb=round(megabytes, 2),
+                         ops=len(stage.ops))
+        self.xfer.submit(self._stage_worker, stage)
+        return True
+
+    def _stage_worker(self, stage):
+        """Transfer thread: replay the recorded uploads; never touches the store."""
+        misses = []
+        try:
+            transfer.replay(stage.ops, stage.transport, self.inv.lab, misses)
+            error = None
+        except Exception as failure:  # noqa: BLE001 - every staging failure is a transport failure
+            error = str(failure) or type(failure).__name__
+        self.done.put(("stage", stage, error, misses))
+
+    def drain_transfers(self):
+        """Apply finished transfers on the daemon thread (the only store writer)."""
+        while True:
+            try:
+                item = self.done.get_nowait()
+            except queue.Empty:
+                self.start_fetches()
+                return
+            try:
+                if item[0] == "stage":
+                    self.finish_stage(*item[1:])
+                else:
+                    self.finish_fetch(*item[1:])
+            except Exception:  # noqa: BLE001 - one bad result never stops the loop
+                self.log(traceback.format_exc())
+
+    def finish_stage(self, stage, error, misses):
+        if self.staging.get(stage.key) is not stage:
+            return  # dropped: the job aborted or the host went down meanwhile
+        if misses:
+            mark = f"s3ckpt:{stage.key[0]}:{stage.key[1]}"
+            records = self.store.kv_get(mark, {})
+            for rel in misses:
+                records.pop(rel, None)
+            self.store.kv_set(mark, records)
+        del self.staging[stage.key]
+        job_id, name = stage.key
+        row = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", job_id, name)
+        if row is None or row["state"] != "pending":
+            return
+        if error:
+            delay = self.transport_failed(stage.host)
+            self.store.update("tasks", dict(job=job_id, name=name),
+                              reason=f"requeued: staging on {stage.host} failed; host retry in {delay:.0f} s")
+            self.events.emit("stage-failed", job=job_id, task=name, host=stage.host, reason=error,
+                             attempts=row["attempts"], retry_in_s=round(delay, 1))
+            return
+        self.backoff.pop(stage.host, None)
+        for item in stage.after:
+            if item[0] == "kv":
+                self.store.kv_set(item[1], item[2])
+            elif item[0] == "tools":
+                self.tools.add(item[1])
+        host = self.host(stage.host)
+        if host is None or not host.up:
+            self.store.update("tasks", dict(job=job_id, name=name), reason=f"staged; {stage.host} is down")
+            return
+        self.start_unit(row["attempts"], job_id, stage.task, host, stage.group, stage.spec, stage.start)
+
+    def transport_failed(self, name):
+        """Back off a host after a transport failure: base * 2^(n-1) up to the cap (seconds)."""
+        failures = self.backoff.get(name, (0, 0))[0] + 1
+        base = float(self.inv.get("transport_backoff_s", 30))
+        cap = float(self.inv.get("transport_backoff_max_s", 900))
+        delay = min(cap, base * 2 ** (failures - 1))
+        self.backoff[name] = (failures, self.clock() + delay)
+        return delay
+
+    def backing_off(self, name):
+        return self.backoff.get(name, (0, 0))[1] > self.clock()
+
+    def stage_busy(self, name):
+        return any(stage.host == name for stage in self.staging.values())
+
+    def drop_stages(self, host=None, job=None, reason="dropped"):
+        """Forget in-flight stages (their tasks stay pending); a late worker result is ignored."""
+        for key, stage in list(self.staging.items()):
+            if (host is not None and stage.host == host) or (job is not None and key[0] == job):
+                del self.staging[key]
+                if job is None:
+                    self.store.update("tasks", dict(job=key[0], name=key[1]), reason=f"requeued: {reason}")
+
+    def launch_failed(self, job_id, name, host, reason):
+        self.store.update("tasks", dict(job=job_id, name=name), state="failed", host=host,
+                          reason=reason, finished=self.clock())
+        self.events.emit("task-failed", job=job_id, task=name, host=host, reason=reason)
+        self.after_task(job_id, name)
+
+    def start_unit(self, attempts, job_id, task, host, group, spec, start):
+        """Mark running, then start the unit (a crash between the two is a lost task, never a
+        duplicate). An uncertain remote start must be reconciled before staging/relaunch."""
+        row = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", job_id, task.name)
+        if row is not None and (row["reason"] or "").startswith(UNCERTAIN_START):
+            try:
+                states = self.launchers[row["host"]].poll([(row["unit"], start["lab"])])
+                if row["unit"] in states:
+                    self.reconcile_start(row, *states[row["unit"]])
+            except Exception as error:  # noqa: BLE001
+                self.log(f"reconcile start {job_id}/{task.name}: {error}")
+            return False
+        self.fence_fetch(dict(job=job_id, name=task.name))
+        launcher = self.launchers[host.name]
+        unit = unit_name(job_id, task.name)
+        key = dict(job=job_id, name=task.name)
+        self.store.update("tasks", key, state="running", host=host.name, grp=group, unit=unit,
+                          launcher=launcher.name, started=self.clock(), attempts=attempts + 1, reason=None,
+                          live=json.dumps(dict(since=self.clock())), spec=json.dumps(task.to_dict()))
+        try:
+            launcher.start(unit, f"{start['lab']}/launch.json", start["lab"], spec["cwd"], mem_gb=host.max_mem_gb,
+                           timeout_h=task.timeout_h, taskwrap=start["taskwrap"])
+        except Exception as error:  # noqa: BLE001
+            if host.kind != "local" and (getattr(error, "returncode", None) == 255
+                                         or isinstance(error, subprocess.TimeoutExpired)):
+                delay = self.transport_failed(host.name)
+                self.store.update("tasks", key, state="pending", attempts=attempts,
+                                  reason=f"{UNCERTAIN_START} {error}; reconcile on {host.name}")
+                self.events.emit("stage-failed", job=job_id, task=task.name, host=host.name,
+                                 reason=f"start: {error}", attempts=attempts, retry_in_s=round(delay, 1))
+                return False
+            if isinstance(error, subprocess.TimeoutExpired):
+                self.log(f"start {job_id}/{task.name} on {host.name} timed out: {error}; the poll decides")
+                return True
+            self.launch_failed(job_id, task.name, host.name, f"launch: {error}")
+            return False
+        self.events.emit("started", job=job_id, task=task.name, host=host.name,
                          group=group if group >= 0 else None, unit=unit, launcher=launcher.name)
         return True
+
+    def reconcile_start(self, row, rc, alive):
+        """Adopt an observed process/result; only an explicit absence permits a fresh stage."""
+        key = dict(job=row["job"], name=row["name"])
+        if rc is not None or alive:
+            self.store.update("tasks", key, state="running", attempts=row["attempts"] + 1, reason=None)
+            self.events.emit("started", job=row["job"], task=row["name"], host=row["host"],
+                             unit=row["unit"], launcher=row["launcher"], reconciled=True)
+            return True
+        self.store.update("tasks", key, state="pending", started=None, unit=None,
+                          reason="requeued: uncertain start absent on host")
+        self.events.emit("requeued", job=row["job"], task=row["name"], host=row["host"],
+                         reason="uncertain start absent on host")
+        return False
+
+    def artifact_sha(self, key, source):
+        row = self.store.one("SELECT sha256 FROM artifacts WHERE key=?", key)
+        if row and row["sha256"]:
+            return row["sha256"]
+        from .snaprun import sha256
+        return sha256(source)
+
+    def put_outputs(self, transport, job, task, local_out, out, s3):
+        """Existing outputs (a retry or resume) without old checkpoints: everything outside
+        `ckpt/`, and per run its newest complete checkpoint, pulled from S3 instead when S3
+        holds one at least as new. True when every run has its own checkpoint there."""
+        if not any(local_out.iterdir()):
+            return False
+        files, checkpoints, runs = transfer.resume_plan(local_out)
+        records = self.store.kv_get(f"s3ckpt:{job.id}:{task.name}", {}) if s3 else {}
+        pulls, covered = [], set(checkpoints)
+        for rel in sorted(set(checkpoints) | set(records)):
+            home, name = checkpoints.get(rel), records.get(rel)
+            if name and (home is None or transfer.name_minute(name) >= home[0]):
+                bucket, region = s3
+                pulls.append(dict(rel=rel, local=str(local_out), remote=out, fallback=home[2] if home else [],
+                                  timeout=float(self.inv.ec2.get("s3_timeout_s", 900)),
+                                  pull=dict(uri=transfer.ckpt_uri(bucket, job.id, task.name, rel, name),
+                                            region=region, dest=f"{out}/{rel}/ckpt/{name}")))
+                covered.add(rel)
+            elif home:
+                files += home[2]
+        transport.put_files(local_out, out, files)
+        for pull in pulls:
+            transport.add(("s3_ckpt", pull))
+        return bool(runs) and all(rel in covered for rel in runs)
+
+    def prepare(self, job, view, task, host, group, transport):
+        """Everything a launch writes, through `transport`: the real one for a local host, a
+        transfer.Recorder for a remote one. Returns (launch spec, start arguments, marks to
+        apply once the uploads have landed)."""
+        launcher = self.launchers[host.name]
+        after = []
+        local_out = view.out
+        local_out.mkdir(parents=True, exist_ok=True)
+        own_checkpoints = False
+        s3 = self.ec2.s3(host.name)
+        if host.kind == "local":
+            out, jobdir, tools = str(local_out), str(job.out), str(self.ctx.lab_dir)
+            run_study = str(self.ctx.run_study)
+            inputs = {k: str(self.ctx.artifact(k)) for k in task.inputs}
+        else:
+            if not host.root:
+                raise RuntimeError(f"host {host.name} has no root")
+            self.ensure_tools(host, transport, after)
+            out, jobdir = self.remote_out(host, job, view), f"{host.root}/jobs/{job.id}"
+            tools = run_study = f"{host.root}/tools"
+            run_study += "/run-study.py"
+            inputs = {}
+            for key in task.inputs:
+                source = self.ctx.artifact(key)
+                remote = f"{host.root}/artifacts/{safe_key(key)}/{source.name}"
+                mark = f"uploaded:{host.name}:{key}"
+                if self.store.kv_get(mark) != host.root:
+                    if s3 and key.startswith("binary:"):
+                        bucket, region = s3
+                        transport.add(("s3_input", dict(
+                            source=str(source), remote=remote, bytes=transfer.tree_size(source),
+                            timeout=float(self.inv.ec2.get("s3_timeout_s", 900)),
+                            fetch=dict(bucket=bucket, region=region, safe=safe_key(key), name=source.name,
+                                       sha256=self.artifact_sha(key, source), dest=remote))))
+                    else:
+                        transport.put(source, remote)
+                    after.append(("kv", mark, host.root))
+                inputs[key] = remote
+            # Retries and explicit resumes carry checkpoints: the newest only (transfer.resume_plan).
+            own_checkpoints = self.put_outputs(transport, job, task, local_out, out, s3)
+        lab = f"{jobdir}/.lab/{task.name}"
+
+        replacements = {}
+        if host.kind != "local":
+            replacements[str(job.out)] = jobdir
+            replacements[str(self.ctx.repo / "scripts/studies/batch.py")] = f"{tools}/studies/batch.py"
+            replacements.update({str(self.ctx.artifact(k)): v for k, v in inputs.items()})
+
+        def subst(value):
+            value = str(value)
+            for source in sorted(replacements, key=len, reverse=True):
+                value = value.replace(source, replacements[source])
+            value = str(value).replace("{out}", out).replace("{job}", jobdir).replace("{lab}", tools)
+            value = value.replace("{python}", launcher.python)
+            return re.sub(r"\{input:([^}]+)\}", lambda m: inputs[m[1]], value)
+
+        resuming = bool(task.resume_argv) and task.argv == task.resume_argv
+        if host.kind != "local":
+            for source, destination in task.files.items():
+                remote = os.path.normpath(subst(destination))
+                if not Path(remote).is_relative_to(Path(jobdir)):
+                    raise ValueError(f"staged input escapes remote job root: {destination}")
+                replacements[str(source)] = remote
+                if resuming and own_checkpoints and not task.meta.get("batch") and transfer.is_checkpoint_dir(source):
+                    continue  # the run resumes from its own checkpoint; the one it started from stays home
+                if Path(source).is_dir():
+                    transport.put_dir(source, remote)
+                else:
+                    transport.put(source, remote)
+        # Saved batch commands/identities contain absolute paths from the previous host.
+        manifest_path = local_out / "batch/batch.json"
+        current_paths = dict(replacements)
+        for previous_key, current_key in task.meta.get("moved_binaries", {}).items():
+            previous_binary = self.ctx.artifact(previous_key)
+            if previous_binary:
+                current_paths[str(previous_binary)] = inputs[current_key]
+        # Staged census arguments carry vitals/config paths from the previous host.
+        for source, previous in task.meta.get("remote_paths", {}).items():
+            replacements[previous] = current_paths.get(source, source)
+        replacements.update(current_paths)
+        if task.resume_argv:
+            argfiles = [local_out / "run/args", *local_out.glob("batch/*/s*/run/args")]
+            for argfile in argfiles:
+                if argfile.is_file():
+                    relocated = subst(argfile.read_text())
+                    write_file(transport, f"{out}/{argfile.relative_to(local_out)}", relocated)
+        if task.meta.get("batch") and manifest_path.is_file():
+            manifest = json.loads(manifest_path.read_text())
+            for source, previous in manifest.get("lab_paths", task.meta.get("remote_paths", {})).items():
+                replacements[previous] = current_paths.get(source, source)
+
+            def relocate(value):
+                if isinstance(value, str):
+                    return subst(value)
+                if isinstance(value, list):
+                    return [relocate(v) for v in value]
+                if isinstance(value, dict):
+                    return {subst(k): relocate(v) for k, v in value.items()}
+                return value
+
+            manifest = relocate(manifest)
+            if task.meta.get("moved_binaries"):
+                # Only home_task can authorize this: the exact source commit is unchanged.
+                binary = self.ctx.artifact(next(k for k in task.inputs if k.startswith("binary:")))
+                manifest["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
+            manifest["lab_paths"] = current_paths
+            write_file(transport, f"{out}/batch/batch.json", json.dumps(manifest, indent=2))
+        if task.resume_argv:
+            task.meta["remote_paths"] = current_paths
+
+        env = {}
+        if host.kind == "local":
+            env = {k: os.environ[k] for k in ("PATH", "HOME", "USER", "LANG", "CARGO_HOME", "RUSTUP_HOME")
+                   if k in os.environ}
+        env.update({k: subst(v) for k, v in task.env.items()})
+        argv = task.remote_argv if host.kind != "local" and task.remote_argv else task.argv
+        build_key = task.meta.get("key") if task.meta.get("kind") == "build" else None
+        if s3 and build_key in task.produces:
+            # A capable instance takes a checksum-matched binary from S3 instead of building.
+            bucket, region = s3
+            wrapper = transfer.s3_build_wrapper(bucket, region, safe_key(build_key),
+                                                "{out}/" + task.produces[build_key])
+            argv = ["bash", "-c", wrapper, "labd-s3-build", *argv]
+        spec = dict(argv=[subst(a) for a in argv], cwd=subst(task.cwd) if task.cwd else out,
+                    env=env, stdout=subst(task.stdout or "{out}/stdout.log"),
+                    stderr=subst(task.stderr or "{out}/stderr.log"), lab_dir=lab,
+                    group=group if group >= 0 else None,
+                    cpus=host.groups[group] if host.kind == "local" and group >= 0 else None,
+                    idle=host.idle, rlimit_as_gb=task.rlimit_as_gb, run_study=run_study,
+                    hidden_script=str(self.paths.repo / "scripts/hidden.sh") if task.hidden else None)
+        if task.hidden and host.kind != "local":
+            raise RuntimeError("hidden tasks run only on the local host")
+        write_file(transport, f"{lab}/launch.json", json.dumps(spec, indent=1))
+        transport.run(f"mkdir -p {shlex.quote(spec['cwd'])} {shlex.quote(out)}\n")
+        return spec, dict(lab=lab, taskwrap=f"{tools}/taskwrap.py"), after
 
     def finish_jobs(self):
         for row in self.store.q("SELECT id, state FROM jobs WHERE state IN ('running', 'aborting')"):
@@ -1020,7 +1446,13 @@ class Daemon:
                     if rc is None and alive:
                         fetching = True
                         continue
-                    self.fetch_task(stopped, final=True)
+                    fetched = self.fetch_result(stopped, final=True)
+                    if fetched is None or not fetched[0]:
+                        if fetched:
+                            self.log(f"stopped task fetch {job.id}/{view.name}: {fetched[1]}")
+                        self.fetch_async(stopped, final=True)
+                        fetching = True
+                        continue
                     self.store.update("tasks", dict(job=job.id, name=view.name), rc=(rc or {}).get("rc", 1))
                     self.cleanup_task(stopped)
                 except Exception as error:  # noqa: BLE001
@@ -1085,6 +1517,7 @@ class Daemon:
 
     # ------------------------------------------------------------------ loop
     def step(self):
+        self.drain_transfers()
         self.ingest()
         self.controls()
         self.plan_jobs()
@@ -1135,6 +1568,7 @@ class Daemon:
         finally:
             self.events.emit("daemon-stop", pid=os.getpid())
             self.pool.shutdown(wait=False, cancel_futures=True)
+            self.xfer.shutdown(wait=False, cancel_futures=True)
             lock.close()
 
     def eta(self):

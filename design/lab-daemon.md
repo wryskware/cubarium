@@ -312,17 +312,65 @@ Launchers:
   (`loginctl enable-linger`) is Wrysk's call; after that `auto` picks systemd.
 - **Remote hosts:** scripts go through `ssh HOST 'bash -s'`, so fish login shells are fine.
   Tools and artifacts are copied under `root` (`~/cubarium-train/lab`), and outputs are
-  incrementally rsynced back at each remote task probe, before progress/liveness hooks read
-  local census, stderr, vitals and checkpoints. At task end a full fetch includes wrapper
+  incrementally rsynced back after remote task probes. Workers fetch into isolated staging
+  directories seeded from the previous mirror with independent inodes (reflinks where
+  available). The loop publishes a successful mirror only while its attempt/host/generation
+  token still owns the task's outputs. A loss or tail move fences older mirrors before its
+  synchronous fetch and before another attempt takes over; late results are discarded.
+  Progress hooks read the accepted local mirror, and mirror-based liveness only judges a
+  fresh successful fetch, excluding time spent waiting for the transfer slot or worker.
+  At task end a full fetch includes wrapper
   logs/status; a fetch failure leaves the task and remote copy available for retry.
   Only after a successful fetch and persisted task result are remote task outputs removed.
   Shared job inputs are removed when all tasks on that host have fetched their results.
   `taskwrap.py` resolves the L3 group from that host's sysfs and applies idle class/nice 19.
 
+**Transfers never run on the daemon loop** (`labkit/transfer.py`; 2026-10-12, nine resumes
+each hit the 600 s upload timeout in turn and froze labd from 22:13 to 00:12):
+- A remote launch is prepared on the loop against a recorder that lists its uploads and remote
+  writes (tools, inputs, outputs, staged files, args, `batch.json`, `launch.json`). A transfer
+  worker replays the list; the task stays `pending` with reason `staging on HOST`, and its
+  threads and memory stay charged to that host. When the worker's result comes back through
+  the queue, the loop marks the task running and starts the unit. Workers never write sqlite.
+- One stage at a time per remote host (the home line is the bottleneck); a task that fits a
+  host whose slot is busy waits for it. Output mirrors (`rsync` home at each remote probe and at
+  task end) run in the same workers, one per task and `fetch_workers` in all. Requests retain
+  FIFO order across polls and hosts; final fetches take priority over queued progress
+  fetches. Finishing a fetch serves queued requests before a just-served task can reclaim
+  its slot, so every task gets a mirror within a bounded number of completed transfers.
+  A tail move's
+  progress check reads that mirror; only the fetch after its stop, a loss and EC2 `down` still
+  fetch on the loop (downloads).
+- A stage in flight is in memory only: after a restart its task is `pending` and stages again
+  (rsync resumes); it is never half-launched, because the unit starts only on the loop after
+  the uploads landed and the row says `running`.
+- A staging failure (upload, timeout, ssh) puts the task back to `pending` without spending a
+  retry and emits `stage-failed`; the host is skipped for `transport_backoff_s`, doubling per
+  failure in a row up to `transport_backoff_max_s`. An ssh failure (255) or timeout of the
+  remote start command is **uncertain**, because the process may already have started.
+  Its pending row retains the host, unit and start time with `start uncertain:` in its reason;
+  it keeps its resource reservation and cannot stage or launch again, including after a
+  daemon restart. Polls reconcile `rc.json`, the unit or wrapper pid: a process or result
+  adopts the attempt as running; an explicit absence requeues without spending a retry.
+  A failed/missing probe, or a fresh setsid launch with no pid yet, leaves it uncertain.
+  Cancellation stops uncertain launches too; a confirmed EC2 loss requeues them.
+  Upload timeouts are `upload_base_s` plus the bytes at `upload_floor_mb_s`.
+- **A resume sends only what resuming needs:** everything outside `ckpt/` folders (args,
+  `end_minute`, `status`, `census.csv`, vitals, logs, `batch.json`: what `resume=`,
+  `census_resume.py` and `batch.py --resume` read, under 1 MB for a run) and, per run (each
+  batch child), its newest complete checkpoint only. Complete: an `mNNNNNN` folder (never
+  `.partial`) with a readable unsigned 64-bit integer `minute` matching its name and all
+  three nonempty layer files (`world.bin`, `flora.bin`, `fauna.bin`), as written by the
+  simulator's atomic checkpoint writer. The same predicate in `transfer.checkpoint_minute`
+  is used by discovery, census stitching, S3 push and S3 pull validation. A resuming task
+  whose runs all have their own checkpoint does not upload the checkpoint it started from
+  (an `ab` continuation's early checkpoint). Batch resumes still stage their original
+  starts, because `batch.resume` validates those inputs before choosing child checkpoints.
+
 On start the daemon:
 - resets jobs that were mid-preflight back to `inputs` (preflights are seconds-long);
 - probes hosts;
-- polls every running task: `rc.json` means ended, a live unit or process means still
+- polls every running task and uncertain start: `rc.json` means ended, a live unit or process means still
   running, and neither means `lost` (requeued if retries remain).
 
 A host reboot today: its tasks are lost, then retried once from their latest fetched
@@ -359,7 +407,8 @@ reach it (tested).
 Job states: `submitted → inputs → preflight → running → done`, with `aborting →
 aborted|cancelled` on an abort or cancel. A bad spec becomes `rejected`, and a kind error
 turns into an abort with `lab-error.log`. Task states: `pending → running → done | failed |
-cancelled | stalled | lost`, or `skipped`.
+cancelled | stalled | lost`, or `skipped`. Staging is not a stored state: a staging task is
+`pending` in sqlite and held in the daemon's memory until its uploads land.
 
 ## Event schema
 
@@ -372,6 +421,7 @@ One JSON object per line, appended by the daemon only:
 | `submitted` / `rejected` | `kind`, `name`, `parent` (a provider job) / `reason` |
 | `planned`, `input-wait`, `artifact` | `tasks`; `key`, `provider`; `key`, `path` |
 | `preflight-ok` / `preflight-abort` | `reason` |
+| `staging` / `stage-failed` | `task`, `host`, `mb`, `ops` / `reason`, `attempts` (unchanged), `retry_in_s` |
 | `started` | `task`, `host`, `group`, `unit`, `launcher` |
 | `task-done` / `task-failed` / `task-lost` / `task-stalled` / `requeued` / `spawned` | `task`, `rc`, `reason` |
 | `aborting`, then `done` / `aborted` / `cancelled` | `reason` (the DONE text), `out` |
@@ -379,6 +429,7 @@ One JSON object per line, appended by the daemon only:
 | `approval-needed` | `approval`, `jobs`, `instance_type`, `price_usd_h`, `local_eta_h`, `ec2_eta_h`, `est_usd`, `command` |
 | `approval-granted` / `approval-withdrawn` | `instance_type`, `max_hours`, `max_usd` |
 | `ec2-launching`, `ec2-limit`, `ec2-auth-expired`, `ec2-down-failed`, `ec2-error`, `ec2-orphan` | details |
+| `ec2-s3` / `s3-checkpoint` | `instance`, `bucket`, `capable`, `detail` / `task`, `checkpoints` ({run: mNNNNNN}) |
 | `control-error`, `tree-pruned` | |
 
 `lab wait --any-new` wakes on the terminal job events, `approval-needed`,
@@ -456,6 +507,33 @@ approval over the remaining budget before launch; the budget never stops a runni
    incident truncated the key).
 6. **At start**, labd resumes an instance it launched. It reports tagged instances it did
    not launch (`ec2-orphan`) and never kills them.
+7. **S3, optional** (`[ec2] s3_bucket`, `s3_region`, `instance_profile`; Wrysk 2026-10-13: "i
+   think you can set up s3. but yes"). The bucket is private with lifecycle rules. Instances
+   reach it only through the instance profile's role and their own aws cli; labd never holds
+   AWS credentials.
+   - `up` gets `--iam-instance-profile NAME` when `instance_profile` is set; without it the
+     instance launches as before.
+   - At host-up labd runs `aws s3 ls s3://BUCKET/` on the instance and records the answer for
+     that instance (`ec2-s3`, `capable`). An incapable instance, or no bucket, turns every S3
+     path off, and no other S3 command is issued.
+   - **Checkpoints:** at each remote probe, after the output mirror, the instance copies each
+     run's newest checkpoint that home has just mirrored to
+     `s3://BUCKET/ckpt/<job>/<task>/<run>/<mNNNNNN>/` and removes older ones under that run
+     (`<run>` is `run` or `batch/<arm>/s<seed>/run`; one per batch child). Copying only what
+     home mirrored keeps S3 from getting ahead of home's census. labd records what landed (kv
+     `s3ckpt:<job>:<task>`, event `s3-checkpoint`).
+   - **Resume:** on a capable instance, a run whose S3 checkpoint is at least as new as home's
+     newest is pulled from S3 (into `mNNNNNN.partial`, validated by the shared completeness
+     predicate, then renamed); otherwise home's newest, and only that, is uploaded. A failed
+     pull, including a timeout or transport exception, falls back to home's copy and forgets
+     the S3 record even if the fallback subsequently fails. Normal failures remove the
+     staging directory; any `.partial` left by an interrupted process is ignored by readers.
+   - **Binaries:** a build task on a capable instance first takes `bin/<key>/` (the binary and
+     its `sha256`) when the checksum matches, with no build; otherwise it builds and pushes the
+     result with its checksum. A binary input that home already has is fetched from
+     `bin/<key>/` when it matches home's sha256, else uploaded from home and then seeded to
+     S3 from the instance. `<key>` is the artifact key made path-safe.
+   - Home keeps mirroring every output for analysis as before.
 
 v1 is tested only against a mocked `aws-graviton.sh` and a local stand-in for the host. No
 instance was launched. The first real launch is still unwatched until someone runs it.
