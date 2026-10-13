@@ -1,4 +1,4 @@
-"""lab: submit, quick, status, top, hosts, cancel, approve, wait, events, kinds, install, daemon."""
+"""lab: submit, quick, status, top, hosts, cancel, approve, budget, wait, events, kinds, install, daemon."""
 
 import argparse
 import json
@@ -11,6 +11,7 @@ import sys
 import time
 import tomllib
 
+from . import budget
 from .core import Context, SpecError, load_kinds
 from .top import cmd_top
 from .ec2 import fill_label
@@ -19,7 +20,7 @@ from .store import TERMINAL, Paths, Store, new_id, read_events, spool
 from .stops import rule_labels, validate_rules
 
 SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
-WAKE = set(TERMINAL) | {"approval-needed", "ec2-auth-expired", "ec2-down-failed", "ec2-limit"}
+WAKE = set(TERMINAL) | {"approval-needed", "approval-refused", "ec2-auth-expired", "ec2-down-failed", "ec2-limit"}
 
 
 def read_spec(path):
@@ -121,6 +122,7 @@ def cmd_status(args, paths):
             print(f"  {row['job']}/{row['name']}: {row['reason']}")
     print_hosts(store, paths, brief=True)
     ec2 = store.kv_get("ec2", dict(state="idle"))
+    left = budget_summary(store, paths)
     line = f"ec2: {ec2.get('state')}"
     if ec2.get("approval"):
         line += f" (request {ec2['approval']})"
@@ -130,12 +132,39 @@ def cmd_status(args, paths):
         line += (f"\n  approval needed {request['id']}: {details.get('eligible_tasks')} tasks, local ETA "
                  f"{fmt_h(details.get('local_eta_h'))}, {details.get('instance_type')} ETA {fmt_h(details.get('ec2_eta_h'))}"
                  f" ~${details.get('est_usd')}  {fill_label(details)}"
-                 f"  ->  lab approve ec2 {request['id']} --max-hours H --max-usd D")
+                 f"  ->  lab approve ec2 {request['id']} --max-hours H --max-usd D"
+                 f" (ec2 budget left ${left['remaining']:.2f})")
     print(line)
+    print(budget.status_line(left))
     tail = store.kv_get("ec2-tail", {})
     if tail:
         print(f"  EC2 tail: {tail['moved']} tasks moved home; ~{tail['est_h_saved']:.2f} task h saved, "
               f"~${tail['usd_saved']:.2f} instance cost saved")
+
+
+def budget_summary(store, paths):
+    """The EC2 budget as labd counts it (read-only; spend comes from the store or the event log)."""
+    try:
+        inventory = Inventory.load(paths.hosts, paths.repo / "scripts/run-study.py")
+        price_of = lambda name: inventory.instance_type(name).get("spot_usd_h") if name else None  # noqa: E731
+    except (OSError, ValueError, KeyError):
+        price_of = lambda name: None  # noqa: E731
+    return budget.summary(store, store.kv_get("ec2", dict(state="idle")), price_of, time.time(), paths.events)
+
+
+def cmd_budget(args, paths):
+    if args.action is None:
+        if args.usd is not None or args.note:
+            raise SpecError("use `lab budget grant USD --note TEXT`")
+        print(budget.report(budget_summary(Store(paths, readonly=True), paths)))
+        return
+    if args.usd is None:
+        raise SpecError("lab budget grant needs USD")
+    budget.check_grant(args.usd, args.note)
+    at = budget.parse_at(args.at, time.time())
+    spool(paths, "control", dict(op="grant", usd=args.usd, note=args.note.strip(), at=at),
+          f"{time.time():.6f}-grant")
+    print(f"budget grant queued: ${args.usd:.2f} \"{args.note.strip()}\" (labd records it on its next tick)")
 
 
 def print_hosts(store, paths, brief=False):
@@ -196,6 +225,8 @@ def cmd_cancel(args, paths):
 def cmd_approve(args, paths):
     if args.what != "ec2":
         raise SpecError("only `lab approve ec2 ID` exists")
+    # The daemon checks again when it acts; this refuses early with the same message.
+    budget.check(budget_summary(Store(paths, readonly=True), paths), args.max_usd)
     spool(paths, "control", dict(op="approve", what="ec2", id=args.id, max_hours=args.max_hours,
                                  max_usd=args.max_usd, type=args.type), f"{time.time():.6f}-approve")
     print(f"approval queued: {args.id} type={args.type or 'requested'} max {args.max_hours} h / ${args.max_usd}")
@@ -323,6 +354,12 @@ def main(argv=None):
     p.add_argument("--max-hours", type=float, required=True)
     p.add_argument("--max-usd", type=float, required=True)
     p.add_argument("--type")
+    p = sub.add_parser("budget", help="lab budget: EC2 granted/spent/committed/remaining; "
+                       "lab budget grant USD --note TEXT [--at ISO]: record Wrysk's authorization")
+    p.add_argument("action", nargs="?", choices=["grant"])
+    p.add_argument("usd", nargs="?", type=float)
+    p.add_argument("--note", help="his words authorizing it (required for a grant)")
+    p.add_argument("--at", help="when he authorized it, ISO date/time (default now)")
     p = sub.add_parser("wait", help="block until --job ends, or until any job ends / needs approval")
     p.add_argument("--job")
     p.add_argument("--any-new", action="store_true")

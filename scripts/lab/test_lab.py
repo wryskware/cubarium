@@ -25,7 +25,8 @@ from labkit import cli  # noqa: E402
 from labkit.core import Abort, Kind, Spawn, Task, load_kinds, register  # noqa: E402
 from labkit.daemon import Daemon  # noqa: E402
 from labkit.hosts import Host, Inventory, Usage, fits  # noqa: E402
-from labkit.store import Paths, read_events, spool  # noqa: E402
+from labkit import budget  # noqa: E402
+from labkit.store import Paths, Store, read_events, spool  # noqa: E402
 import test_ab  # noqa: E402
 
 REPO = HERE.parents[1]
@@ -544,6 +545,8 @@ esac
                                             python=sys.executable, status_s=0, max_mem_gb=8,
                                             instance_types={"c7g.16xlarge": dict(arch=platform.machine(), cpus=8,
                                                                                  mem_gb=16, spot_usd_h=0.75)}))
+        # Approvals need budget (labkit/budget.py); these tests are about launching, not money.
+        budget.grant(Store(self.paths), 1000, "test budget", time.time())
 
     def calls(self, verb):
         return [l for l in (self.log.read_text().splitlines() if self.log.exists() else []) if l.split()[0] == verb]

@@ -98,6 +98,9 @@ CREATE TABLE IF NOT EXISTS providers(key TEXT PRIMARY KEY, job TEXT);
 CREATE TABLE IF NOT EXISTS approvals(id TEXT PRIMARY KEY, kind TEXT, state TEXT, request TEXT,
   grant_ TEXT, created REAL, decided REAL);
 CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS ec2_grants(id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL, usd REAL, note TEXT);
+CREATE TABLE IF NOT EXISTS ec2_spend(key TEXT PRIMARY KEY, instance TEXT, approval TEXT, ended REAL,
+  hours REAL, usd REAL, reason TEXT);
 """
 
 

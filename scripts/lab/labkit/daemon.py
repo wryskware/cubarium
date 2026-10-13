@@ -27,6 +27,7 @@ from .hosts import (Host, Inventory, Usage, allowed, could_ever_fit, fits, mem_a
                     quick_timeout_h)
 from .launch import LAUNCHERS, LocalTransport, SshTransport, systemd_user_works, write_file
 from .store import TERMINAL, Events, Store, atomic_write, new_id
+from . import budget
 from .ec2 import Ec2Pool, estimate
 from . import providers
 from .stops import evaluate, run_hook, validate_rules
@@ -71,6 +72,7 @@ class Daemon:
         self.launchers = {}
         self.tools = set()
         self.stopping = False
+        budget.migrate(self.store, paths.events)  # past ec2 spend from the event log, once
         self.ec2 = Ec2Pool(self)
         for host in self.inv.hosts.values():
             self._connect(host)
@@ -281,6 +283,11 @@ class Daemon:
                 command = json.loads(file.read_text())
                 if command["op"] == "cancel":
                     self.cancel(command["job"])
+                elif command["op"] == "grant":
+                    budget.grant(self.store, float(command["usd"]), command.get("note"),
+                                 float(command.get("at") or self.clock()))
+                    self.events.emit("budget-granted", usd=float(command["usd"]), note=command.get("note"),
+                                     budget_left_usd=round(self.ec2.budget()["remaining"], 2))
                 elif command["op"] == "approve" and command.get("what") == "ec2":
                     self.ec2.approve(command["id"], float(command["max_hours"]), float(command["max_usd"]),
                                      command.get("type"))

@@ -6,11 +6,14 @@ import os
 from pathlib import Path
 import shlex
 import sys
+import time
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import test_lab
+from labkit import budget
 from labkit.hosts import allowed
+from labkit.store import Store
 
 
 class Ec2SimulationTests(test_lab.LabCase):
@@ -36,6 +39,8 @@ exit 0
                                            instance_types={"c7g.16xlarge": dict(arch="aarch64", cpus=8,
                                                                                 mem_gb=16, spot_usd_h=0.75)}))
         self.data["hosts"]["fake"].update(groups="live")
+        # Approvals need budget (labkit/budget.py); these tests are about launching, not money.
+        budget.grant(Store(self.paths), 1000, "test budget", time.time())
         del self.data["hosts"]["fake"]["cpus"]
         self.arm_binary = self.root / "arm-census"
         # ARM stand-in must never be executed by the desktop preflight.
