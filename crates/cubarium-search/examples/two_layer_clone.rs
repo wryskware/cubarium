@@ -33,7 +33,9 @@
 //!    bodies of the lineage under each arm. A first read, not a verdict.
 //!
 //! One JSON summary in `out/summary.json` and a per-mode table on stdout; the clones' files in
-//! `out/`.
+//! `out/`. `confusion=1` (CLONE-AGREE) also prints the two-layer top's confusion matrix
+//! (label row, pick column) on the held-out live teacher records and, in sample, on the
+//! training teacher records, and adds both to the summary as `confusion`.
 
 
 use cubarium_search::es::voxel::live::{self, balance, ecology::EcologyParams, world};
@@ -210,6 +212,27 @@ fn label_counts(rs: &[TrajectoryRecord], names: &[&str]) -> serde_json::Value {
         }
     }
     json!(names.iter().enumerate().map(|(k, n)| (n.to_string(), json!({"held": held[k], "proposed": proposed[k]}))).collect::<serde_json::Map<_, _>>())
+}
+
+/// A confusion matrix as text: one row per label with any count, its picks by intent.
+fn confusion_text(title: &str, names: &[&str], m: &[Vec<usize>]) -> String {
+    let used: Vec<usize> = (0..names.len()).filter(|&k| m[k].iter().sum::<usize>() > 0 || m.iter().any(|r| r[k] > 0)).collect();
+    let short = |n: &str| n.chars().take(7).collect::<String>();
+    let mut out = format!("# {title}: label (row) -> two-layer pick (column)\n{:16} {:>7}", "label", "n");
+    for &k in &used {
+        out += &format!(" {:>7}", short(names[k]));
+    }
+    for &r in &used {
+        let n: usize = m[r].iter().sum();
+        if n == 0 {
+            continue;
+        }
+        out += &format!("\n{:16} {:>7}", names[r], n);
+        for &k in &used {
+            out += &format!(" {:>7}", m[r][k]);
+        }
+    }
+    out
 }
 
 fn mean(xs: impl Iterator<Item = f64>) -> f64 {
@@ -421,6 +444,14 @@ fn main() {
         eprintln!("# live closed loop {:.0} s", t0.elapsed().as_secs_f64());
     }
 
+    let confusion = (num(&args, "confusion", 0u8) > 0).then(|| {
+        let live = per_mode(&two, &arb, &theta2, &teacher(&held_live), names.len()).confusion;
+        let fit_on = per_mode(&two, &arb, &theta2, &teacher(&train), names.len()).confusion;
+        println!("{}", confusion_text("held-out live teacher", &names, &live));
+        println!("{}", confusion_text("training teacher (in sample)", &names, &fit_on));
+        json!({"intents": names, "held_out_live": live, "training": fit_on})
+    });
+
     let summary = json!({
         "founder": f.name(),
         "bodies": bodies, "fullness": fullness, "also": also.iter().map(|t| json!({"founder": t.founder.name(), "bodies": t.bodies, "fullness": t.fullness})).collect::<Vec<_>>(), "record_s": record_s, "closed_s": closed_s, "alt_period_s": alt_period_s, "alt_len_s": alt_len_s,
@@ -433,6 +464,7 @@ fn main() {
         "held_out": held_out,
         "competence": competence,
         "live_closed_loop": live_arms,
+        "confusion": confusion,
         "skipped": skipped,
         "wall_s": t0.elapsed().as_secs_f64(),
     });

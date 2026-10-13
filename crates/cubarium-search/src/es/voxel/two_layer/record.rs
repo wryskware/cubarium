@@ -306,6 +306,12 @@ pub struct PerMode {
     pub switch_labels: Vec<usize>,
     #[serde(default)]
     pub switch_hits: Vec<usize>,
+    /// CLONE-AGREE: the top's confusion, `confusion[label][pick]` over the same top labels as
+    /// [`PerMode::intent_labels`] (the pick the masked argmax; a label with no valid pick is
+    /// not counted). Row sums are [`PerMode::intent_labels`], the diagonal
+    /// [`PerMode::intent_hits`].
+    #[serde(default)]
+    pub confusion: Vec<Vec<usize>>,
     /// Per held intent (the mode the bottom acts in): samples and summed squared action
     /// error per action value.
     pub mode_samples: Vec<usize>,
@@ -357,6 +363,7 @@ pub fn per_mode(
         intent_hits: vec![0; menu],
         switch_labels: vec![0; menu],
         switch_hits: vec![0; menu],
+        confusion: vec![vec![0; menu]; menu],
         mode_samples: vec![0; menu],
         mode_se: vec![0.0; menu],
     };
@@ -377,7 +384,11 @@ pub fn per_mode(
                 let mut valid = vec![false; shape.intents()];
                 valid[..shape.menu].copy_from_slice(&s.intent_valid);
                 if valid.get(p.intent).copied().unwrap_or(false) && p.intent < menu {
-                    let hit = super::net::masked_argmax(&top.logits, &valid) == Some(p.intent);
+                    let pick = super::net::masked_argmax(&top.logits, &valid);
+                    let hit = pick == Some(p.intent);
+                    if let Some(k) = pick.filter(|&k| k < menu) {
+                        m.confusion[p.intent][k] += 1;
+                    }
                     m.intent_labels[p.intent] += 1;
                     m.intent_hits[p.intent] += usize::from(hit);
                     if before != Some(p.intent) {
