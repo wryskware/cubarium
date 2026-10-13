@@ -81,9 +81,11 @@ fn main() -> Result<(), String> {
             let m = fauna.hound(h.id).copied().unwrap_or_default();
             let nl = ls.iter().map(|l| (l.id, gap(h.pose.x, h.pose.z, l.pose.x, l.pose.z))).min_by(|p, q| p.1.total_cmp(&q.1));
             format!(
-                "hound {} body {:.2} pup {pup} intent {} eating {} emerg {} state {:?} wound {:.2} reserve {:.2} den_d {:.1} tgt {:?} com {} at ({:.1},{:.1}) hd {:.0} near_ls {:?} held {:?} steer {:?}",
+                "hound {} body {:.2} pup {pup} breeder {} gest {} intent {} eating {} emerg {} state {:?} wound {:.2} reserve {:.2} den_d {:.1} tgt {:?} com {} at ({:.1},{:.1}) hd {:.0} near_ls {:?} held {:?} steer {:?}",
                 h.id,
                 h.body,
+                h.pack.and_then(|m| fauna.pack(m.pack)).is_some_and(|p| p.breeder == Some(h.id)),
+                h.reproduction.escrow.is_some(),
                 VEILHOUND.name(usize::from(h.intent.held)),
                 h.eating,
                 h.emergency,

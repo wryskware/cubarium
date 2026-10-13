@@ -417,7 +417,7 @@ fn founder_rows() -> Vec<Row> {
         r("kick.band_low_fraction", "x own height", nonneg, "CONTRACTS: the kick's height band's floor over the kicker's base").optional(),
         r("kick.band_high_fraction", "x own height", nonneg, "CONTRACTS: the kick's height band's top over the kicker's base").optional(),
         r("kick.damage", "wound at equal size", nonneg, "CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6)").optional(),
-        // LS-DEFEND (`defend::Defence`, behaviour-AI §3.1-§3.2, §11.5); `defence.enabled` is a switch: no row.
+        // LS-DEFEND (`defend::Defence`, behaviour-AI §3.1-§3.2, §11.5); `defence.enabled`, `defence.meet_young` and `defence.kick_any_intent` are switches: no row.
         r("defence.threat_m", "m", nonneg, "LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight"),
         r("defence.guard_m", "m", nonneg, "LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths"),
         r("defence.guard_gap_m", "m", nonneg, "LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder)"),
@@ -434,7 +434,6 @@ fn founder_rows() -> Vec<Row> {
         r("defence.w_go_to_calf", "logit", nonneg, "LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult)"),
         r("defence.w_guard", "logit", nonneg, "LS-DEFEND: guard's score (a pressing threat within guard_m)"),
         r("defence.w_go_to_adults", "logit", nonneg, "LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded)"),
-        r("defence.meet_young", "switch", fraction, "VH-KICKED: a hound that looks young (shorter than its lineage's intent.adult_fraction of the grown body) is a threat the defence meets: calves run from it, adults guard against, charge and kick it (false: it is not; a pup cannot strike and one kick kills it)"),
         // YOUNG-ROAM (`roam::Young`, behaviour-AI §3.5).
         r("young.pace_floor", "x adult cruise", fraction, "YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed"),
         r("young.independence_s", "s", nonneg, "YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth"),

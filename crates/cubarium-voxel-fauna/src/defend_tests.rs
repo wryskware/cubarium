@@ -756,3 +756,26 @@ fn a_young_looking_hound_is_no_threat_the_defence_meets_unless_switched_on() {
     assert!(adult.is_some() && kicked, "meet_young: kicked: {adult:?}");
     assert_eq!(calf, Some("go_to_adults"));
 }
+
+/// A grown loftstrider with a still hound in kick reach (seen, not pressing: watched), its
+/// `defence.kick_any_intent` as given: (the intent it holds, whether it aimed a kick).
+fn watched_in_reach(any: bool) -> (Option<&'static str>, bool) {
+    let (w, mut f, adult, vh) = kick_scene(32, 0.0);
+    f.config.founders[LS.index()].defence.kick_any_intent = any;
+    let ahead = in_reach(&f, adult, vh);
+    assert!(ahead > f.config.predation.still_threat_near_m, "the premise: a still hound in reach reads as watched");
+    place(&mut f, vh, 20.0 + ahead, MID_Z, WEST);
+    sees(&mut f, adult, &[(vh, class::THREAT, false)]);
+    decide(&mut f, &w, adult);
+    (held(&f, adult), f.ls_teach.get(&adult).is_some_and(|t| t.kick))
+}
+
+#[test]
+fn the_aimed_kick_is_guards_alone_unless_switched_to_any_intent() {
+    let (intent, kicked) = watched_in_reach(false);
+    assert_eq!(intent, Some("watch"));
+    assert!(!kicked, "§3.3: no aimed kick outside guard");
+    let (intent, kicked) = watched_in_reach(true);
+    assert_eq!(intent, Some("watch"));
+    assert!(kicked, "kick_any_intent: the watched hound in reach is kicked");
+}
