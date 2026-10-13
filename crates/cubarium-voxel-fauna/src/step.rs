@@ -2092,7 +2092,7 @@ pub(crate) fn controllers(
         // SHREDDER-NEST: a layer the crowd refused walks to the free egg face it chose, over
         // its forager, its search and the herd; flight, deep water and thirst (below) win.
         if driven && prey {
-            if let Some(go) = nest_seek_reflex(fauna, i, view) {
+            if let Some(go) = nest_seek_reflex(fauna, i, view, &fv) {
                 actions = go;
                 lure = 0.0;
                 lift = 0.0;
@@ -5864,11 +5864,17 @@ fn end_nest_trip(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &Flor
     let late = fauna.tick.saturating_sub(trip.since) >= rule.nest_seek_give_up_ticks();
     let arrived = (a.site.x, a.site.z) == (trip.target.x, trip.target.z);
     if late || (arrived && !egg_site_fits(fauna, lineage, view, flora, a.site, rule)) {
-        let id = a.id;
-        fauna.nest_trips.remove(&id);
-        fauna.nest_seek_tally[lineage.index()].give_ups += 1;
-        fauna.animals[i].reproduction.retry_ticks = rule.retry_ticks();
+        give_up_nest_trip(fauna, i, lineage, rule);
     }
+}
+
+/// A walk off a crowded nest given up: the trip ends without a clutch, booked as given up,
+/// and body `i` of `lineage` waits out its retry, as a refused layer does.
+fn give_up_nest_trip(fauna: &mut Fauna, i: usize, lineage: Founder, rule: &crate::Reproduction) {
+    let id = fauna.animals[i].id;
+    fauna.nest_trips.remove(&id);
+    fauna.nest_seek_tally[lineage.index()].give_ups += 1;
+    fauna.animals[i].reproduction.retry_ticks = rule.retry_ticks();
 }
 
 /// Whether `site` holds lineage `lineage`'s egg-site rule for a clutch on the ground
@@ -5898,21 +5904,24 @@ fn egg_site_fits(fauna: &Fauna, lineage: Founder, view: &VoxelView<'_>, flora: &
 /// nearest support face within `nest_seek_m` (level distance around the ring and across,
 /// faces within one `step_up_m` of its own height, so the walk is not up or down a wall) that
 /// holds its egg-site rule ([`egg_site_fits`]) and whose nest is not crowded
-/// ([`nest_crowded_at`], the laying's own test). Its own face is never the target. `None`
+/// ([`nest_crowded_at`], the laying's own test). Its own face is never the target. Empty
 /// for a vine nester or a shore layer (each has its own trip), or with no such face. A
 /// heuristic world query, as the shore trip's is.
-fn nest_seek_target(fauna: &Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora, rule: &crate::Reproduction) -> Option<Site> {
+///
+/// SHRED-NEST: up to `limit` such faces, nearest first; the layer sets out for the first it
+/// can walk to ([`nest_seek_target`]).
+fn nest_seek_faces(fauna: &Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora, rule: &crate::Reproduction, limit: usize) -> Vec<Site> {
     let a = &fauna.animals[i];
-    let founder = a.founder?;
+    let Some(founder) = a.founder else { return Vec::new() };
     let phys = fauna.config.founder(founder);
     if matches!(phys.egg_site, crate::EggSite::Vine | crate::EggSite::Shore) {
-        return None;
+        return Vec::new();
     }
     let c = view.config;
     let v = c.voxel_m;
     let reach = rule.nest_seek_m.max(0.0);
     if !(reach > 0.0) {
-        return None;
+        return Vec::new();
     }
     let k = (reach / v).ceil() as i64;
     let step = (phys.step_up_m.max(0.0) / v).floor() as u32;
@@ -5948,8 +5957,24 @@ fn nest_seek_target(fauna: &Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora
     }
     near.sort_by(|p, q| p.0.total_cmp(&q.0));
     near.into_iter()
-        .find(|&(_, s)| !nest_crowded_at(fauna, a.id, founder, (f64::from(s.x) + 0.5) * v, (f64::from(s.z) + 0.5) * v, view, rule))
+        .filter(|&(_, s)| !nest_crowded_at(fauna, a.id, founder, (f64::from(s.x) + 0.5) * v, (f64::from(s.z) + 0.5) * v, view, rule))
         .map(|(_, s)| s)
+        .take(limit)
+        .collect()
+}
+
+/// **SHRED-NEST: where a refused layer sets out for**: of [`nest_seek_faces`], nearest first,
+/// the first it can walk to on its lineage's route graph ([`glider::walk_target`], as every
+/// reflex walk goes). `None` when it can walk to none of them: it is refused, as with no free
+/// face. It took the nearest free face before, wherever it was, and steered straight at it:
+/// a face over a wall it could not climb or across a trench held it pressing at the barrier,
+/// turning on the spot, until its give-up time.
+fn nest_seek_target(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora, rule: &crate::Reproduction) -> Option<Site> {
+    let faces = nest_seek_faces(fauna, i, view, flora, rule, FACE_TRIES);
+    let cands: Vec<(f64, u64, Site)> = faces.iter().map(|&s| (0.0, Fauna::walk_key_face(s), s)).collect();
+    let fv = flora.view();
+    let (_, k) = glider::walk_target(fauna, i, view, &fv, &cands, rule.nest_seek_m, 0.0)?;
+    Some(cands[k].2)
 }
 
 /// **The walk off a crowded nest** (SHREDDER-NEST): a body on a [`crate::NestTrip`], on the
@@ -5958,20 +5983,38 @@ fn nest_seek_target(fauna: &Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora
 /// it. Committed: nothing but the trip's own end ([`end_nest_trip`], or a clutch) takes the
 /// goal away, so it never turns back to the huddle between samples. Flight from a threat,
 /// deep water and sleep still win (the step's chain); `None` otherwise.
-fn nest_seek_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
-    let a = &fauna.animals[i];
-    let trip = fauna.nest_trips.get(&a.id)?;
+///
+/// SHRED-NEST: it walks by its lineage's route graph ([`glider::walk_target`]): straight at
+/// the face when the line is walkable, else along the route. A walk it presses against for
+/// `teachers.press_replan_s` ([`Fauna::walk_shunned`]), or a face it can no longer reach, is
+/// given up ([`give_up_nest_trip`]) and its heuristic steers: it forages through its retry.
+fn nest_seek_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &cubarium_voxel_flora::FloraView<'_>) -> Option<Actions> {
+    let a = fauna.animals[i];
+    let trip = *fauna.nest_trips.get(&a.id)?;
     if a.state == State::Asleep || a.attached.is_some() || a.mobility.mode != crate::MobilityMode::Ground {
         return None;
     }
-    let sc = body::effective_config(&fauna.config, a);
+    let sc = body::effective_config(&fauna.config, &a);
     if !trip_ready(&sc.reproduction, &a.reproduction, a.reserve, sc.reserve_of(a.body)) {
         return None;
     }
     if (a.site.x, a.site.z) == (trip.target.x, trip.target.z) {
         return Some(Actions { forward: 0.0, turn: 0.0, feed: 0.0 });
     }
-    Some(walk_to_place(a, view, trip.target, 0.0))
+    let key = Fauna::walk_key_face(trip.target);
+    let cands = [(0.0, key, trip.target)];
+    match glider::walk_target(fauna, i, view, fv, &cands, sc.reproduction.nest_seek_m, 0.0) {
+        Some((go, _)) => {
+            fauna.walking_to(a.id, key, crate::Steer::Nest);
+            Some(go)
+        }
+        None => {
+            if let Some(lineage) = a.founder {
+                give_up_nest_trip(fauna, i, lineage, &sc.reproduction);
+            }
+            None
+        }
+    }
 }
 
 /// [`crate::LAY_GATES`]' indices.
@@ -7383,6 +7426,10 @@ mod detritivore_tests;
 #[cfg(test)]
 #[path = "shredder_nest_tests.rs"]
 mod shredder_nest_tests;
+
+#[cfg(test)]
+#[path = "shred_nest_tests.rs"]
+mod shred_nest_tests;
 #[cfg(test)]
 #[path = "generation_tests.rs"]
 mod generation_tests;
