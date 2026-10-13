@@ -454,3 +454,31 @@ fn a_calve_entry_gives_each_grown_body_its_calves_also_on_a_loaded_running_layer
     closes(&flora, &loaded);
     assert!(Scenario::from_toml("[[calve]]\nlineage = \"nope\"\n").unwrap().apply(&mut Edit::new(&world, &mut flora, &mut loaded)).refused.len() == 1);
 }
+
+/// LS-TEACH: `share = [k, n]` takes the `k`-th of every `n` mothers in id order, so entries
+/// with the shares `[0, 2]` and `[1, 2]` give each mother one calf of one entry's age, wherever
+/// she stands; a share past its `n` is refused.
+#[test]
+fn calve_entries_with_shares_give_each_mother_one_age() {
+    let (world, mut flora, mut fauna) = layers();
+    let ls = Founder::Loftstrider;
+    let mut e = Edit::new(&world, &mut flora, &mut fauna);
+    let ids: Vec<u64> = [(26, 20), (30, 20), (34, 20), (54, 24)]
+        .into_iter()
+        .map(|(x, z)| body_id(e.place_animal(ls, At::Column { x, z }, adult()).expect("placed")))
+        .collect();
+    let sc = Scenario::from_toml(
+        "[[calve]]\nlineage = \"loftstrider\"\nage_s = 100\nshare = [0, 2]\n\n[[calve]]\nlineage = \"loftstrider\"\nage_s = 900\nshare = [1, 2]\n",
+    )
+    .expect("parses");
+    let r = sc.apply(&mut e);
+    assert!(r.refused.is_empty(), "{r:?}");
+    let tick = |s: f64| (s * f64::from(cubarium_voxel_fauna::TICK_HZ)) as u64;
+    let v = fauna.view();
+    for (rank, m) in ids.iter().enumerate() {
+        let ages: Vec<u64> = v.animals.iter().filter(|c| c.mother == Some(*m)).map(|c| c.age_ticks).collect();
+        assert_eq!(ages, vec![tick(if rank % 2 == 0 { 100.0 } else { 900.0 })], "mother {m}, rank {rank}");
+    }
+    let bad = Scenario::from_toml("[[calve]]\nlineage = \"loftstrider\"\nshare = [2, 2]\n").unwrap();
+    assert_eq!(bad.apply(&mut Edit::new(&world, &mut flora, &mut fauna)).refused.len(), 1);
+}

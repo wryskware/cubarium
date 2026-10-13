@@ -7,7 +7,7 @@
 //! two_layer_clone founder=seedporter train_seeds=1,2,3 heldout_seed=9 record_s=600 \
 //!     scene_seeds=1,2,3,4,5,6,7,8 scene_heldout=101,102,103,104 refit_rounds=1 \
 //!     closed_seeds=21,22 closed_s=300 updates=300 workers=8 out=DIR \
-//!     [fullness=F] [also=LINEAGE=N[:FULLNESS],...]
+//!     [fullness=F] [also=LINEAGE=N[:FULLNESS],...] [scenario=PATH] [hound_every_s=S hound_m=M]
 //! ```
 //!
 //! 1. **Record** each seed's training world (`small`, still water, default founders) under
@@ -38,6 +38,13 @@
 //! training teacher records, and adds both to the summary as `confusion`; `dump=1` also
 //! writes every scored held-out live label to `out/heldout_picks.jsonl` (label, pick, the
 //! hold before, the observation) for reading which senses separate a confused pair.
+//!
+//! LS-TEACH: `scenario=PATH` applies a scenario file (`[[calve]]`, `[[place]]`,
+//! `[[populate]]`; `cubarium_voxel_sim::edit::Scenario`) to every live world after the
+//! top-ups (the teacher worlds' calves: `config/scenarios/calves/ls-teach.toml`), and
+//! `hound_every_s=S` moves a Veilhound to `hound_m` (default 8) metres from a grown body of the
+//! lineage every `S` seconds of every live world ([`world::show_hunter`]). Both off by default:
+//! the worlds as before.
 
 
 use cubarium_search::es::voxel::live::{self, balance, ecology::EcologyParams, world};
@@ -69,6 +76,30 @@ static FULLNESS: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
 /// Veilhounds, which the training worlds found none of.
 static ALSO: std::sync::OnceLock<Vec<world::TopUp>> = std::sync::OnceLock::new();
 
+/// LS-TEACH: a scenario (`scenario=PATH`, the `[[calve]]`/`[[place]]`/`[[populate]]` file of
+/// `cubarium_voxel_sim::edit::Scenario`) applied to every live world this run founds, after
+/// the top-ups: the teacher worlds' calves. Unset: the worlds as before.
+static SCENARIO: std::sync::OnceLock<Option<cubarium_voxel_sim::edit::Scenario>> = std::sync::OnceLock::new();
+
+/// LS-TEACH: every `hound_every_s` seconds of a live world (0: never, the default), a
+/// Veilhound is moved to `hound_m` metres along the ring from a grown body of the lineage, a
+/// mother first ([`world::show_hunter`]), so its threat labels come with the hound in its
+/// senses: `(hound_every_s, hound_m)`.
+static HOUNDS: std::sync::OnceLock<(u64, f64)> = std::sync::OnceLock::new();
+
+/// Step a live world one second; at second `s` of it, show a Veilhound when [`HOUNDS`] says.
+fn second(sim: &mut cubarium_voxel_sim::Sim, f: Founder, s: u64) {
+    let (every, at_m) = HOUNDS.get().copied().unwrap_or((0, 0.0));
+    if every > 0 && s > 0 && s % every == 0 && f != Founder::Chorister {
+        if let Err(why) = world::show_hunter(sim, f, Founder::Chorister, s / every, at_m) {
+            eprintln!("# second {s}: no Veilhound shown: {why}");
+        }
+    }
+    for _ in 0..TICKS_PER_S {
+        sim.step();
+    }
+}
+
 const TICKS_PER_S: u64 = cubarium_voxel_fauna::TICK_HZ as u64;
 
 /// The training world (`small`, still water) with the ecology's own founders, then the
@@ -89,6 +120,10 @@ fn found(seed: u64, f: Founder, bodies: usize) -> Result<cubarium_voxel_sim::Sim
     let had = lineage_ids(&sim, f).len();
     let placed = world::top_up(&mut sim, world::TopUp { founder: f, bodies, fullness: FULLNESS.get().copied().flatten() });
     eprintln!("# seed {seed}: {had} {} founded, {placed} placed by the top-up", f.name());
+    if let Some(sc) = SCENARIO.get().and_then(Option::as_ref) {
+        let r = sim.edit(|e| sc.apply(e));
+        eprintln!("# seed {seed}: scenario applied {:?} refused {:?}", r.applied, r.refused);
+    }
     Ok(sim)
 }
 
@@ -120,9 +155,7 @@ fn record(seed: u64, f: Founder, bodies: usize, shape: &TwoLayerShape, seconds: 
                 forced.push((id, from, now));
             }
         }
-        for _ in 0..TICKS_PER_S {
-            sim.step();
-        }
+        second(&mut sim, f, s);
     }
     let now = sim.fauna().tick();
     forced.extend(on.drain(..).map(|(id, from)| (id, from, now)));
@@ -138,8 +171,8 @@ fn record_closed(seed: u64, f: Founder, bodies: usize, shape: &TwoLayerShape, se
     live::install_centres(sim.fauna_mut(), &[(f, driver.clone())]);
     sim.fauna_mut().dry_teach(f, Some(DryScope::Brains));
     sim.fauna_mut().start_tap();
-    for _ in 0..seconds * TICKS_PER_S {
-        sim.step();
+    for s in 0..seconds {
+        second(&mut sim, f, s);
     }
     let tap = sim.fauna_mut().take_tap().ok_or("tap")?;
     Ok(closed_loop_records(&tap, f, shape, 8).into_iter().map(|(_, r)| r).collect())
@@ -163,8 +196,8 @@ fn closed(seed: u64, f: Founder, bodies: usize, arm: Option<&EpisodeDriver>, sec
     }
     let start = tally(&sim, f);
     let started_ids = lineage_ids(&sim, f);
-    for _ in 0..seconds * TICKS_PER_S {
-        sim.step();
+    for s in 0..seconds {
+        second(&mut sim, f, s);
     }
     let end = tally(&sim, f);
     let born = lineage_ids(&sim, f).iter().filter(|id| !started_ids.contains(id)).count();
@@ -272,6 +305,12 @@ fn main() {
         .unwrap_or_default();
     assert!(also.iter().all(|t| t.founder != f), "also= tops up other lineages");
     ALSO.set(also.clone()).expect("set once");
+    let scenario_path = arg(&args, "scenario").map(str::to_string);
+    let scenario = scenario_path.as_deref().map(|p| cubarium_voxel_sim::edit::Scenario::read(std::path::Path::new(p)).expect("scenario"));
+    SCENARIO.set(scenario).expect("set once");
+    let hounds = (num(&args, "hound_every_s", 0u64), num(&args, "hound_m", 8.0f64));
+    assert!(hounds.1.is_finite() && hounds.1 > 0.0, "hound_m: metres");
+    HOUNDS.set(hounds).expect("set once");
     let mut scene_cfg = mode_scenes::Config::default();
     if let Some(s) = arg(&args, "scene_s").and_then(|v| v.parse().ok()) {
         scene_cfg.duration_s = s;
@@ -478,7 +517,7 @@ fn main() {
 
     let summary = json!({
         "founder": f.name(),
-        "bodies": bodies, "fullness": fullness, "also": also.iter().map(|t| json!({"founder": t.founder.name(), "bodies": t.bodies, "fullness": t.fullness})).collect::<Vec<_>>(), "record_s": record_s, "closed_s": closed_s, "alt_period_s": alt_period_s, "alt_len_s": alt_len_s,
+        "bodies": bodies, "fullness": fullness, "also": also.iter().map(|t| json!({"founder": t.founder.name(), "bodies": t.bodies, "fullness": t.fullness})).collect::<Vec<_>>(), "scenario": scenario_path, "hound_every_s": hounds.0, "hound_m": hounds.1, "record_s": record_s, "closed_s": closed_s, "alt_period_s": alt_period_s, "alt_len_s": alt_len_s,
         "scene_s": scene_cfg.duration_s, "scene_seeds": scene_seeds, "scene_heldout": scene_heldout, "refit_rounds": refit_rounds,
         "train_labels": train_labels,
         "samples": {"train_teacher": samples(&train, RecordSource::Teacher), "train_alternative_mode": samples(&train, RecordSource::AlternativeMode),

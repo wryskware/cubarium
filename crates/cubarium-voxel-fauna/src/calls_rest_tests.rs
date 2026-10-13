@@ -217,6 +217,40 @@ fn a_snort_gathers_a_hearer_to_its_kin_head_up() {
     }
 }
 
+/// **LS-TEACH: a loftstrider answering a snort is labelled `stay_with_family`**, walking to its
+/// kin or standing beside it facing the call, with its kin as the subject: the body hears the
+/// snort but has no threat in its record, and the menu's `watch` needs one. The same steering
+/// and actions not from a call's answer keep flight's labels (`move_off` walking, `watch`
+/// standing).
+#[test]
+fn a_loftstrider_answering_a_snort_with_no_threat_sensed_is_labelled_stay_with_family() {
+    let world = world(34);
+    let flora = Flora::new(FloraConfig::default());
+    let c = config();
+    let gather = c.founder(LS).calls.gather_m;
+    for (gap, walks) in [(2.0 * gather, true), (0.5 * gather, false)] {
+        let mut f = Fauna::new(c.clone());
+        f.set_births_enabled(false);
+        let hearer = body(&mut f, &world, LS, 2.0, EAST, 0.0);
+        let caller = body(&mut f, &world, LS, 2.0 + gap, EAST, 0.0);
+        sense(&mut f, &world);
+        let i = f.animals.iter().position(|a| a.id == caller).unwrap();
+        assert!(calls::emit(&mut f, i, 0));
+        calls::hear(&mut f, &world.view());
+        let act = respond(&mut f, &world, &flora, hearer, CROP).expect("a heeded snort overrides cropping");
+        assert_eq!(act.forward > 0.0, walks, "gap {gap} m");
+        let threats = f.percepts.get(&hearer).map_or(0, |p| p.tracks().iter().filter(|t| t.class == perception::class::THREAT).count());
+        assert_eq!(threats, 0, "no threat in its record");
+        let h = f.animals.iter().position(|a| a.id == hearer).unwrap();
+        let label = |f: &Fauna| crate::intent::teacher_label(f, h, LS, crate::Steer::Flee, act, false, false);
+        let t = label(&f);
+        assert_eq!(t.name, Some("stay_with_family"), "gap {gap} m");
+        assert_eq!(t.subject.body(), Some(caller), "its kin, the subject");
+        f.call_answer.remove(&hearer);
+        assert_eq!(label(&f).name, Some(if walks { "move_off" } else { "watch" }), "flight's labels without a call's answer");
+    }
+}
+
 /// A calf's bleat draws its own mother at once; another adult the same distance away comes
 /// only after `stranger_delay_s`.
 #[test]

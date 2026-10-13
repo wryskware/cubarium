@@ -457,8 +457,8 @@ pub(crate) fn heuristic_calls(fauna: &mut Fauna, i: usize, ts: ThreatSense, stru
 /// **A hearer's reaction** to a heeded call (module note), from its own records.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Reaction {
-    /// Walk this way (metres on the ring, from it).
-    Walk { dx: f64, dz: f64 },
+    /// Walk this way (metres on the ring, from it), answering a call of kind `call`.
+    Walk { dx: f64, dz: f64, call: u8 },
     /// Stand, head up, facing this heading (radians).
     Face { heading: f64 },
 }
@@ -520,11 +520,11 @@ pub(crate) fn reaction(fauna: &Fauna, i: usize, heard_from: u64, ring: f64) -> (
                 .min_by(|p, q| p.0.hypot(p.1).total_cmp(&q.0.hypot(q.1)))
         });
         match kin {
-            Some((dx, dz)) if dx.hypot(dz) > t.gather_m => Some(Reaction::Walk { dx, dz }),
+            Some((dx, dz)) if dx.hypot(dz) > t.gather_m => Some(Reaction::Walk { dx, dz, call: 0 }),
             _ => Some(Reaction::Face { heading: cx.atan2(cz) }),
         }
     } else if cx.hypot(cz) > t.arrive_m {
-        Some(Reaction::Walk { dx: cx, dz: cz })
+        Some(Reaction::Walk { dx: cx, dz: cz, call: r.kind })
     } else {
         None
     };

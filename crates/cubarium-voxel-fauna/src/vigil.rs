@@ -1221,8 +1221,14 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
         // CALLS-REST: a heeded call (an alarm gathers it to its kin, head up; a distress call
         // draws it to the caller).
         fauna.ledger.vigil.call_reactions[k] += 1;
+        // LS-TEACH: which call it answers, for its intent record only.
+        let call = match r {
+            crate::calls::Reaction::Walk { call, .. } => call,
+            crate::calls::Reaction::Face { .. } => 0,
+        };
+        fauna.call_answer.insert(a.id, call);
         out = Some(match r {
-            crate::calls::Reaction::Walk { dx, dz } => head(&a, dx.atan2(dz), 1.0, 0.0),
+            crate::calls::Reaction::Walk { dx, dz, .. } => head(&a, dx.atan2(dz), 1.0, 0.0),
             crate::calls::Reaction::Face { heading } => {
                 let mut act = head(&a, heading, 0.0, 0.0);
                 act.forward = 0.0;
