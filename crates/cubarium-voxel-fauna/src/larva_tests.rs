@@ -924,3 +924,63 @@ fn a_vaulttree_with_larvae_and_no_nuts_holds_food_when_checked() {
     assert!(larva_bites(&fauna) > 0 && count(&fauna) < n0, "it eats the tree's larvae");
     layers_close(&fauna, &flora);
 }
+
+/// A hungry seedporter on its heuristic on the ground at `(x, z)` facing east among three
+/// crowned vaulttrees (hosts within its check search), its catch on; with `carcass`, a kill's
+/// carcass lies under its mouth. Its id, after `ticks` steps.
+fn seedporter_among_hosts(carcass: bool, ticks: u32) -> (World, Flora, Fauna, u64) {
+    let world = world(48, 64, 16);
+    let mut flora = Flora::new(flora_config());
+    for x in [12, 24, 36] {
+        vaulttree(&mut flora, &world, x, 8);
+    }
+    let mut cfg = check_config();
+    cfg.founders[SP.index()].catch_bellwings = true;
+    let mut fauna = Fauna::new(cfg);
+    fauna.set_births_enabled(false);
+    let id = hungry_on_ground(&mut fauna, &world, 18, 8, EAST);
+    fauna.step_with(&world, &mut flora, 1);
+    if carcass {
+        let a = animal(&fauna, id);
+        let g = fauna.config().founder(SP).body_at(a.body);
+        for (x, z) in crate::body::mouth_columns(&world.view(), &a.pose, &g) {
+            let site = Site { x: x.rem_euclid(i64::from(world.view().config.width)) as u32, y: a.site.y, z };
+            assert!(flora.deposit(site, cubarium_voxel_flora::Deposit { kind: cubarium_voxel_flora::DepositKind::Carrion, organic: 1.0, mineral: 0.05, energy: 2.0 }));
+            assert!(flora.lay_carcass(site, cubarium_voxel_flora::Carcass { lineage: Founder::Bellwing.index() as u8, heading_rad: EAST, organic: 1.0 }));
+        }
+        assert!(crate::hunt::mouth_on_carcass(&flora.view(), &world.view(), &a, &g), "fixture: its mouth is over the carcass");
+    }
+    let i = fauna.animals.iter().position(|a| a.id == id).expect("alive");
+    fauna.animals[i].eating = true;
+    for _ in 0..ticks {
+        fauna.step(&world, &mut flora);
+        if let Some(a) = fauna.animals.iter_mut().find(|a| a.id == id) {
+            a.eating = true;
+        }
+    }
+    (world, flora, fauna, id)
+}
+
+/// **A seedporter eating a carcass near several hosts makes no check walk, switches no aim
+/// and shuns nothing** (ECO-INT; the wide-world churn: a check is for a hungry body that sees
+/// no food, and one eating has food). Held hungry over a carcass under its mouth among three
+/// crowned vaulttrees for many times the pressed-walk clock, it eats carrion, sets out on no
+/// check walk, switches no aim, its stillness counts as no pressed walk, and it gives up no
+/// target. Without the carcass the same body does set out on a check (the hosts are in reach
+/// of the check).
+#[test]
+fn a_seedporter_eating_near_several_hosts_makes_no_check_walk_and_shuns_nothing() {
+    let press = FaunaConfig::default().teachers.press_replan_s;
+    assert!(press > 0.0, "fixture: the pressed-walk rule is on");
+    let ticks = (10.0 * press / DT).ceil() as u32;
+    let (_, _, mut fauna, id) = seedporter_among_hosts(true, ticks);
+    assert!(fauna.view().ledger.eaten_carrion_by_founder[SP.index()] > 0.0, "it eats the carcass");
+    let t = fauna.check_tally();
+    assert_eq!((t.walks, t.switches), (0, 0), "no check walk, no switch: {t:?}");
+    assert!(fauna.tree_checks_of(id).is_none_or(|m| m.aim.is_none()), "no aim");
+    assert!(!fauna.pressed.get(&id).is_some_and(|&p| p > 0), "its meal is no pressed walk");
+    assert!(fauna.walk_shunned(id, SP).is_empty(), "it shuns nothing");
+
+    let (_, _, fauna, _) = seedporter_among_hosts(false, ticks);
+    assert!(fauna.check_tally().walks >= 1, "fixture: without food it checks the hosts: {:?}", fauna.check_tally());
+}

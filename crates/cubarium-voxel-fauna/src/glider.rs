@@ -1950,6 +1950,12 @@ pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
         return Some((Actions { forward: 1.0, turn: 0.0, feed: 0.0 }, crate::Steer::Fruit));
     }
     if a.mobility.mode != MobilityMode::Ground { return None; }
+    // ECO-INT: a walk to food is for a hungry body with none; one eating a carcass (its
+    // catch's meal, which holds it still by day and wins over this walk) has food, so
+    // neither the fruit walk nor the tree check runs or touches its aim.
+    if day && crate::hunt::eating_carrion_here(fauna, i, view, fv) {
+        return None;
+    }
     let fruit = if phys.senses.live {
         fruit_by_sight(fauna, i, view, fv, day)
     } else {

@@ -1966,7 +1966,10 @@ pub(crate) fn controllers(
             let fruit_stalled = heuristic && fauna.config.founder(founder).glider.is_some()
                 && a.mobility.mode == crate::MobilityMode::Ground
                 && matches!(fauna.steer.get(&id), Some(crate::Steer::Fruit | crate::Steer::Check))
-                && fb.delivered_forward <= 1e-12 && fb.delivered_turn.abs() <= 1e-12;
+                && fb.delivered_forward <= 1e-12 && fb.delivered_turn.abs() <= 1e-12
+                // ECO-INT: the stillness of a carcass meal is not a stalled walk.
+                && !(crate::perception::is_day(&fauna.config, sky.clock_on, sky.daylight)
+                    && crate::hunt::eating_carrion_here(fauna, i, view, &fv));
             let vine_stalled = heuristic && fauna.config.founder(founder).glider.is_some()
                 && matches!(a.mobility.mode, crate::MobilityMode::Climb | crate::MobilityMode::Perched)
                 && a.mobility.perch.is_some_and(|p| matches!(p.anchor, crate::PerchAnchor::Vine(_)))

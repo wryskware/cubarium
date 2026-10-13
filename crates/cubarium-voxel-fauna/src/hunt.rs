@@ -620,6 +620,35 @@ pub(crate) fn mouth_on_carcass(fv: &FloraView<'_>, view: &VoxelView<'_>, a: &cra
 /// [`HuntConfig::reachable_only`], the nearest by route; else the nearest), go to it, feed
 /// off so nothing is struck on the way. A walk that has not reached its carcass after
 /// [`HuntConfig::patrol_give_up_s`] remembers it fruitless. `None`: no meal to go to.
+/// **Body `i` holds still at a carcass meal** ([`meal_step`]'s eating case, without its
+/// bookkeeping): it wants food and eats carrion, its mouth is on a carcass from where it
+/// stands (not above it on a perch, not up a stem), and nothing else holds it. ECO-INT:
+/// such a body has food, so the tree check does not run for it and its stillness is not a
+/// pressed walk (the wide-world churn: seedporters eating a carcass beside the founding grove
+/// ran the check, the meal held them still, and the pressed-walk rule shunned every host in
+/// turn).
+pub(crate) fn eating_carrion_here(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> bool {
+    let a = &fauna.animals[i];
+    let Some(founder) = a.founder else { return false };
+    let phys = fauna.config.founder(founder);
+    // The meal comes through the catch (`catch_step`), so only a catching body has one.
+    if !fauna.config.hunt.meal_first
+        || !phys.catch_bellwings
+        || !a.eating
+        || a.attached.is_some()
+        || a.strike.is_some()
+        || phys.active_hunter().is_none()
+        || !phys.diet.foods().any(|f| f == Food::Carrion)
+        || a.mobility.mode == crate::MobilityMode::Climb
+    {
+        return false;
+    }
+    let v = view.config.voxel_m;
+    let geometry = phys.body_at(a.body);
+    let above_meal = a.mobility.mode == crate::MobilityMode::Perched && a.pose.y_m > crate::surface_m(a.site.y, v) + geometry.mouth_ceiling_m;
+    !above_meal && mouth_on_carcass(fv, view, a, &geometry)
+}
+
 pub(crate) fn meal_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Option<Actions> {
     meal_step_among(fauna, i, view, fv, None)
 }
