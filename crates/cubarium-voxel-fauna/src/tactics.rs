@@ -136,7 +136,8 @@ pub struct Tactics {
     /// **VH-FEED-KICK: keep clear of a kicker** ([`keep_clear`]). On: a grown hound that senses
     /// a kicker it saw kick (or felt kick it) within `kick_memory_s`, or sees in guard stance,
     /// nearer than `clear_lengths` of that kicker's lengths where it senses it, or last sensed
-    /// it within its subject's expiry (`intent.subject_lost_s`: walking away puts the kicker
+    /// it within its subject's expiry (`intent.subject_lost_s`, or `kick_memory_s` of a kick from
+    /// it; [`remembers`]: walking away puts the kicker
     /// behind it, out of sight; [`note_kickers`]), walks straight away from it before anything else — eating, resting, the walk home, a give-up's rest — unless the
     /// kicker is of the lineage it is hunting (the chase's own `dc` rule meets those). A carcass
     /// within that distance of such a kicker is weighed as the hunt weighs a kick
@@ -1116,7 +1117,8 @@ fn clears(fauna: &Fauna, tac: &Tactics, t: &Track, len: f64, mem: &Hound, now: u
 /// **The kickers it remembers** (VH-FEED-KICK, [`crate::Fauna::kickers_seen`]) for hound `i`,
 /// each sample before [`keep_clear`]: every kicker it senses now that it keeps clear of
 /// ([`clears`]) is remembered as sensed (one it senses that no longer qualifies is forgotten),
-/// and one not sensed for its subject's expiry (`subject_lost_s`) is forgotten. Walking away
+/// and one not sensed for its subject's expiry (`subject_lost_s`) is forgotten unless its kick
+/// is still remembered ([`remembers`]). Walking away
 /// from a kicker turns its back on it: a still kicker behind it is neither seen nor heard,
 /// and with only what it sensed this sample the hound stopped, turned back to its carcass
 /// and ate under the hoof (s7: kicked three times, never moving). Off with the switch.
@@ -1137,7 +1139,7 @@ pub(crate) fn note_kickers(fauna: &mut Fauna, i: usize, tac: &Tactics) {
         .map(|p| p.tracks().iter().filter(|t| t.known && t.class == class::PREY && now.saturating_sub(t.tick) <= fresh).copied().collect())
         .unwrap_or_default();
     let mut kept: Vec<Track> = fauna.kickers_seen.get(&a.id).cloned().unwrap_or_default();
-    kept.retain(|k| age_s(k, now) <= lost && !sensed.iter().any(|t| t.id == k.id));
+    kept.retain(|k| remembers(tac, &mem, k, now, lost) && !sensed.iter().any(|t| t.id == k.id));
     kept.extend(sensed.iter().filter(|t| clears(fauna, tac, t, len, &mem, now)).copied());
     if kept.is_empty() {
         fauna.kickers_seen.remove(&a.id);
@@ -1146,8 +1148,17 @@ pub(crate) fn note_kickers(fauna: &mut Fauna, i: usize, tac: &Tactics) {
     }
 }
 
+/// Whether a hound with memory `mem` still remembers where kicker `k` stood, unsensed since:
+/// within its subject's expiry `lost` of last sensing it, or (follow-up 2) while it remembers
+/// a kick from it (`kick_memory_s`). Kicked, walked clear and forgetting where the hoof stood
+/// after `subject_lost_s` while still remembering the kick, it walked back to its carcass by
+/// the family and was kicked again (s7, m203 save: h104, 13 s after its first kick).
+fn remembers(tac: &Tactics, mem: &Hound, k: &Track, now: u64, lost: f64) -> bool {
+    age_s(k, now) <= lost || mem.kick_seen(k.id).is_some_and(|at| now.saturating_sub(at) as f64 * DT <= tac.kick_memory_s)
+}
+
 /// The kickers hound `i` keeps clear of ([`clears`]) as it senses them now, then those it
-/// remembers ([`note_kickers`]) and does not sense now, within its subject's expiry.
+/// remembers ([`note_kickers`], [`remembers`]) and does not sense now.
 fn kickers_kept(fauna: &Fauna, i: usize, tac: &Tactics) -> Vec<Track> {
     let a = &fauna.animals[i];
     let now = fauna.tick;
@@ -1158,7 +1169,7 @@ fn kickers_kept(fauna: &Fauna, i: usize, tac: &Tactics) -> Vec<Track> {
     let sensed = sensed.iter().filter(|t| now.saturating_sub(t.tick) <= fresh);
     let lost = a.founder.map_or(0.0, |f| fauna.config.founder(f).intent.subject_lost_s);
     let remembered = fauna.kickers_seen.get(&a.id).map_or(&[][..], |v| v.as_slice());
-    let remembered = remembered.iter().filter(|k| age_s(k, now) <= lost && !fauna.percept(a.id).is_some_and(|p| p.tracks().iter().any(|t| t.id == k.id && now.saturating_sub(t.tick) <= fresh)));
+    let remembered = remembered.iter().filter(|k| remembers(tac, &mem, k, now, lost) && !fauna.percept(a.id).is_some_and(|p| p.tracks().iter().any(|t| t.id == k.id && now.saturating_sub(t.tick) <= fresh)));
     sensed.chain(remembered).filter(|t| clears(fauna, tac, t, len, &mem, now)).copied().collect()
 }
 

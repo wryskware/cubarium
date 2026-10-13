@@ -1602,7 +1602,8 @@ fn a_hound_leaves_its_carcass_beside_a_kicker_in_guard_stance_and_not_beside_one
 /// is neither seen nor heard. A hound that kicked-and-sensed kicker sent off its carcass walks on
 /// away from it on the next sample with the kicker gone from its record, labelled a give-up on
 /// it; once unsensed past its subject's expiry (`subject_lost_s`) it is forgotten and the hound
-/// eats. A guarding kicker sensed again out of guard stance (no kick) is forgotten at once:
+/// eats once its kick is no longer remembered either (`kick_memory_s`, follow-up 2). A guarding
+/// kicker sensed again out of guard stance (no kick) is forgotten at once:
 /// unsensed after that, it is no reason to leave.
 #[test]
 fn a_hound_keeps_clear_of_a_kicker_it_last_sensed_after_losing_it_from_its_senses() {
@@ -1627,12 +1628,19 @@ fn a_hound_keeps_clear_of_a_kicker_it_last_sensed_after_losing_it_from_its_sense
     let (held, subject) = label.expect("a label");
     assert_eq!(held, "give_up");
     assert!(matches!(subject, Subject::Body { id, .. } if id == ls), "on the kicker it last sensed: {subject:?}");
-    // Unsensed past its subject's expiry (its kick still remembered): forgotten, it eats.
+    // Unsensed past its subject's expiry with its kick still remembered (follow-up 2): still
+    // away; past the kick's memory, forgotten, it eats.
     let lost = f.config.founder(CH).intent.subject_lost_s;
-    assert!(lost < tac(&f).kick_memory_s, "the case needs the kick remembered past the expiry");
+    let kick_memory = tac(&f).kick_memory_s;
+    assert!(lost < kick_memory, "the case needs the kick remembered past the expiry");
+    let kicked_at = f.tick - 1;
     f.tick += cubarium_voxel::ticks_at_least_one(lost) + 1;
     sees(&mut f, h, &[]);
-    assert_eq!(decide(&mut f, &w, &flora, h).feed, 1.0, "past the expiry it eats");
+    let act = decide(&mut f, &w, &flora, h);
+    assert!(act.feed == 0.0 && act.forward > 0.0, "past the expiry, its kick remembered: still away: {act:?}");
+    f.tick = kicked_at + cubarium_voxel::ticks_at_least_one(kick_memory) + 1;
+    sees(&mut f, h, &[]);
+    assert_eq!(decide(&mut f, &w, &flora, h).feed, 1.0, "past the kick's memory it eats");
 
     // Guard stance only: away; sensed again standing plain: it eats, and once out of its
     // senses it is not remembered as guarding.
