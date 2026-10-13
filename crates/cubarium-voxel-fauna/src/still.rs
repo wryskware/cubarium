@@ -11,9 +11,10 @@ use crate::{Animal, Fauna, HuntMode, MobilityMode, State, Steer, VigilMode};
 /// state) has nowhere it needs to go. A hungry body is excused while it waits in ambush
 /// (the patrol's `Wait` with its lure lit), roosts (a glider's rest hour), is retracted
 /// or freezes under a threat (its lineage's `Freeze` ground response), is a pack pup
-/// held at the den and provisioned there, or is a pack adult its pack tactic holds (at
-/// the den until the pack's hunt quorum; an emergency starts a hunt, so an emergency
-/// member is not excused).
+/// held at the den and provisioned there, or is a pack adult its pack tactic holds (the
+/// Veilhound's: a breeder carrying a litter at its den, until its own hunger or a hunt it
+/// senses releases it, VH-HOLD; the old tactic's: at the den until the pack's hunt quorum;
+/// an emergency starts a hunt, so an emergency member is not excused).
 pub fn still_reason(fauna: &Fauna, a: &Animal) -> Option<&'static str> {
     let freezes = a
         .founder

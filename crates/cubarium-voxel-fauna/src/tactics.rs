@@ -257,6 +257,16 @@ pub struct Tactics {
     /// A carcass within this of where its target was last sensed, when the target is gone
     /// from its senses, is its kill. Metres.
     pub kill_site_m: f64,
+    /// **The breeder's den hold** (VH-HOLD; PIT-2's `Pack::whelp_at_den`): a hungry breeder
+    /// carrying a litter stays at its den, but leaves to hunt once its own hunger (1 − its
+    /// reserve fraction) is at or past this, 0..1 (1: only an emergency releases it; 0: never
+    /// held hungry).
+    pub whelp_leave_hunger: f64,
+    /// ...and leaves with a hunt it senses (a switch): a hunt cue it hears, a hunt already in
+    /// hand, or a grown packmate it sees walking away from the den outside the den radius,
+    /// heading within `whelp_leave_deg` of straight away from it. Degrees.
+    pub whelp_join_hunt: bool,
+    pub whelp_leave_deg: f64,
 }
 
 impl Default for Tactics {
@@ -366,6 +376,12 @@ impl Tactics {
         time_strikes: true,
         lead_close: true,
         kill_site_m: 2.0,
+        // VH-HOLD (placeholders): a breeder holds hungry at the den down to half its reserve,
+        // and leaves with a hunt it hears or sees leave (a packmate heading within a right
+        // angle of straight away from the den).
+        whelp_leave_hunger: 0.5,
+        whelp_join_hunt: true,
+        whelp_leave_deg: 90.0,
     };
 }
 
@@ -1311,8 +1327,14 @@ pub(crate) fn tactic(
         return Some(Actions::REST);
     }
 
-    // The breeder carrying a litter stays home (PIT-2), eating a carcass it knows by the den.
-    if pk.whelp_at_den && fauna.pack(own).is_some_and(|p| p.breeder == Some(id)) && a.reproduction.escrow.is_some() && !a.emergency {
+    // The breeder carrying a litter stays home (PIT-2), eating a carcass it knows by the den;
+    // VH-HOLD: unless its own hunger or a hunt it senses releases it ([`whelp_leaves`]).
+    if pk.whelp_at_den
+        && fauna.pack(own).is_some_and(|p| p.breeder == Some(id))
+        && a.reproduction.escrow.is_some()
+        && !a.emergency
+        && !whelp_leaves(fauna, &a, &tac, phys.calls.keep_s, lost_s, (dcx, dcz, pk.den_radius_m), ring)
+    {
         drop_hunt(fauna, i, own, crate::ChaseEnd::Spent);
         label(fauna, id, "den", Subject::None);
         if a.eating {
@@ -1543,6 +1565,29 @@ pub(crate) fn tactic(
     // ---- search.
     let act = search(fauna, i, view, fv, &tac, &pk, &h, &geometry, held, occupancy, den);
     Some(clamp(fauna, act))
+}
+
+/// **VH-HOLD, the breeder's release** from its den hold (hungry, carrying a litter, not in an
+/// emergency): its own hunger at or past `whelp_leave_hunger`; or, with `whelp_join_hunt`, a
+/// hunt it senses — one in hand (its own target: it joined a hunt and keeps it), a hunt cue it
+/// heard within `keep_s`, or a grown packmate it sees (fresh within `lost_s`) moving outside
+/// the den radius and heading within `whelp_leave_deg` of straight away from the den (§2.1:
+/// a visible departure). Reads only its own body, memory, hearing and sight, never the pack's
+/// record or a packmate's hunger.
+pub(crate) fn whelp_leaves(fauna: &Fauna, a: &Animal, tac: &Tactics, keep_s: f64, lost_s: f64, (dcx, dcz, den_r): (f64, f64, f64), ring: f64) -> bool {
+    if 1.0 - reserve_fraction(fauna, a) >= tac.whelp_leave_hunger {
+        return true;
+    }
+    if !tac.whelp_join_hunt {
+        return false;
+    }
+    if memory(fauna, a.id).target.is_some() || cue_heard(fauna, a.id, keep_s).is_some() {
+        return true;
+    }
+    mates_of(fauna, a.id, tac, lost_s).iter().any(|m| {
+        let (dx, dz, d) = gap(dcx, dcz, m.x, m.z, ring);
+        m.modes & SIGHT != 0 && m.moving && d > den_r && angle_between(m.heading, dx.atan2(dz)) <= tac.whelp_leave_deg.to_radians()
+    })
 }
 
 /// Whether hound `a` can reach prey `t` on foot within the chase (the strike node on its
