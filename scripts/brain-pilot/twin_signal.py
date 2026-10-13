@@ -3,6 +3,9 @@
 
     twin_signal.py DIR [DIR...]      # lj_twin's out dirs (pairs.jsonl, staged.jsonl)
 
+TWIN-MIX: rows with `d` (lj_twin modes all and mix) first get the trainer's measurement's
+ICC over starts and its price per update; mix rows at dials 0, 0.5 and 1.
+
 Every row of pairs.jsonl is one matched pair: one live start run twice, identical but
 for the variant sign (`all`: every lanternjaw on +eps_p / -eps_p; `focal`: one; `null`:
 the same candidate in both copies, the determinism floor). Per (sigma, mode):
@@ -100,6 +103,47 @@ def staged(dirs):
                   f"d==0 {sum(1 for x in fl if x == 0) / len(fl):.2f}, ICC over seeds {fmt_icc(icc(g))}")
 
 
+def price(c, flat, cost):
+    """Thread-hours per update at cos COS from an ICC result, at its point and upper bound."""
+    if c is None:
+        return "n/a"
+    need = TOP_PARAMS * COS ** 2 / (1 - COS ** 2)
+    at = lambda v: "unbounded" if v <= 0 else f"{need / v:,.0f} twins, {need / v * cost / 3600:,.2f} thread-h"
+    return f"{cost:.2f} thread-s per twin; at the ICC's point {at(c[0])}; at its 95% upper bound {at(c[2])}"
+
+
+def measured(rows):
+    """TWIN-MIX: the trainer's twin measurement `d` per row (all-sign: summed lineage score
+    over the head count; mix: the half-and-half estimate), its ICC over starts and price.
+    Mix rows are re-read at dials 0, 0.5 and 1 from the estimate's parts."""
+    by = defaultdict(list)
+    for r in rows:
+        if r.get("d") is not None:
+            by[(r["mode"], r["sigma"])].append(r)
+    for (mode, sigma), rs in sorted(by.items()):
+        cost = st.fmean(r["wall_s"] for r in rs)
+        dials = [None] if mode != "mix" else [0.0, 0.5, 1.0]
+        for w in dials:
+            val = (lambda r: r["d"]) if w is None else (lambda r, w=w: r["mix"]["direct"] + w * r["mix"]["social"] + r["mix"]["kin"])
+            g = defaultdict(list)
+            for r in rs:
+                g[r["pair"]].append(val(r))
+            flat = [x for v in g.values() for x in v]
+            c = icc(g)
+            label = f"{mode}" + ("" if w is None else f" dial {w}")
+            print(f"== measured d, {label}, sigma {sigma}: {len(rs)} twins; sd {st.pstdev(flat):.4f}, mean {st.fmean(flat):+.4f}, "
+                  f"d==0 {sum(1 for x in flat if x == 0) / len(flat):.3f}")
+            print(f"  ICC over starts {fmt_icc(c)}")
+            print(f"  price per update at cos {COS}: {price(c, flat, cost)}")
+        if mode == "mix":
+            ms = [r["mix"] for r in rs]
+            print(f"  carriers per twin {st.fmean(m['carriers'] for m in ms):.2f} of {st.fmean(r['lanternjaws'] for r in rs):.2f}; "
+                  f"no stranger non-carrier {sum(1 for m in ms if m['strangers'] == 0) / len(ms):.3f}; "
+                  f"mean direct {st.fmean(m['direct'] for m in ms):+.4f} (sd {st.pstdev([m['direct'] for m in ms]):.4f}), "
+                  f"social {st.fmean(m['social'] for m in ms):+.4f} (sd {st.pstdev([m['social'] for m in ms]):.4f}), "
+                  f"stranger pair {st.fmean(m['stranger_pair'] for m in ms):+.4f}")
+
+
 def main(dirs):
     staged(dirs)
     rows = []
@@ -110,6 +154,7 @@ def main(dirs):
         for line in f.read_text().splitlines():
             if line.strip():
                 rows.append(json.loads(line))
+    measured(rows)
     by = defaultdict(list)
     for r in rows:
         by[(r["mode"], r["sigma"])].append(r)

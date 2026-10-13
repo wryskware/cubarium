@@ -6,13 +6,25 @@
 //!
 //! - **all-sign**: every lanternjaw on `+ε_p` in one copy and `−ε_p` in the other;
 //! - **focal**: one lanternjaw on `±ε_p`, every other body on the centre;
-//! - **null**: every lanternjaw on candidate 0 in both copies (the determinism floor).
+//! - **null**: every lanternjaw on candidate 0 in both copies (the determinism floor);
+//! - **mix** (TWIN-MIX): half-and-half twins as the trainer runs them (`carrier_share`,
+//!   the carriers drawn per twin by `kin::twins::carriers`, a carrier's newborns on its
+//!   variant), scored by `kin::twins::estimate`; each row carries the estimate's parts so
+//!   any dial reads `direct + w·social + kin`.
+//!
+//! Every non-null row carries `d`, the trainer's twin measurement: all-sign rows the
+//! lineage's summed score over its head count at the start (`+` minus `−`), mix rows the
+//! estimate at `stranger_weight` (default 0). With `trainer_newborns=1` all-sign newborns
+//! take the copy's variant, as the trainer's all-sign twins do (default: the centre, as
+//! LJ-TWIN ran).
 //!
 //! ```text
 //! lj_twin centre=CENTRE.json out=DIR [worlds=8] [starts=1] [warmup_min=20] [gap_min=10]
 //!         [window_min=10] [sigmas=0.02,0.05,0.1] [pairs=8] [modes=all,focal]
 //!         [threads=16] [world_seed=3001] [train_seed=20260924] [generation=0]
 //!         [top_up=lanternjaw=8:0.3] [water_every=4] [info=1: print the centre's size, run nothing]
+//!         [carrier_share=0.5] [stranger_weight=0] [mix_shares=0: every kin share in the
+//!         mix estimate] [mix_seed=1] [trainer_newborns=0]
 //! lj_twin centre=CENTRE.json out=DIR staged=SEEDS [sigmas=…] [pairs=…] [threads=…]
 //! ```
 //!
@@ -27,7 +39,8 @@
 
 use std::collections::BTreeMap;
 
-use cubarium_search::es::voxel::kin::matched::{self, Scene, SceneCopy, SimStart};
+use cubarium_search::es::voxel::kin::matched::{self, AssignOptions, Scene, SceneCopy, SimStart};
+use cubarium_search::es::voxel::kin::twins::{self, MixEstimate};
 use cubarium_search::es::voxel::kin::{BrainStage, KinConfig};
 use cubarium_search::es::voxel::live::ecology::EcologyParams;
 use cubarium_search::es::voxel::live::variants::VariantTable;
@@ -200,6 +213,7 @@ enum Mode {
     All,
     Focal,
     Null,
+    Mix,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -248,6 +262,11 @@ struct PairRow {
     first_world_diff_s: Option<f64>,
     max_score_gap_other_lineages: f64,
     bodies: Vec<BodyRow>,
+    /// The trainer's twin measurement (all-sign and mix rows).
+    d: Option<f64>,
+    /// Mix rows: the carriers and the estimate's parts.
+    carriers: Option<Vec<u64>>,
+    mix: Option<MixEstimate>,
     wall_s: f64,
 }
 
@@ -377,9 +396,18 @@ fn main() {
         .map(|m| match m {
             "all" => Mode::All,
             "focal" => Mode::Focal,
-            other => panic!("mode {other}: all or focal"),
+            "mix" => Mode::Mix,
+            other => panic!("mode {other}: all, focal or mix"),
         })
         .collect();
+    let carrier_share = num("carrier_share", 0.5);
+    let stranger_weight = num("stranger_weight", 0.0);
+    let mix_seed: u64 = arg(&args, "mix_seed").map_or(1, |s| s.parse().expect("mix_seed"));
+    let trainer_newborns = num("trainer_newborns", 0.0) != 0.0;
+    // The mix estimate's kin shares (the copies run and meter as before; only the
+    // estimate's kin term reads them).
+    let mut mix_kin = KinConfig::default();
+    mix_kin.lineages[LJ.index()].shares = cubarium_search::es::voxel::kin::KinShares::uniform(num("mix_shares", 0.0));
     let top_up = world::TopUp::parse(arg(&args, "top_up").unwrap_or("lanternjaw=8:0.3")).expect("top_up");
     let tpm = window::TICKS_PER_MIN;
     let ticks = (window_min * tpm as f64).round() as u64;
@@ -478,6 +506,8 @@ fn main() {
             return Err(format!("start {} has no lanternjaw", it.start));
         }
         let focal = (it.mode == Mode::Focal).then(|| ids[(it.pair + it.start) % ids.len()]);
+        let carriers = (it.mode == Mode::Mix)
+            .then(|| twins::carriers(ids, carrier_share, twins::twin_seed(mix_seed, it.pair, it.start)));
         let cands: [usize; 2] = match it.mode {
             Mode::Null => [0, 0],
             _ => [2 * it.pair, 2 * it.pair + 1],
@@ -486,12 +516,18 @@ fn main() {
         let mut traces = Vec::new();
         let mut outcomes = Vec::new();
         for c in cands {
-            let assign: Vec<(u64, usize)> = match focal {
-                Some(f) => vec![(f, c)],
-                None => ids.iter().map(|&id| (id, c)).collect(),
+            let assign: Vec<(u64, usize)> = match (focal, &carriers) {
+                (Some(f), _) => vec![(f, c)],
+                (None, Some(on)) => on.iter().map(|&id| (id, c)).collect(),
+                (None, None) => ids.iter().map(|&id| (id, c)).collect(),
+            };
+            let options = AssignOptions {
+                newborns: (it.mode == Mode::All && trainer_newborns).then_some((LJ, c)),
+                inherit: carriers.is_some().then_some((LJ, c)),
+                ..Default::default()
             };
             let mut tr = Trace::new(ids, menu);
-            let o = matched::run_assigned(scene, &assign, table, &kin, &mut |sim| tr.observe(sim))?;
+            let o = matched::run_assigned_with(scene, &assign, table, &kin, options, &mut |sim| tr.observe(sim))?;
             traces.push(tr);
             outcomes.push(o);
         }
@@ -525,7 +561,7 @@ fn main() {
             };
             bodies.push(BodyRow {
                 id,
-                on_variant: focal.is_none_or(|f| f == id),
+                on_variant: focal.is_none_or(|f| f == id) && carriers.as_ref().is_none_or(|c| c.contains(&id)),
                 score: [ma.map_or(f64::NAN, |s| s.score), mb.map_or(f64::NAN, |s| s.score)],
                 intake: [ma.map_or(f64::NAN, |s| s.intake_normalized), mb.map_or(f64::NAN, |s| s.intake_normalized)],
                 swallowed: [swallowed(a, ma), swallowed(b, mb)],
@@ -558,6 +594,21 @@ fn main() {
                 other_gap = other_gap.max((x.own - y.own).abs());
             }
         }
+        // The trainer's measurement.
+        let summed = |o: &matched::AssignedOutcome| -> f64 {
+            o.metered.iter().filter(|m| m.founder == LJ).filter_map(|m| o.scores.get(&m.body_id)).map(|k| k.combined).sum::<f64>()
+                / ids.len() as f64
+        };
+        let mix = carriers.as_ref().and_then(|c| {
+            let (bodies, x) = twins::mix_side(ids, c, LJ, &outcomes[0], &mix_kin);
+            let (_, y) = twins::mix_side(ids, c, LJ, &outcomes[1], &mix_kin);
+            twins::estimate(&bodies, &x, &y, stranger_weight)
+        });
+        let d = match it.mode {
+            Mode::All => Some(summed(&outcomes[0]) - summed(&outcomes[1])),
+            Mode::Mix => mix.map(|e| e.score),
+            _ => None,
+        };
         let row = PairRow {
             sigma: if it.mode == Mode::Null { 0.0 } else { sigmas[it.sigma_i] },
             mode: it.mode,
@@ -570,6 +621,9 @@ fn main() {
             first_world_diff_s: world_diff.map(|i| secs(i + 1)),
             max_score_gap_other_lineages: other_gap,
             bodies,
+            d,
+            carriers,
+            mix,
             wall_s: t0.elapsed().as_secs_f64(),
         };
         let line = serde_json::to_string(&row).map_err(|e| e.to_string())?;

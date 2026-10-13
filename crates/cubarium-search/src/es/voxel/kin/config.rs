@@ -82,6 +82,12 @@ pub enum Comparison {
     /// not outweigh one with few. The twin's measurement is `+` minus `−`
     /// ([`super::twins`]). The live world itself then runs its window with this lineage on
     /// its centre, so the worlds live on as before. Distinct from the focal `matched`.
+    ///
+    /// **Half-and-half by default** (TWIN-MIX): with [`TwinKnobs::carrier_share`] below 1
+    /// only a drawn subset carries `±ε_p` and the twin is scored by
+    /// [`super::twins::estimate`] (the carrier's direct effect, its kin-weighted effect on
+    /// relatives, and [`TwinKnobs::stranger_weight`] times its effect on the rest); the
+    /// all-sign twin above is `carrier_share = 1, stranger_weight = 1`.
     Twins,
 }
 
@@ -103,17 +109,48 @@ pub struct TwinKnobs {
     /// Null twins per generation: both copies on candidate 0 from one start, the
     /// determinism floor (their gap must be 0); readout only, never in the update.
     pub nulls: usize,
+    /// **Carriers** (TWIN-MIX): the share of the lineage's bodies at the start that carry
+    /// the variant in a twin (fraction, `(0, 1]`); the rest run the centre in both copies.
+    /// A fresh subset is drawn for every twin from its seed, the same in both copies
+    /// ([`super::twins::carriers`]). `1`: every body, all-sign twins exactly (then
+    /// [`TwinKnobs::stranger_weight`] must be 1).
+    pub carrier_share: f64,
+    /// **The stranger dial** (TWIN-MIX): the weight on the carriers' social effect on the
+    /// lineage's other bodies (fraction, `[0, 1]`). `0`: a twin scores the carrier's direct
+    /// effect plus its kin-weighted effect on relatives, topic 2 exactly; `1`: the effect on
+    /// every other body counts in full, relatives at `1 + r` (all-sign twins' weighting).
+    /// The estimator is [`super::twins::estimate`].
+    pub stranger_weight: f64,
 }
 
 impl Default for TwinKnobs {
     fn default() -> TwinKnobs {
-        TwinKnobs { window_s: 120.0, pairs: 1024, starts: 1, nulls: 1 }
+        TwinKnobs { window_s: 120.0, pairs: 1024, starts: 1, nulls: 1, carrier_share: 0.5, stranger_weight: 0.0 }
     }
 }
 
 impl TwinKnobs {
     pub fn is_default(&self) -> bool {
         *self == TwinKnobs::default()
+    }
+
+    /// Every body carries the variant: the all-sign twins of LIVE-TWINS, scored as before.
+    pub fn all_sign(&self) -> bool {
+        self.carrier_share >= 1.0
+    }
+
+    /// The knobs that the registry's ranges cannot say: at `carrier_share = 1` no body is
+    /// left to tell a carrier's direct effect from its social one, so the score is the
+    /// all-sign sum and the dial must say so (`stranger_weight = 1`).
+    pub fn check(&self) -> Result<(), String> {
+        if self.all_sign() && self.stranger_weight != 1.0 {
+            return Err(format!(
+                "twins: carrier_share = 1 scores every body (all-sign twins), which is stranger_weight = 1; \
+                 stranger_weight = {} needs carrier_share below 1",
+                self.stranger_weight
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -181,6 +218,9 @@ impl KinConfig {
             c.lineages[f.index()] = l;
         }
         registry().check(&c)?;
+        for f in Founder::ALL {
+            c.of(f).twins.check().map_err(|why| format!("[{}]: {why}", f.name()))?;
+        }
         Ok(c)
     }
 
@@ -215,6 +255,10 @@ pub fn kin_rows() -> Vec<Row> {
             "LIVE-TWINS: distinct boundary starts each pair is measured on (at most the run's worlds)"),
         Row::new("kin.lineages.*.twins.nulls", "count", Range::closed(0.0, 4096.0),
             "LIVE-TWINS: null twins (both copies on one candidate) per generation, the determinism readout"),
+        Row::new("kin.lineages.*.twins.carrier_share", "fraction", Range::fraction().open_lo(),
+            "TWIN-MIX: share of the lineage's bodies at a twin's start drawn to carry the variant (the rest run the centre in both copies); 1 = all-sign twins"),
+        Row::new("kin.lineages.*.twins.stranger_weight", "fraction", Range::fraction(),
+            "TWIN-MIX: weight on the carriers' social effect on the lineage's other bodies; 0 = direct + kin-weighted relatives (topic 2), 1 = every body in full (all-sign)"),
     ]
 }
 

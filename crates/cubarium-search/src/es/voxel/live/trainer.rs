@@ -551,6 +551,7 @@ fn run_generation(
                 lineage: *f,
                 table: tables[f.index()].as_ref().expect("a trained lineage has a table"),
                 knobs: spec.kin.of(*f).twins,
+                seed: crate::es::voxel::kin::twins::job_seed(spec.train_seed, generation, *f),
             })
             .collect();
         let metering = crate::es::voxel::kin::twins::Metering {

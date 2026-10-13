@@ -117,7 +117,14 @@ fn poses(w: &LiveWorld) -> Vec<(u64, [u64; 4])> {
 
 #[test]
 fn a_null_table_gives_bit_identical_twins_and_a_zero_update() {
-    let knobs = TwinKnobs { window_s: 4.0, pairs: 2, starts: 2, nulls: 1 };
+    // Half-and-half (the default; TWIN-MIX) and all-sign alike.
+    let base = TwinKnobs { window_s: 4.0, pairs: 2, starts: 2, nulls: 1, ..Default::default() };
+    for knobs in [base, TwinKnobs { carrier_share: 1.0, stranger_weight: 1.0, ..base }] {
+        null_generation(knobs);
+    }
+}
+
+fn null_generation(knobs: TwinKnobs) {
     let path = crate::es::voxel::store::test_centre_path(A, "twins-null");
     let spec = spec("null", vec![(A, path)], twins(A, knobs), 0.0, 2);
     let mut ls = lineages(&spec);
@@ -134,6 +141,13 @@ fn a_null_table_gives_bit_identical_twins_and_a_zero_update() {
     assert_eq!(t.share_diverged, 0.0, "a null table's twins never differ: {t:?}");
     assert_eq!(t.share_d_zero, 1.0);
     assert_eq!((t.nulls, t.nulls_identical), (1, 1));
+    assert_eq!(t.null_max_d, 0.0);
+    if knobs.all_sign() {
+        assert_eq!(t.mean_carriers, 0.0, "all-sign reads no estimate");
+    } else {
+        assert_eq!(t.mean_carriers, 2.0, "half of the four carry: {t:?}");
+        assert_eq!((t.mean_direct, t.mean_social, t.mean_kin), (0.0, 0.0, 0.0));
+    }
     assert_eq!((u.gradient_norm, u.update_rms), (0.0, 0.0));
     assert_eq!(bits(&ls[0].theta), bits(&theta), "the centre does not move");
     assert_eq!(serde_json::to_string(&ls[0].adam).unwrap(), adam, "nor does the optimizer");
@@ -156,8 +170,8 @@ fn a_twins_lineage_leaves_a_per_body_lineage_untouched() {
         let _ = std::fs::remove_dir_all(&spec.out);
         (results, updates, ls, ws)
     };
-    let (r1, u1, l1, w1) = run("iso-1", TwinKnobs { window_s: 3.0, pairs: 1, starts: 1, nulls: 0 });
-    let (r2, u2, l2, w2) = run("iso-2", TwinKnobs { window_s: 5.0, pairs: 3, starts: 2, nulls: 1 });
+    let (r1, u1, l1, w1) = run("iso-1", TwinKnobs { window_s: 3.0, pairs: 1, starts: 1, nulls: 0, ..Default::default() });
+    let (r2, u2, l2, w2) = run("iso-2", TwinKnobs { window_s: 5.0, pairs: 3, starts: 2, nulls: 1, ..Default::default() });
     // A's update is byte-identical whatever B's twins did.
     assert_eq!(u1[0].lineage, A.name());
     assert!(u1[0].bodies > 0, "A trained on its variants");

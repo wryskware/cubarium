@@ -1,0 +1,45 @@
+# TWIN-MIX: train a lineage on half-and-half twins (design/handoffs/twin-mix-2026-10-13.md;
+# `--kin` on voxel-live-train). Wrysk decides whether training uses it; a lineage left out
+# trains as before (`per_body`, every share 0).
+#
+# Each twin draws half the lineage's bodies at the start as carriers (+eps_p in one copy,
+# -eps_p in the other; the rest on the centre in both). The twin scores the carriers'
+# direct effect, their kin-weighted effect on relatives (shares below) and
+# stranger_weight x their effect on the lineage's other bodies (kin::twins::estimate).
+# stranger_weight 0 is topic 2 exactly: own energy plus a share of relatives', at the
+# design's "0.5 to start" (design/behaviour-ai-2026-10-11.md §10.3; the shares the
+# kin-train file sets). On all-sign twins the shares stayed 0; here they carry the kin.
+#
+# The layout is the all-sign one (config/training/kin-twins-2026-10-13.toml).
+
+[lanternjaw]
+comparison = "twins"
+stage = "top"
+[lanternjaw.shares]
+calf = 0.5
+mother = 0.5
+sibling = 0.5
+packmate = 0.5
+[lanternjaw.twins]
+window_s = 120.0
+pairs = 1024
+starts = 1
+nulls = 1
+carrier_share = 0.5
+stranger_weight = 0.0
+
+[seedporter]
+comparison = "twins"
+stage = "top"
+[seedporter.shares]
+calf = 0.5
+mother = 0.5
+sibling = 0.5
+packmate = 0.5
+[seedporter.twins]
+window_s = 120.0
+pairs = 1024
+starts = 1
+nulls = 1
+carrier_share = 0.5
+stranger_weight = 0.0
