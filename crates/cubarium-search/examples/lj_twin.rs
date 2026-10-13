@@ -12,7 +12,7 @@
 //! lj_twin centre=CENTRE.json out=DIR [worlds=8] [starts=1] [warmup_min=20] [gap_min=10]
 //!         [window_min=10] [sigmas=0.02,0.05,0.1] [pairs=8] [modes=all,focal]
 //!         [threads=16] [world_seed=3001] [train_seed=20260924] [generation=0]
-//!         [top_up=lanternjaw=8:0.3] [water_every=4]
+//!         [top_up=lanternjaw=8:0.3] [water_every=4] [info=1: print the centre's size, run nothing]
 //! ```
 //!
 //! One JSON line per matched pair in `DIR/pairs.jsonl` (per lanternjaw: score, intake,
@@ -98,6 +98,9 @@ struct BodyTrace {
     stomach_last: f64,
     /// Body energy after the window's first tick (the per-minute scores' baseline).
     energy_first: Option<f64>,
+    /// What it had given (births) after the first tick; a birth moves its escrow there.
+    given_first: Option<f64>,
+    given_last: f64,
 }
 
 struct Trace {
@@ -149,6 +152,8 @@ impl Trace {
             let stomach = targets::digestible_stomach(a, phys);
             b.stomach_start.get_or_insert(stomach);
             b.energy_first.get_or_insert(window::body_energy(a));
+            b.given_first.get_or_insert(a.reproduction.given);
+            b.given_last = a.reproduction.given;
             b.stomach_last = stomach;
             b.pose.push(Some(pose_hash(a)));
             let held = a.intent.held;
@@ -163,16 +168,18 @@ impl Trace {
                 b.last_held = Some(held);
             }
             if minute_end {
-                b.energy_min.push(window::body_energy(a));
+                // As the window scores it: energy plus what was given since the start.
+                b.energy_min.push(window::body_energy(a) + a.reproduction.given - b.given_first.unwrap_or(0.0));
                 b.stomach_min.push(stomach);
             }
         }
         for (k, id) in self.tracked.iter().enumerate() {
             if !seen[k] {
+                // Gone (a death scores `E_end = 0`; what it gave before still counts).
                 let b = self.bodies.get_mut(id).expect("tracked");
                 b.pose.push(None);
                 if minute_end {
-                    b.energy_min.push(0.0);
+                    b.energy_min.push(b.given_last - b.given_first.unwrap_or(b.given_last));
                     b.stomach_min.push(0.0);
                 }
             }
@@ -299,6 +306,12 @@ fn main() {
     let ecology = EcologyParams::defaults();
     let arbitration = ecology.fauna().founder(LJ).brain;
     let driver = EpisodeDriver::two_layer(file.net().expect("net"), arbitration, LJ);
+    let top = file.layout().range(cubarium_search::es::voxel::two_layer::Layer::Top);
+    let rms = (file.theta[top.clone()].iter().map(|x| x * x).sum::<f64>() / top.len() as f64).sqrt();
+    eprintln!("# centre: {} parameters, top {} (rms {rms:.4})", file.theta.len(), top.len());
+    if arg(&args, "info").is_some() {
+        return;
+    }
     let tables: Vec<VariantTable> = sigmas
         .iter()
         .map(|&s| VariantTable::antithetic_two_layer(&file, BrainStage::Top, arbitration, train_seed, s, generation, pairs).expect("table"))
