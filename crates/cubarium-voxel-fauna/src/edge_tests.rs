@@ -616,6 +616,8 @@ fn a_seedporter_on_a_ledge_it_cannot_walk_or_glide_off_does_not_press() {
     let (width, depth) = (48u32, 16u32);
     let mut world = plain(width, depth, 24);
     let mut c = config();
+    // As above: the ledge is drawn for the graph's disc grown by the founding's margin.
+    c.route_clearance_m = c.founding.clearance_margin_m;
     c.teachers.press_replan_s = 1e6;
     c.teachers.route_refresh_s = 1e6;
     c.perception.remote_hz = f64::from(TICK_HZ);
@@ -687,6 +689,9 @@ fn a_seedporter_on_a_ledge_glides_off_where_it_can() {
     let (width, depth) = (48u32, 16u32);
     let mut world = plain(width, depth, 24);
     let mut c = config();
+    // The ledge's walls stand half a voxel from its centre: drawn for a route graph whose disc
+    // is grown past that, by the founding's margin (ROUTE-WALK's `route_clearance_m`).
+    c.route_clearance_m = c.founding.clearance_margin_m;
     c.teachers.press_replan_s = 1e6;
     c.teachers.route_refresh_s = 1e6;
     let down = c.founder(SP).step_limits(V).down;

@@ -1,14 +1,16 @@
 //! **ROUTE-WALK: why a column has no route-graph face** (the `two_layer_clone` world, as
 //! `den_reach_trace` founds it). After `at_s` seconds, for each column `x0..=x1`,
 //! `z0..=z1`: each support face's tests in `RouteGraph::for_founder` (`face_tests`), and
-//! whether the graph holds it. Read only.
+//! whether the live walking graph (`FaunaConfig::walking_graph`) and the founding's graph
+//! hold it. Read only.
 //!
 //! ```text
 //! route_face_probe founder=chorister seed=9 bodies=8 fullness=0.3 at_s=60 x=5..12 z=0..3 y=8..20
 //! ```
 //!
 //! `bench=K config=HOST.toml seed=N`: instead, the host config's `[world]` generated at seed
-//! `N` (terrain only) and the lineage's route graph built `K` times, timed.
+//! `N` (terrain only) and the lineage's founding and walking route graphs each built `K`
+//! times, timed.
 
 use cubarium_search::es::voxel::live::{ecology::EcologyParams, world};
 
@@ -46,17 +48,23 @@ fn main() -> Result<(), String> {
         let world = cubarium_voxel::World::new(cfg);
         let fauna = cubarium_voxel_fauna::FaunaConfig::default();
         let (phys, margin) = (fauna.founder(f), fauna.founding.clearance_margin_m);
-        let mut ms = Vec::new();
-        let mut faces = 0;
-        for _ in 0..reps.max(1) {
-            let t = std::time::Instant::now();
-            let g = cubarium_voxel_fauna::RouteGraph::for_founder(&world.view(), phys, margin);
-            ms.push(t.elapsed().as_secs_f64() * 1e3);
-            faces = g.faces.len();
-        }
-        ms.sort_by(f64::total_cmp);
         let c = world.config();
-        println!("bench {}x{}x{} seed={seed} faces={faces} reps={} min={:.1} ms median={:.1} ms", c.width, c.height, c.depth, ms.len(), ms[0], ms[ms.len() / 2]);
+        for (name, walking) in [("founding", false), ("walking", true)] {
+            let mut ms = Vec::new();
+            let mut faces = 0;
+            for _ in 0..reps.max(1) {
+                let t = std::time::Instant::now();
+                let g = if walking {
+                    fauna.walking_graph(&world.view(), phys)
+                } else {
+                    cubarium_voxel_fauna::RouteGraph::for_founder(&world.view(), phys, margin)
+                };
+                ms.push(t.elapsed().as_secs_f64() * 1e3);
+                faces = g.faces.len();
+            }
+            ms.sort_by(f64::total_cmp);
+            println!("bench {name} {}x{}x{} seed={seed} faces={faces} reps={} min={:.1} ms median={:.1} ms", c.width, c.height, c.depth, ms.len(), ms[0], ms[ms.len() / 2]);
+        }
         return Ok(());
     }
     let eco = EcologyParams::defaults();
@@ -70,14 +78,16 @@ fn main() -> Result<(), String> {
     let phys = cfg.founder(f);
     let margin = cfg.founding.clearance_margin_m;
     let t = std::time::Instant::now();
-    let graph = cubarium_voxel_fauna::RouteGraph::for_founder(&view, phys, margin);
-    println!("# graph build {:.1} ms, {} faces", t.elapsed().as_secs_f64() * 1e3, graph.faces.len());
+    let graph = cfg.walking_graph(&view, phys);
+    println!("# walking graph build {:.1} ms, {} faces", t.elapsed().as_secs_f64() * 1e3, graph.faces.len());
+    let founding = cubarium_voxel_fauna::RouteGraph::for_founder(&view, phys, margin);
     for z in z0..=z1 {
         for x in x0..=x1 {
             for line in cubarium_voxel_fauna::RouteGraph::face_tests(&view, phys, margin, x, z, y0..=y1) {
                 let y: u32 = line.split(',').nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-                let node = graph.face(cubarium_voxel_flora::Site { x, y, z });
-                println!("{line} node={:?} k={:?}", node.is_some(), node.map(|i| graph.components[i]));
+                let s = cubarium_voxel_flora::Site { x, y, z };
+                let node = graph.face(s);
+                println!("{line} walking_node={:?} k={:?} founding_node={:?}", node.is_some(), node.map(|i| graph.components[i]), founding.face(s).is_some());
             }
         }
     }

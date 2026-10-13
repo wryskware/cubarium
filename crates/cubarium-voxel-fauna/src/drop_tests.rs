@@ -66,6 +66,10 @@ fn config() -> FaunaConfig {
         c.founders[f.index()].active = Activity::Always;
     }
     c.predation.wound_heal_per_s = 0.0;
+    // The ledge's walls stand half a voxel from its centre: the fixture is drawn for a route
+    // graph whose disc is grown past that, by the founding's margin (ROUTE-WALK: the live
+    // graph's own clearance, `route_clearance_m`, is set to it here).
+    c.route_clearance_m = c.founding.clearance_margin_m;
     c
 }
 

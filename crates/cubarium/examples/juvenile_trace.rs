@@ -331,7 +331,7 @@ fn main() {
             );
             if args.iter().any(|a| a == "drop") {
                 let cfg = sim.fauna().config();
-                let graph = cubarium_voxel_fauna::RouteGraph::for_founder(&w, phys, cfg.founding.clearance_margin_m);
+                let graph = cfg.walking_graph(&w, phys);
                 let v = c.voxel_m;
                 let step = phys.step_limits(v);
                 let reach = cubarium_voxel_fauna::step_voxels(phys.drop.reach_m(phys, &g), v);

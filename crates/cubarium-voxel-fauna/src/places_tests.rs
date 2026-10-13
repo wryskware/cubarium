@@ -623,6 +623,7 @@ fn shore_search_fixture(seed: u64) -> (World, Fauna) {
     phys.step_up_m = 0.0;
     phys.step_down_m = 0.0;
     cfg.founding.clearance_margin_m = 0.0;
+    (cfg.route_clearance_m, cfg.route_line_clearance_m) = (0.0, 0.0);
     let mut f = Fauna::new(cfg);
     body(&mut f, &w, Founder::Loftstrider);
     (w, f)

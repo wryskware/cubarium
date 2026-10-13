@@ -449,6 +449,7 @@ fn a_member_stepping_off_a_prey_with_its_back_to_a_wall_does_not_press_it() {
     let mut c = config();
     c.founders[CH.index()].pack.as_mut().unwrap().close_in_m = 2.5;
     c.founding.clearance_margin_m = 0.0;
+    (c.route_clearance_m, c.route_line_clearance_m) = (0.0, 0.0);
     let run = |wall: bool| {
         let mut world = world(931);
         let mut flora = Flora::new(FloraConfig::default());

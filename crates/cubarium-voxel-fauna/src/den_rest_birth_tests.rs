@@ -76,6 +76,7 @@ fn wall(world: &mut World, x: i64) {
 fn pack_config() -> FaunaConfig {
     let mut config = FaunaConfig::default();
     config.founding.clearance_margin_m = 0.0;
+    (config.route_clearance_m, config.route_line_clearance_m) = (0.0, 0.0);
     let phys = &mut config.founders[C.index()];
     phys.active = Activity::Nocturnal;
     phys.core.reserve_cap = 10.0;
@@ -602,10 +603,10 @@ fn an_adult_against_a_wall_anchors_its_packs_den_search() {
     wall(&mut world, 12);
     let old = site(6, 6);
     let (mut fauna, pack) = found(&world, old);
-    // The founding's clearance margin keeps the disc's graph off the face against the wall;
+    // The route graph's clearance keeps the disc's graph off the face against the wall;
     // the body itself (its own footprint) stands there.
     let r = { let p = fauna.config.founder(C); p.adult_body().footprint_radius() };
-    fauna.config.founding.clearance_margin_m = V;
+    fauna.config.route_clearance_m = V;
     place(&mut fauna, site(11, 6));
     let graph = fauna.pack_routes(&world.view(), C);
     assert!(graph.face(site(11, 6)).is_none(), "fixture: the face against the wall is off the graph");

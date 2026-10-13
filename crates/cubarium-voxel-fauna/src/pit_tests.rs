@@ -10,7 +10,7 @@
 //! The scene: a plateau with a **trench** across the straight line home — its near end a
 //! stair one step down and one more to the floor, its far end a riser two steps tall, its
 //! width room for the body but not for the route graph's disc (the body's footprint plus
-//! `FoundingConfig::clearance_margin_m`, which each case sets). Every case sets the config it
+//! `FaunaConfig::route_clearance_m`, which each case sets). Every case sets the config it
 //! relies on and takes its bounds and the trench's dimensions from it (the step, the cruise,
 //! the controller period); no shipped default, ratio or verdict is asserted.
 
@@ -90,7 +90,7 @@ fn config(pit_search_m: f64) -> FaunaConfig {
     c.founders[CH.index()].active = Activity::Nocturnal;
     let r = c.founder(CH).adult_body().footprint_radius();
     let half = 0.5 * f64::from(trench_cols(&c)) * V;
-    c.founding.clearance_margin_m = half - r + V;
+    c.route_clearance_m = half - r + V;
     let pk = c.founders[CH.index()].pack.as_mut().expect("the chorister's pack table");
     pk.pack_size = 1;
     pk.den_radius_m = 0.5;
@@ -144,7 +144,7 @@ fn bound(fauna: &Fauna, metres: f64) -> u32 {
 
 /// The case's premise: the trench holds no node of the route graph, and the plateau by it does.
 fn assert_trench_off_the_graph(fauna: &Fauna, world: &World, c: &FaunaConfig) {
-    let g = crate::RouteGraph::for_founder(&world.view(), fauna.config.founder(CH), fauna.config.founding.clearance_margin_m);
+    let g = fauna.config.walking_graph(&world.view(), fauna.config.founder(CH));
     let zc = (lane_z(c) / V).floor() as u32;
     let step = c.founder(CH).step_limits(V);
     assert!(g.face(Site { x: X1 - 2, y: TOP - 2 * step.up, z: zc }).is_none(), "the trench floor is off the graph");

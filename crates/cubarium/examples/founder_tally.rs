@@ -1256,11 +1256,7 @@ fn print_pack_trace(sim: &Sim, tick: u64) {
         // The route from each member to the target (bellwing3): steps on the lineage's
         // route graph (out to 400) and whether the straight line is walkable.
         let graph = target.map(|_| {
-            cubarium_voxel_fauna::RouteGraph::for_founder(
-                &sim.world().view(),
-                f.config().founder(Founder::Chorister),
-                f.config().founding.clearance_margin_m,
-            )
+            f.config().walking_graph(&sim.world().view(), f.config().founder(Founder::Chorister))
         });
         let field = target
             .zip(graph.as_ref())

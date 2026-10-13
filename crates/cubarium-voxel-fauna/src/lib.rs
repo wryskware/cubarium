@@ -2620,6 +2620,27 @@ pub struct FaunaConfig {
     /// point, inspections and the failed-visit mark.
     #[serde(default)]
     pub light: LightConfig,
+    /// **ROUTE-WALK, the walking graph's clearance**, metres: the slack added to a lineage's
+    /// adult footprint radius when its live route graph (pack routes, the patrol, hunting;
+    /// [`encounter::RouteGraph::for_walking`]) judges where the body stands and steps. 0: the
+    /// bare disc the motor walks with. The founding and the habitat verdict keep
+    /// [`FoundingConfig::clearance_margin_m`].
+    #[serde(default = "default_route_clearance_m")]
+    pub route_clearance_m: f64,
+    /// **ROUTE-WALK, the straight lines' clearance**, metres: the slack added to the adult
+    /// footprint radius at every node and edge a straight line crosses
+    /// ([`encounter::RouteGraph::walk_line`]: the shortcuts a body steers along off its
+    /// route's centres). Below [`FaunaConfig::route_clearance_m`] it changes nothing.
+    #[serde(default = "default_route_line_clearance_m")]
+    pub route_line_clearance_m: f64,
+}
+
+fn default_route_clearance_m() -> f64 {
+    FaunaConfig::default().route_clearance_m
+}
+
+fn default_route_line_clearance_m() -> f64 {
+    FaunaConfig::default().route_line_clearance_m
 }
 
 fn default_lineage_body_ceiling() -> u32 {
@@ -2666,6 +2687,9 @@ impl Default for FaunaConfig {
             perception: PerceptionConfig::default(),
             scent: ScentConfig::default(),
             light: LightConfig::default(),
+            // ROUTE-WALK: the bare disc, as the motor walks; lines keep the founding's 3 cm.
+            route_clearance_m: 0.0,
+            route_line_clearance_m: 0.03,
         }
     }
 }
@@ -2692,6 +2716,14 @@ impl FaunaConfig {
         match s {
             Species::Frondgrazer => &mut self.frondgrazer,
         }
+    }
+
+    /// **ROUTE-WALK**: the live walking route graph of a lineage with physiology `phys`
+    /// ([`encounter::RouteGraph::for_walking`] on [`FaunaConfig::route_clearance_m`] and
+    /// [`FaunaConfig::route_line_clearance_m`]): what the pack, the patrol and the hunters
+    /// route on, for tools that read the same graph.
+    pub fn walking_graph(&self, view: &VoxelView<'_>, phys: &FounderPhysiology) -> encounter::RouteGraph {
+        encounter::RouteGraph::for_walking(view, phys, self.route_clearance_m, self.route_line_clearance_m)
     }
 
     /// One founder's physiology, by lineage.
@@ -4847,7 +4879,7 @@ impl Fauna {
                 return map.clone();
             }
         }
-        let map = std::sync::Arc::new(encounter::RouteGraph::for_founder(view, &phys, self.config.founding.clearance_margin_m));
+        let map = std::sync::Arc::new(self.config.walking_graph(view, &phys));
         self.pack_routes.insert(founder.index(), (tick, map.clone()));
         map
     }

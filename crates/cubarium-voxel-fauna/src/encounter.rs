@@ -479,6 +479,10 @@ pub struct RouteGraph {
     index: FxHashMap<Site, usize>,
     /// Each node's neighbours (the step edges the disc passes, and a climber's walls).
     adj: Vec<Vec<usize>>,
+    /// ROUTE-WALK: the edges a straight line may cross ([`RouteGraph::walk_line`]), when
+    /// narrower than `adj`: between nodes where the disc grown by the line margin also
+    /// stands clear, with that disc clear at the midpoint too. `None`: every edge.
+    lines: Option<Vec<Vec<usize>>>,
     /// The node count of each walkable component, by its id (`components`' values).
     sizes: FxHashMap<usize, usize>,
     climb: u32,
@@ -489,16 +493,45 @@ pub struct RouteGraph {
 
 impl RouteGraph {
     /// The route graph of a founder lineage's adult body, its disc grown by `margin_m`
-    /// ([`crate::FoundingConfig::clearance_margin_m`], as the founding's).
+    /// ([`crate::FoundingConfig::clearance_margin_m`], as the founding's): the founding's
+    /// and the habitat verdict's graph, nodes, edges and lines alike on the grown disc.
     pub fn for_founder(view: &VoxelView<'_>, phys: &crate::FounderPhysiology, margin_m: f64) -> RouteGraph {
+        Self::build(view, phys, margin_m, margin_m)
+    }
+
+    /// **ROUTE-WALK, the walking graph** the live animals route on (pack routes, the patrol,
+    /// hunting; [`crate::FaunaConfig::route_clearance_m`],
+    /// [`crate::FaunaConfig::route_line_clearance_m`]): nodes and edges where the adult's
+    /// disc grown by `clearance_m` stands and steps clear, as [`RouteGraph::for_founder`]
+    /// judges them; straight lines ([`RouteGraph::walk_line`]) only over the nodes and
+    /// edges where the disc grown by `line_clearance_m` does too. The graph on the
+    /// founding's margin left out ground the motor walks: in seed 9 of the Veilhound clone
+    /// world a strip a voxel deep between the depth edge and a wall, 2.5 cm wider than the
+    /// adult's disc and walked both ways, had no node, cutting the den off from the basin
+    /// its hounds rested in.
+    pub fn for_walking(
+        view: &VoxelView<'_>,
+        phys: &crate::FounderPhysiology,
+        clearance_m: f64,
+        line_clearance_m: f64,
+    ) -> RouteGraph {
+        Self::build(view, phys, clearance_m, line_clearance_m)
+    }
+
+    fn build(view: &VoxelView<'_>, phys: &crate::FounderPhysiology, margin_m: f64, line_margin_m: f64) -> RouteGraph {
         let c = view.config;
         let v = c.voxel_m;
         let body = phys.adult_body();
         let step = phys.step_limits(v);
         let room = body.headroom_voxels(v);
-        let r = body.footprint_radius() + margin_m.max(0.0);
+        let margin_m = margin_m.max(0.0);
+        let r = body.footprint_radius() + margin_m;
         let clear = |x: f64, z: f64, y: u32| crate::body::pose_clear(view, x, z, y, r, room, step);
-        let faces: Vec<Site> = standable_faces(view, &body, phys.wade_depth_m(&body))
+        // The lines' disc, when wider than the nodes' (else the lines are every edge).
+        let r_line = (line_margin_m > margin_m).then(|| body.footprint_radius() + line_margin_m);
+        let clear_line = |x: f64, z: f64, y: u32| r_line.is_none_or(|rl| crate::body::pose_clear(view, x, z, y, rl, room, step));
+        let wade = phys.wade_depth_m(&body);
+        let faces: Vec<Site> = standable_faces(view, &body, wade)
             .into_iter()
             .filter(|f| {
                 let z = (f64::from(f.z) + 0.5) * v;
@@ -508,6 +541,11 @@ impl RouteGraph {
             .collect();
         let index: FxHashMap<Site, usize> = faces.iter().enumerate().map(|(i, f)| (*f, i)).collect();
         let mut adj: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
+        let wide: Vec<bool> = match r_line {
+            Some(_) => faces.iter().map(|f| clear_line((f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v, f.y)).collect(),
+            None => Vec::new(),
+        };
+        let mut lines: Option<Vec<Vec<usize>>> = r_line.map(|_| vec![Vec::new(); faces.len()]);
         let climb = step.mutual();
         for (i, f) in faces.iter().enumerate() {
             for (dx, dz) in [(1i64, 0i64), (0, 1)] {
@@ -521,10 +559,31 @@ impl RouteGraph {
                     let Some(&j) = index.get(&Site { x: nx, y: ny, z: nz as u32 }) else {
                         continue;
                     };
-                    if clear(mx, mz, f.y) && clear(mx, mz, ny) {
-                        adj[i].push(j);
-                        adj[j].push(i);
+                    if !(clear(mx, mz, f.y) && clear(mx, mz, ny)) {
+                        continue;
                     }
+                    if let Some(lines) = lines.as_mut() {
+                        if wide[i] && wide[j] && clear_line(mx, mz, f.y) && clear_line(mx, mz, ny) {
+                            lines[i].push(j);
+                            lines[j].push(i);
+                        } else {
+                            // A tight edge (the disc clears with less than the lines' slack):
+                            // kept only where the motor's own walk takes it, both ways. The
+                            // centres' clearance admits a step up a one-voxel shelf from its
+                            // riser's foot that the motor refuses from anywhere it can stand
+                            // (SP-STUCK); an edge it refuses strands a body mid-route.
+                            let a = ((f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v);
+                            let b = (a.0 + dx as f64 * v, a.1 + dz as f64 * v);
+                            let walks = |from: (f64, f64), to: (f64, f64), y0: u32, y1: u32| {
+                                crate::body::motor_walk(view, from, to, y0, r, wade, room, step) == Some(y1)
+                            };
+                            if !(walks(a, b, f.y, ny) && walks(b, a, ny, f.y)) {
+                                continue;
+                            }
+                        }
+                    }
+                    adj[i].push(j);
+                    adj[j].push(i);
                 }
             }
         }
@@ -543,6 +602,12 @@ impl RouteGraph {
                     if let Some(&j) = index.get(&to) {
                         adj[i].push(j);
                         adj[j].push(i);
+                        if let Some(lines) = lines.as_mut() {
+                            if wide[i] && wide[j] {
+                                lines[i].push(j);
+                                lines[j].push(i);
+                            }
+                        }
                     }
                 }
             }
@@ -568,7 +633,7 @@ impl RouteGraph {
         for &k in &components {
             *sizes.entry(k).or_default() += 1;
         }
-        RouteGraph { faces, components, index, adj, sizes, climb, width: c.width, depth: c.depth, voxel_m: v }
+        RouteGraph { faces, components, index, adj, lines, sizes, climb, width: c.width, depth: c.depth, voxel_m: v }
     }
 
     /// **ROUTE-WALK, a diagnostic**: for each support face in column `(x, z)` (layers
@@ -1426,7 +1491,9 @@ impl RouteGraph {
 
     /// Whether the straight line from node `from` at `(x0, z0)` to `(x1, z1)` is walkable on
     /// the graph: sampled each half voxel, every column it enters holds a node joined to the
-    /// last one by an edge (a diagonal crossing by two).
+    /// last one by an edge (a diagonal crossing by two). On the walking graph
+    /// ([`RouteGraph::for_walking`]) only its line edges count: a line steers a body off its
+    /// route's centres, so it keeps the lines' slack.
     pub fn walk_line(&self, from: usize, xz: (f64, f64), end: (f64, f64)) -> bool {
         self.line_end(from, xz, end).is_some()
     }
@@ -1452,6 +1519,7 @@ impl RouteGraph {
         let (dx, dz) = crate::pose::wrapped_delta(x0, z0, x1, z1, ring);
         let len = (dx * dx + dz * dz).sqrt();
         let n = ((len / (0.5 * v)).ceil() as usize).max(1);
+        let adj = self.lines.as_ref().unwrap_or(&self.adj);
         let mut cur = from;
         for k in 1..=n {
             let t = k as f64 / n as f64;
@@ -1465,13 +1533,13 @@ impl RouteGraph {
             if f.x == cx && f.z == cz as u32 {
                 continue;
             }
-            let next = self.adj[cur]
+            let next = adj[cur]
                 .iter()
                 .copied()
                 .find(|&j| self.faces[j].x == cx && self.faces[j].z == cz as u32)
                 .or_else(|| {
-                    self.adj[cur].iter().find_map(|&k| {
-                        self.adj[k].iter().copied().find(|&j| self.faces[j].x == cx && self.faces[j].z == cz as u32)
+                    adj[cur].iter().find_map(|&k| {
+                        adj[k].iter().copied().find(|&j| self.faces[j].x == cx && self.faces[j].z == cz as u32)
                     })
                 });
             match next {

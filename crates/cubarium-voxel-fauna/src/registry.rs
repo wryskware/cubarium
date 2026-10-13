@@ -737,6 +737,11 @@ fn rows() -> Vec<Row> {
             .search(60.0, 3600.0).log().grade("N"),
         r("fauna.lineage_body_ceiling", "bodies", Range::nonneg(), "COMPUTE GUARD, not ecology: living bodies a lineage may hold before breeding is refused and logged (0 off)")
             .grade("N").prov("decision"),
+        // ROUTE-WALK: the live walking route graph (pack routes, the patrol, hunting).
+        r("fauna.route_clearance_m", "m", Range::nonneg(), "ROUTE-WALK: slack added to the adult footprint radius where the live route graph judges a body stands and steps (0: the bare disc the motor walks with)")
+            .grade("N"),
+        r("fauna.route_line_clearance_m", "m", Range::nonneg(), "ROUTE-WALK: slack added to the adult footprint radius at every node and edge a straight-line shortcut on the route graph crosses")
+            .grade("N"),
     ]);
     rows
 }
