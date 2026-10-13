@@ -295,9 +295,10 @@ impl Tactics {
     ///   each grown body facing the pack half (MacNulty et al. 2007; Mech 1970);
     /// - a grown body 1.2 × the hound's length kicks: 0.3 expected kicks, doubled facing a
     ///   hound, at half a meal each (topic 6: three kicks kill);
-    /// - VH-FEED-KICK: off its hunt it keeps two of a kicker's lengths from one that guards or
-    ///   kicked within the kick memory (centre to centre: past a hoof's reach from the front of
-    ///   a body that long, about where a defending ungulate's short charge ends);
+    /// - VH-FEED-KICK: it keeps two of a kicker's lengths from one that guards or kicked
+    ///   within the kick memory (on a hunt, one not of the hunted lineage; centre to centre:
+    ///   past a hoof's reach from the front of a body that long, about where a defending
+    ///   ungulate's short charge ends);
     /// - groups are tested from 5 m, 3 s watching, a 3 s rush; chases held 30 s; give up at a
     ///   wound of a third, winded, or 20 s without progress; shun 2 min; rest a minute;
     /// - encircle beyond a kick's reach (0.6 of the kicker's length) plus 0.5 m, repulsion
