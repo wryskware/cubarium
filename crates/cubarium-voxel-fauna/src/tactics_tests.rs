@@ -1594,6 +1594,63 @@ fn a_hound_leaves_its_carcass_beside_a_kicker_in_guard_stance_and_not_beside_one
     }
 }
 
+/// **A kicker out of its senses is kept clear of where it was last sensed** (VH-FEED-KICK
+/// follow-up): walking away from a kicker puts it behind the hound, and a still body behind it
+/// is neither seen nor heard. A hound that kicked-and-sensed kicker sent off its carcass walks on
+/// away from it on the next sample with the kicker gone from its record, labelled a give-up on
+/// it; once unsensed past its subject's expiry (`subject_lost_s`) it is forgotten and the hound
+/// eats. A guarding kicker sensed again out of guard stance (no kick) is forgotten at once:
+/// unsensed after that, it is no reason to leave.
+#[test]
+fn a_hound_keeps_clear_of_a_kicker_it_last_sensed_after_losing_it_from_its_senses() {
+    let probe = kicker_scene((8.0 - 1.0, MID_Z), EAST);
+    let inside = 0.5 * keep_of(&probe.2, probe.4);
+    let off = |f: &mut Fauna, w: &World, flora: &Flora, h: u64| {
+        let act = decide(f, w, flora, h);
+        (act, f.hound_teach.get(&h).map(|t| (t.held, t.subject)))
+    };
+
+    // Kicked by the kicker behind it, sensing it: away.
+    let (w, flora, mut f, h, ls) = kicker_scene((8.0 - inside, MID_Z), EAST);
+    felt_kick(&mut f, h, ls);
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    let (act, _) = off(&mut f, &w, &flora, h);
+    assert!(act.feed == 0.0 && act.forward > 0.0, "sensed: away: {act:?}");
+    // Next sample the kicker is out of its senses: still away, on that kicker.
+    f.tick += 1;
+    sees(&mut f, h, &[]);
+    let (act, label) = off(&mut f, &w, &flora, h);
+    assert!(act.feed == 0.0 && act.forward > 0.0, "out of its senses: still away: {act:?}");
+    let (held, subject) = label.expect("a label");
+    assert_eq!(held, "give_up");
+    assert!(matches!(subject, Subject::Body { id, .. } if id == ls), "on the kicker it last sensed: {subject:?}");
+    // Unsensed past its subject's expiry (its kick still remembered): forgotten, it eats.
+    let lost = f.config.founder(CH).intent.subject_lost_s;
+    assert!(lost < tac(&f).kick_memory_s, "the case needs the kick remembered past the expiry");
+    f.tick += cubarium_voxel::ticks_at_least_one(lost) + 1;
+    sees(&mut f, h, &[]);
+    assert_eq!(decide(&mut f, &w, &flora, h).feed, 1.0, "past the expiry it eats");
+
+    // Guard stance only: away; sensed again standing plain: it eats, and once out of its
+    // senses it is not remembered as guarding.
+    let (w, flora, mut f, h, ls) = kicker_scene((8.0 - inside, MID_Z), EAST);
+    shows_guard(&mut f, h, ls);
+    assert_eq!(decide(&mut f, &w, &flora, h).feed, 0.0, "guard stance: away");
+    f.tick += 1;
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    assert_eq!(decide(&mut f, &w, &flora, h).feed, 1.0, "sensed out of the stance: it eats");
+    f.tick += 1;
+    sees(&mut f, h, &[]);
+    assert_eq!(decide(&mut f, &w, &flora, h).feed, 1.0, "then unsensed: not remembered as guarding");
+
+    // The switch off: nothing remembered.
+    let (w, flora, mut f, h, ls) = kicker_scene((8.0 - inside, MID_Z), EAST);
+    f.config.founders[CH.index()].pack.as_mut().unwrap().tactics.keep_clear = false;
+    shows_guard(&mut f, h, ls);
+    let _ = decide(&mut f, &w, &flora, h);
+    assert!(!f.kickers_seen.contains_key(&h), "off: no kicker remembered");
+}
+
 /// **Off its hunt every kicker counts; on a hunt, not the hunted lineage's** (VH-FEED-KICK):
 /// [`keep_clear`] meets a guarding loftstrider near when the hound hunts nothing or another
 /// lineage, and leaves it to the chase's own `dc` rule when the hound hunts loftstriders.

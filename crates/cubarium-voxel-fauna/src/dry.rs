@@ -76,6 +76,8 @@ struct DryBody {
     rove: Option<crate::step::rove::Rove>,
     forage: Option<crate::step::forage::Patch>,
     mother_seen: Option<crate::Track>,
+    /// VH-FEED-KICK: the kickers a Veilhound last sensed and keeps clear of.
+    kickers_seen: Option<Vec<crate::Track>>,
     route_flee: Option<u64>,
     walk_targets: Option<(u64, u64, u64)>,
     walk_pending: Option<(u64, Steer)>,
@@ -114,6 +116,7 @@ impl DryBody {
             rove: fauna.rove.get(&id).cloned(),
             forage: fauna.forage.get(&id).copied(),
             mother_seen: fauna.mother_seen.get(&id).copied(),
+            kickers_seen: fauna.kickers_seen.get(&id).cloned(),
             route_flee: fauna.route_flee.get(&id).copied(),
             walk_targets: fauna.walk_targets.get(&id).copied(),
             walk_pending: fauna.walk_pending.get(&id).copied(),
@@ -137,6 +140,7 @@ impl DryBody {
         put(&mut copy.rove, id, self.rove.clone());
         put(&mut copy.forage, id, self.forage);
         put(&mut copy.mother_seen, id, self.mother_seen);
+        put(&mut copy.kickers_seen, id, self.kickers_seen.clone());
         put(&mut copy.route_flee, id, self.route_flee);
         put(&mut copy.walk_targets, id, self.walk_targets);
         put(&mut copy.walk_pending, id, self.walk_pending);
@@ -159,6 +163,7 @@ impl DryBody {
         self.rove = copy.rove.get(&id).cloned();
         self.forage = copy.forage.get(&id).copied();
         self.mother_seen = copy.mother_seen.get(&id).copied();
+        self.kickers_seen = copy.kickers_seen.get(&id).cloned();
         self.route_flee = copy.route_flee.get(&id).copied();
         self.walk_targets = copy.walk_targets.get(&id).copied();
         self.walk_pending = copy.walk_pending.get(&id).copied();

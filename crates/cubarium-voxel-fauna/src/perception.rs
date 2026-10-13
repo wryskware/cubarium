@@ -739,6 +739,7 @@ pub(crate) fn sense_pass(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool
         fauna.percepts.retain(|id, _| alive.contains(id));
         fauna.steer.retain(|id, _| alive.contains(id));
         fauna.walk_targets.retain(|id, _| alive.contains(id));
+        fauna.kickers_seen.retain(|id, _| alive.contains(id));
         fauna.pressed.retain(|id, _| alive.contains(id));
         fauna.walk_shun.retain(|id, _| alive.contains(id));
         fauna.route_flee.retain(|id, _| alive.contains(id));
