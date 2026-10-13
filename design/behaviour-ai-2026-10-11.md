@@ -39,9 +39,9 @@ Evidence:
 | 5 | How a family avoids being caught asleep | **body fixes plus "sleeps lighter when it sees no one awake"** (Wrysk, 2026-10-12: "would you recommend B? it sounds more interesting to watch"; recommended, taken). Mostly light rest at reduced range; deep sleep in 1–2 min bouts, only deep sleep blind; a rush's footfalls wake sleepers; rest spots away from hound scent; deep bouts rare while the animal sees no relative awake (one knob, also for the Veilhounds at the den). Deep versus light is the body's; the brain picks when and where to rest (§3.4) |
 | 6 | How dangerous a kick is | **kicks wound** (Wrysk, 2026-10-12: "yeah A sounds reasonable"): about a third per landed kick on a grown hound, three in one fight kill; strength scales by body size and is a knob. His worry, kept as a watch item (§7): "hopefully the brains dont just decide that loftstriders are too challenging and they should eat like all the seedporters and bellwings instead and ecosystem crashes" |
 | 7 | Does a calf treat its own mother differently (the record exists: `Animal::mother`, SP-NURSE) | **bond both ways** (Wrysk, 2026-10-12: "lets do A"), plus his addition: "young loftstriders and non-infant seedporters should have some level of curiosity to stray from their parent and explore though, increasing the older they get" (§3.5) |
-| 8 | How often the pack should win | **a rare feast** (Wrysk, 2026-10-12: "(a) makes sense"): about one loftstrider a world-year, mostly strayed calves; an adult once in several years (lone, lame or old); a standoff every 1–2 h that usually ends with the pack giving up; a hound killed by kicks about once in a few years. A target the knobs are turned to bracket, not a gate (§6) |
+| 8 | How often the pack should win | **a rare feast** (Wrysk, 2026-10-12: "(a) makes sense"): about one loftstrider a world-year, mostly strayed calves; an adult once in several years (lone, lame or old); a standoff every 1–2 h that usually ends with the pack giving up; a hound killed by kicks about once in a few years. A target the knobs are turned to bracket, not a gate (§6). **Accepted for now** (Wrysk, 2026-10-13: "accept loftstrider hunt results for now (option 1)"): 16 eight-hour wide worlds with the defence on had no loftstrider wounded or killed and one hound kicked dead; no knob changes; a 20-world-hour run on 8 seeds reads the first calves and strays |
 | 9 | Look of the new poses (kick, guard stance, calf tucked in, hound crouch) | when there is something to show |
-| 10 | How training compares animals, so the family benefit survives scoring (Astra review #1–3) | **matched copies of the staged encounters, kept open** (Wrysk, 2026-10-12: "i guess (a) but hard to say and we might want to keep the options open or revise once we start training"). A staged scene runs twice from one start, one animal on `+ε` and `−ε`, all else identical; live windows keep today's per-body comparison for everyday skills. The comparison is a switch, not a commitment: the shared family variant and matched copies of whole live worlds stay available, and the first signal read decides whether to revise (§11.7) |
+| 10 | How training compares animals, so the family benefit survives scoring (Astra review #1–3) | **matched copies of the staged encounters, kept open** (Wrysk, 2026-10-12: "i guess (a) but hard to say and we might want to keep the options open or revise once we start training"). A staged scene runs twice from one start, one animal on `+ε` and `−ε`, all else identical; live windows keep today's per-body comparison for everyday skills. The comparison is a switch, not a commitment: the shared family variant and matched copies of whole live worlds stay available, and the first signal read decides whether to revise (§11.7). **Revised 2026-10-13:** live training uses whole-lineage twin worlds (Wrysk: "accept twin world training"), kin `comparison = "twins"` (§11.7) |
 
 ## 1. What happens today
 
@@ -882,6 +882,15 @@ an already isolated prey). The heuristics add local memory:
   - staged-scene gains don't show in live worlds (calf and hound losses on matched live
     seeds no better than the cloned brain's): a short trial of matched live windows, priced
     and taken to him first (EC2 only via `lab approve`).
+- **Revised (Wrysk, 2026-10-13: "accept twin world training").** The first signal read
+  (lanternjaw) found per-body live windows blind: the variant's share of a pair difference
+  was about 0 at every σ up to 0.1. Twin copies showed a variant moves behaviour consistently
+  (ambush/patrol), but a body's energy is mostly which twin caught prey; focal twins sit at
+  about 0 because one body's flip reshuffles its neighbours' luck. **All-sign twins** (every
+  body of the lineage on `+ε` in one copy, `−ε` in the other, from one start) carry about
+  0.1 of the difference. Live training now runs `comparison = "twins"`
+  (`config/training/kin-twins-2026-10-13.toml`: 1024 pairs × 2-minute windows a generation).
+  The other modes stay as switches.
 - **Checks.** An algebraic check that a perturbation improving only a relative's energy
   survives the whole scorer. Readouts of raw own, relative and combined scores. Missing signs
   are never scored as zero returns.
