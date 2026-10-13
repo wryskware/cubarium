@@ -58,3 +58,17 @@ and a guarding mother kicks the feeding hounds again and again while they keep e
 
 Each death's chain (file:line), bug or balance, the fix and knobs, tests, re-check job ids and
 numbers, commits, departures.
+
+## Follow-up (parent, 2026-10-13 ~15:30)
+
+Merged 29c9e247 (branch tip 4cbac9fe). Re-check (`kick-trace-read.py --list` on
+`runs/lab/1013-151156-vfk-fix2-{s4-da67,s7-e54f}/run/stdout.log`): s4 2 dead -> 0; s7 3 -> 2, and
+earlier (102@204.027, 104@204.089). In s7 both hounds were labelled `give_up` (keep_clear firing)
+yet stayed in motor state `Resting` at d=2.12–2.15 m from ls56 between 203.86 and 204.09 (~14 s)
+while 4 kicks landed: the walk-away does not move the body. Also `ls55 go_to_calf -> h104`: a
+kick landing with the loftstrider's label `go_to_calf` (VH-KICKED made the aimed kick guard-only;
+is that label stale at the kick tick, or a kick outside guard?). Find why the body stays (file:line:
+a rest/eat posture that must stand first, a carcass hold, the motor refusing the heading, an
+action the pack layer overrides later in the tick), fix it if absurd (knob + registry row for any
+number, mechanism test), and re-run the s7 trace (quick lane). Work on branch `vh-feed-kick`
+after `git merge main` (fast-forward). Hand back as before.
