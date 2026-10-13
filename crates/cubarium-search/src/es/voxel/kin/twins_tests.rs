@@ -330,3 +330,15 @@ fn all_carriers_at_dial_one_is_the_all_sign_twin_bit_for_bit() {
     assert_eq!(r.readout.mean_d.to_bits(), d.to_bits());
     assert_eq!(r.readout.mean_carriers, 0.0, "the all-sign path reads no estimate");
 }
+
+#[test]
+fn the_shipped_twin_mix_kin_file_parses() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/kin-twin-mix-2026-10-13.toml");
+    let k = KinConfig::load(&path).unwrap();
+    for f in [Founder::Lanternjaw, Founder::Seedporter] {
+        assert_eq!(k.of(f).comparison, Comparison::Twins);
+        assert!(!k.of(f).twins.all_sign(), "{f:?} runs half-and-half twins");
+        assert!(layout(&k.of(f).twins, 16).is_ok(), "{f:?}'s layout fits the 16-world specs");
+    }
+    assert!(k.of(F).is_today(), "a lineage left out trains as before");
+}

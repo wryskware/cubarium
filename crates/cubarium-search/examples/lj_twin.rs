@@ -23,7 +23,8 @@
 //!         [window_min=10] [sigmas=0.02,0.05,0.1] [pairs=8] [modes=all,focal]
 //!         [threads=16] [world_seed=3001] [train_seed=20260924] [generation=0]
 //!         [top_up=lanternjaw=8:0.3] [water_every=4] [info=1: print the centre's size, run nothing]
-//!         [carrier_share=0.5] [stranger_weight=0] [mix_seed=1] [trainer_newborns=0]
+//!         [carrier_share=0.5] [stranger_weight=0] [mix_shares=0: every kin share in the
+//!         mix estimate] [mix_seed=1] [trainer_newborns=0]
 //! lj_twin centre=CENTRE.json out=DIR staged=SEEDS [sigmas=…] [pairs=…] [threads=…]
 //! ```
 //!
@@ -403,6 +404,10 @@ fn main() {
     let stranger_weight = num("stranger_weight", 0.0);
     let mix_seed: u64 = arg(&args, "mix_seed").map_or(1, |s| s.parse().expect("mix_seed"));
     let trainer_newborns = num("trainer_newborns", 0.0) != 0.0;
+    // The mix estimate's kin shares (the copies run and meter as before; only the
+    // estimate's kin term reads them).
+    let mut mix_kin = KinConfig::default();
+    mix_kin.lineages[LJ.index()].shares = cubarium_search::es::voxel::kin::KinShares::uniform(num("mix_shares", 0.0));
     let top_up = world::TopUp::parse(arg(&args, "top_up").unwrap_or("lanternjaw=8:0.3")).expect("top_up");
     let tpm = window::TICKS_PER_MIN;
     let ticks = (window_min * tpm as f64).round() as u64;
@@ -595,8 +600,8 @@ fn main() {
                 / ids.len() as f64
         };
         let mix = carriers.as_ref().and_then(|c| {
-            let (bodies, x) = twins::mix_side(ids, c, LJ, &outcomes[0], &kin);
-            let (_, y) = twins::mix_side(ids, c, LJ, &outcomes[1], &kin);
+            let (bodies, x) = twins::mix_side(ids, c, LJ, &outcomes[0], &mix_kin);
+            let (_, y) = twins::mix_side(ids, c, LJ, &outcomes[1], &mix_kin);
             twins::estimate(&bodies, &x, &y, stranger_weight)
         });
         let d = match it.mode {
