@@ -24,6 +24,7 @@ fn main() -> Result<(), String> {
     let bodies: usize = arg(&args, "bodies").and_then(|v| v.parse().ok()).unwrap_or(8);
     let fullness: Option<f64> = arg(&args, "fullness").and_then(|v| v.parse().ok());
     let every: u64 = arg(&args, "every_s").and_then(|v| v.parse().ok()).unwrap_or(30).max(1);
+    let map_at: Option<u64> = arg(&args, "map_at_s").and_then(|v| v.parse().ok());
     let share: Option<f64> = arg(&args, "share").and_then(|v| v.parse().ok());
     let per_s = u64::from(cubarium_voxel_fauna::TICK_HZ);
     for seed in seeds {
@@ -45,8 +46,21 @@ fn main() -> Result<(), String> {
         };
         world::top_up(&mut sim, world::TopUp { founder: f, bodies, fullness });
         let (mut sum_stranded, mut sum_no_way, mut samples) = (0usize, 0usize, 0usize);
+        let moves = arg(&args, "moves").is_some_and(|v| v == "1");
+        let mut last: std::collections::HashMap<u64, (Option<usize>, String)> = Default::default();
         for tick in 1..=seconds * per_s {
             sim.step();
+            if moves {
+                for (id, k, site, (x, z), mob) in cubarium_voxel_fauna::den_reach_member_components(sim.fauna(), &sim.world().view()) {
+                    let now = format!("site=({},{},{}) pose=({x:.2},{z:.2}) {mob}", site.x, site.y, site.z);
+                    if let Some((was, from)) = last.get(&id) {
+                        if *was != k {
+                            println!("seed={seed} tick={tick} MOVE member={id} k {was:?} -> {k:?} from {from} to {now}");
+                        }
+                    }
+                    last.insert(id, (k, now));
+                }
+            }
             if tick % (every * per_s) != 0 {
                 continue;
             }
@@ -67,6 +81,14 @@ fn main() -> Result<(), String> {
                 census.len() - way,
                 dens.join(",")
             );
+            for line in cubarium_voxel_fauna::den_reach_components(fauna, &sim.world().view()) {
+                println!("seed={seed} t={}s   {line}", tick / per_s);
+            }
+            if map_at.is_some_and(|m| m == tick / per_s) {
+                for line in cubarium_voxel_fauna::den_reach_map(fauna, &sim.world().view(), 12) {
+                    println!("seed={seed} t={}s MAP {line}", tick / per_s);
+                }
+            }
             sum_stranded += on - with_den;
             sum_no_way += census.len() - way;
             samples += 1;
