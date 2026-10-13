@@ -233,7 +233,9 @@ core.birth_body = 0.03
 core.birth_cost = 0.03
 core.body_max = 0.06
 core.body_min = 0.006
-core.reproduction.egg_organic = 0.007000000000000001
+# LARVA (Wrysk 2026-10-12 "yah (c) for mix"; plan design/larva-nuts-plan-2026-10-12.md §3): a bellwing
+# egg is 1 % of the adult (0.01 × body_max 0.06), laid into the larva field on leaves.
+core.reproduction.egg_organic = 0.0006
 core.reproduction.surplus_floor = 0.003
 gut.bite_per_body_s = 0.000583334
 gut.digestion_s.litter = 102.85702530625679
