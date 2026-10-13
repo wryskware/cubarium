@@ -392,6 +392,8 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
         for k in kicks {
             fauna.ledger.kicks_landed_by_founder[k.by.index()] += 1;
             wound(fauna, flora, k.target, k.damage, k.by, Some(&view));
+            // VH-FEED-KICK: a hound feels the kick that landed on it, and whose it was.
+            crate::pack::tactics::felt_kick(fauna, k.target, k.kicker);
         }
     });
     crate::groom::step(fauna, &view, flora);
