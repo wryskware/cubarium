@@ -1594,13 +1594,47 @@ pub(crate) fn whelp_leaves(fauna: &Fauna, a: &Animal, tac: &Tactics, keep_s: f64
 /// route field): the old choice's bound (bellwing-finding item 3).
 #[allow(clippy::too_many_arguments)]
 fn reachable(fauna: &mut Fauna, view: &VoxelView<'_>, founder: crate::Founder, pk: &Pack, geometry: &crate::Body, h: &crate::Hunter, a: &Animal, t: &Track) -> bool {
-    let v = view.config.voxel_m;
     let routes = fauna.pack_routes(view, founder);
+    reachable_on(fauna, &routes, view.config.voxel_m, founder, pk, geometry, h, a, t)
+}
+
+/// [`reachable`] on `routes`, read only.
+#[allow(clippy::too_many_arguments)]
+fn reachable_on(fauna: &Fauna, routes: &crate::encounter::RouteGraph, v: f64, founder: crate::Founder, pk: &Pack, geometry: &crate::Body, h: &crate::Hunter, a: &Animal, t: &Track) -> bool {
     let (own_r, _) = node_radii(geometry, h, v);
     let Some(from) = routes.node_near(a.site, (a.pose.x, a.pose.z), own_r) else { return true };
     let cruise = fauna.config.manifest(founder).cruise_m_per_s;
     let field = routes.distances(from, reach_steps(pk, cruise, v));
-    strike_node(&routes, t, height_of(fauna, t.id), geometry, h, v).is_some_and(|j| field.contains_key(&j))
+    strike_node(routes, t, height_of(fauna, t.id), geometry, h, v).is_some_and(|j| field.contains_key(&j))
+}
+
+/// VH-TEACH: **the Veilhound's `Reach` block** for hound `i` and the prey on its `Prey` slot
+/// (`prey`, as the slot shows it: known and within `fresh_s`):
+/// - `den`: it knows a walking way home ([`super::den_way`]);
+/// - `prey`: it can walk to a face it would strike that prey from within a chase
+///   ([`reachable`], the choice's own bound), on its lineage's route graph as last built;
+/// - `prey_lost`: it lost that prey within `shun_s` (its own memory of the chase,
+///   [`Hound::shuns`]).
+///
+/// The tactic chooses only prey it can reach and has not just lost, and walks a sated hound
+/// home only along a way it knows; without these a brain could not tell its search with such
+/// a prey beside it from a hunt, or its rest away from a den it cannot reach from the walk
+/// home. Read only; no slot prey reads 0 on both prey channels. A brain body's lost chases
+/// are its teacher's memory (the tactic writes it), so only a heuristic or dry-taught hound
+/// fills `prey_lost`.
+pub(crate) fn reach(fauna: &Fauna, i: usize, view: &VoxelView<'_>, prey: &Track, fresh_s: f64) -> [f64; 3] {
+    let a = &fauna.animals[i];
+    let den = f64::from(super::den_way(fauna, a, view));
+    let Some(founder) = a.founder else { return [den, 0.0, 0.0] };
+    let phys = fauna.config.founder(founder);
+    let slot = prey.known && fresh_s > 0.0 && prey.age(fauna.tick) as f64 * DT <= fresh_s;
+    let (Some(pk), Some(h), true) = (phys.pack, phys.active_hunter(), slot) else { return [den, 0.0, 0.0] };
+    let geometry = phys.body_at(a.body);
+    let way = fauna
+        .pack_routes
+        .get(&founder.index())
+        .is_some_and(|(_, routes)| reachable_on(fauna, routes, view.config.voxel_m, founder, &pk, &geometry, &h, a, prey));
+    [den, f64::from(way), f64::from(memory(fauna, a.id).shuns(prey.id, fauna.tick))]
 }
 
 /// **Commit** hound `i` to `p` (a chase): its memory, focus, the hunt cue, and bookkeeping.

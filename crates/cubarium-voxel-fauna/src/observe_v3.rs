@@ -10,8 +10,8 @@
 //!   a heuristic body's reflexes, so for the encoding they are read **fresh**, read only,
 //!   into a copy ([`fresh_record`]): a brain body, which runs no reflex, sees them as a
 //!   heuristic one would. Nothing here writes the world.
-//! - **The body**: its stomach, latch, wound, stamina, hunker, water state, mode, pack and
-//!   rest bout.
+//! - **The body**: its stomach, latch, wound, stamina, hunker, water state, mode, pack,
+//!   rest bout and (the Veilhound) the ways it knows it can walk.
 //! - **The clock** ([`Clock`]): daylight and the day's phase.
 //!
 //! # Bearings
@@ -229,6 +229,7 @@ pub(crate) fn encode(
             "Glow" => out.copy_from_slice(&glow(fauna, &p, &frame)),
             "Hunker" => out[0] = f64::from(a.hunkered),
             "Rhythm" => out[0] = f64::from(a.rest_ticks > 0),
+            "Reach" => out.copy_from_slice(&crate::pack::tactics::reach(fauna, i, view, &p.best[usize::from(class::PREY)], fresh)),
             "Amphibious" => out.copy_from_slice(&[
                 clamp01(a.mobility.dryness),
                 f64::from(a.mobility.thirsty),

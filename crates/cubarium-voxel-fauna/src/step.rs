@@ -1667,6 +1667,9 @@ pub(crate) fn controllers(
     // CONTRACTS: the calls emitted since the last tick, heard by their own range, asleep too.
     crate::calls::hear(fauna, view);
     crate::places::refresh(fauna, view, &flora.view(), sky);
+    // VH-TEACH: the den route fields the observations' `Reach.den` reads, current with the
+    // route graphs as last built (no graph is built here).
+    crate::pack::warm_den_paths(fauna);
     let due: Vec<usize> = fauna
         .animals
         .iter()
