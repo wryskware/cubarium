@@ -2022,6 +2022,19 @@ fn print_header() {
     // starved.
     header.push_str(",larvae_vine,larvae_vaulttree,larva_mass,larva_eggs_in,larvae_emerged,larva_died_background");
     header.push_str(",larva_eaten_seedporter,larva_eaten_seedporter_organic,larva_eaten_browser,larva_leaf_eaten,larva_died_host,larva_died_starved,larva_pool");
+    // CALF-PLACE (2026-10-13): the loftstrider calves now (a young of its mother,
+    // `roam::young_of_mother`), those whose living mother is beyond `young.excursion_m` (ground
+    // distance), those whose mother is gone, and the mean calf-to-mother distance, metres;
+    // then this session's excursions begun and bleats; then, per lineage `f`, its hits on and
+    // kills of a loftstrider calf, and its wounding hits on loftstriders and on Veilhounds
+    // (`roam::HarmTally`; session counts, from 0 at a load).
+    header.push_str(",ls_calves,ls_calves_far,ls_calves_orphan,ls_calf_dist_m,ls_excursions,ls_bleats");
+    for f in Founder::ALL {
+        header.push_str(&format!(",calf_wounds_{0}_loftstrider,calf_kills_{0}_loftstrider", f.name()));
+    }
+    for f in Founder::ALL {
+        header.push_str(&format!(",wounds_{0}_loftstrider,wounds_{0}_{1}", f.name(), Founder::Chorister.name()));
+    }
     header.push_str(",seed");
     println!("{header}");
 }
@@ -2388,6 +2401,43 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         row.push(format!("{:.3}", l.died_host));
         row.push(format!("{:.3}", l.died_starved));
         row.push(format!("{:.3}", av.larvae.pool_count()));
+    }
+    {
+        let fa = sim.fauna();
+        let av = fa.view();
+        let ls = Founder::Loftstrider;
+        let ring = f64::from(sim.world().config().width) * sim.world().config().voxel_m;
+        let far_m = fa.config().founder(ls).young.excursion_m;
+        let (mut calves, mut far, mut orphan, mut dist) = (0usize, 0usize, 0usize, 0.0f64);
+        for a in av.animals.iter().filter(|a| a.founder == Some(ls) && cubarium_voxel_fauna::roam::young_of_mother(fa.config(), a)) {
+            calves += 1;
+            match cubarium_voxel_fauna::mother_body(a).and_then(|m| av.animal(m)) {
+                Some(m) => {
+                    let dx = (a.pose.x - m.pose.x).rem_euclid(ring);
+                    let d = dx.min(ring - dx).hypot(a.pose.z - m.pose.z);
+                    dist += d;
+                    far += usize::from(d > far_m);
+                }
+                None => orphan += 1,
+            }
+        }
+        let with_mother = calves - orphan;
+        let t = fa.roam_tally(ls);
+        row.push(calves.to_string());
+        row.push(far.to_string());
+        row.push(orphan.to_string());
+        row.push(if with_mother > 0 { format!("{:.2}", dist / with_mother as f64) } else { String::new() });
+        row.push(t.started.iter().sum::<u64>().to_string());
+        row.push(t.bleats.to_string());
+        let h = fa.harm_tally();
+        for f in Founder::ALL {
+            row.push(h.young_wounds[f.index()][ls.index()].to_string());
+            row.push(h.young_kills[f.index()][ls.index()].to_string());
+        }
+        for f in Founder::ALL {
+            row.push(h.wounds[f.index()][ls.index()].to_string());
+            row.push(h.wounds[f.index()][Founder::Chorister.index()].to_string());
+        }
     }
     // Read the kept world's seed, including fallback and loaded-world starts.
     row.push(sim.world().config().seed.to_string());

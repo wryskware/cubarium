@@ -417,3 +417,40 @@ fn every_lineage_places_where_it_can_live() {
     assert_eq!(fauna.view().animals.len(), Founder::COUNT);
     closes(&flora, &fauna);
 }
+
+#[test]
+fn a_calve_entry_gives_each_grown_body_its_calves_also_on_a_loaded_running_layer() {
+    let (world, mut flora, mut fauna) = layers();
+    let ls = Founder::Loftstrider;
+    let mut e = Edit::new(&world, &mut flora, &mut fauna);
+    let a = body_id(e.place_animal(ls, At::Column { x: 30, z: 20 }, adult()).expect("placed"));
+    let b = body_id(e.place_animal(ls, At::Column { x: 54, z: 24 }, adult()).expect("placed"));
+    // A juvenile is no mother.
+    e.place_animal(ls, At::Column { x: 4, z: 24 }, BodySpec { stage: BodyStage::Juvenile, ..adult() }).expect("placed");
+    // The layer runs a while, is saved and read back (a `load=`): its clock is past 0.
+    for _ in 0..5 {
+        fauna.step(&world, &mut flora);
+    }
+    let mut loaded = Fauna::load(&fauna.save()).expect("loads");
+    loaded.replace_config(fauna.config().clone()).unwrap();
+    assert!(loaded.tick() > 0);
+    let sc = Scenario::from_toml("[[calve]]\nlineage = \"loftstrider\"\ncount = 2\nage_s = 600\n").expect("parses");
+    let r = sc.apply(&mut Edit::new(&world, &mut flora, &mut loaded));
+    assert!(r.refused.is_empty(), "{r:?}");
+    assert!(r.applied[0].contains("4 loftstrider calves"), "{r:?}");
+    let age = (600.0 * f64::from(cubarium_voxel_fauna::TICK_HZ)) as u64;
+    let v = loaded.view();
+    for m in [a, b] {
+        let calves: Vec<_> = v.animals.iter().filter(|c| c.mother == Some(m)).collect();
+        assert_eq!(calves.len(), 2, "mother {m}");
+        let mp = v.animal(m).unwrap().pose;
+        for c in calves {
+            assert_eq!(c.age_ticks, age);
+            assert!(cubarium_voxel_fauna::roam::young_of_mother(loaded.config(), c));
+            let d = (c.pose.x - mp.x).hypot(c.pose.z - mp.z);
+            assert!(d <= (crate::edit::SNAP_CELLS as f64 + 1.0) * V * std::f64::consts::SQRT_2, "beside her: {d} m");
+        }
+    }
+    closes(&flora, &loaded);
+    assert!(Scenario::from_toml("[[calve]]\nlineage = \"nope\"\n").unwrap().apply(&mut Edit::new(&world, &mut flora, &mut loaded)).refused.len() == 1);
+}

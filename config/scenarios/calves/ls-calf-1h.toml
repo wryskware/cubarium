@@ -1,0 +1,12 @@
+# CALF-PLACE (design/handoffs/calf-place-2026-10-13.md): one calf beside every grown
+# loftstrider, its mother's own, an hour old: `voxel_census … edit=THIS`.
+#
+# Why an hour: a loftstrider calf strays from birth (it does not nurse), its excursions rising
+# from `young.excursion_per_h` 1/h at birth to 4/h at `young.independence_s` (15,000 s) and its
+# leash from `follow_m` 3 m to `roam_m` 10 m. At 3,600 s it is a quarter of the way (about
+# 1.7 excursions an hour, a 4.7 m leash), and a three-hour run ends at 14,400 s, still short
+# of independence: the whole run is the straying age.
+[[calve]]
+lineage = "loftstrider"
+count = 1
+age_s = 3600

@@ -168,6 +168,21 @@ impl Lifted {
     }
 }
 
+/// The Cubarium year a conception fell in that came `gestation_ticks` before a birth
+/// `age_ticks` before `view`'s tick ([`cubarium_voxel::weather::Climate::year`]'s clock, run
+/// back past tick 0 when it must); `None` with no year.
+fn conception_year(view: &VoxelView<'_>, age_ticks: u64, gestation_ticks: u64) -> Option<i64> {
+    let c = view.config;
+    let day_s = c.day.day_s();
+    let every = c.climate.dry_season_every_days;
+    if !(every > 0.0) || !(day_s > 0.0) {
+        return None;
+    }
+    let ticks = view.tick as f64 - age_ticks as f64 - gestation_ticks as f64;
+    let days = ticks * cubarium_voxel::DT / day_s;
+    Some(((days - c.climate.dry_season_phase_days) / every).floor() as i64)
+}
+
 /// Where a body would stand: its support face, pose and mode.
 #[derive(Clone, Copy, Debug)]
 struct Stance {
@@ -419,6 +434,95 @@ impl Fauna {
         }
         self.install_founder_controller(id, founder);
         Ok(Placed::Body { id, pack: pack_id })
+    }
+
+    /// **A calf of adult `mother`, `age_ticks` old, placed at `spot`** (CALF-PLACE, a dev
+    /// scenario control): a juvenile of her lineage, placed as [`Fauna::place_body`] places
+    /// one (`body_min`, a newborn's structure; its reserve and stomach at `fullness`, or the
+    /// founding arrival's), facing her heading, in her pack when she has one. Then it is
+    /// made the young a birth makes: its recorded mother is `mother` (the bond every reader
+    /// keys on: the follow, the leash and excursions, nursing, the calls' recognised voice,
+    /// the defence's own calf) and its age is `age_ticks`, its drawn lifespan kept as
+    /// [`Fauna::stage_identity`] keeps it. Unlike that one, any tick: a loaded world too.
+    ///
+    /// Booked as a placement (`introduced_*_in`), not a birth: the mother pays nothing, and
+    /// nothing is counted born or given. Her side of the birth is [`Fauna::mark_birth`],
+    /// once per litter. Refused (nothing changed) for a missing, riding or not grown
+    /// (`birth_body`) mother, or a lineage that lays eggs.
+    pub fn place_calf(
+        &mut self,
+        world: &World,
+        flora: &Flora,
+        mother: u64,
+        spot: Spot,
+        age_ticks: u64,
+        fullness: Option<f64>,
+    ) -> Result<u64, String> {
+        let m = *self.animals.get(self.index_of(mother).ok_or_else(|| format!("no animal {mother}"))?).expect("indexed");
+        let founder = m.founder.ok_or("the mother has no lineage")?;
+        let core = self.config.founder(founder).core;
+        if core.reproduction.mode != BirthMode::Gestation {
+            return Err(format!("the {} lineage lays eggs: it has no calves", founder.name()));
+        }
+        if m.attached.is_some() {
+            return Err("the mother is riding a host".into());
+        }
+        if m.body < core.birth_body {
+            return Err(format!("animal {mother} is not grown ({:.1} of {:.1} birth body)", m.body, core.birth_body));
+        }
+        let group = match m.pack {
+            Some(p) => Group::Join(p.pack),
+            None => Group::Auto,
+        };
+        let spec = BodySpec { stage: BodyStage::Juvenile, fullness, group, heading_rad: m.pose.heading_rad };
+        let Placed::Body { id, .. } = self.place_body(world, flora, founder, spot, spec)? else {
+            unreachable!("a juvenile is a body");
+        };
+        let i = self.index_of(id).expect("just placed");
+        let a = &mut self.animals[i];
+        if a.lifespan_ticks != 0 {
+            a.lifespan_ticks = a.lifespan_ticks.saturating_sub(a.age_ticks).saturating_add(age_ticks);
+        }
+        a.age_ticks = age_ticks;
+        a.mother = Some(mother);
+        Ok(id)
+    }
+
+    /// **Her side of a birth `age_ticks` ago** (CALF-PLACE), for a mother given calves by
+    /// [`Fauna::place_calf`], once per litter: what a term leaves on a mother and is still
+    /// running at that age.
+    /// - The refractory after a birth (`birth_interval_s`), less the age: while any is left
+    ///   it holds, and her surplus window starts over as at a term.
+    /// - Her breeding season (LIFE-HISTORY, `litters_per_year`): the conception
+    ///   (`gestation_s` before the birth) counts against the Cubarium year it fell in, her
+    ///   pack's for a pack member, so she does not conceive again in that year.
+    ///
+    /// Not her reserve (the calf is placed, not paid for) and not her `given`: a birth's
+    /// books stay with births. A gestation she has open is left as it is. `false` when there
+    /// is no such body.
+    pub fn mark_birth(&mut self, view: &VoxelView<'_>, mother: u64, age_ticks: u64) -> bool {
+        let Some(i) = self.index_of(mother) else { return false };
+        let rule = crate::body::effective_config(&self.config, &self.animals[i]).reproduction;
+        let left = rule.interval_ticks().saturating_sub(age_ticks);
+        let r = &mut self.animals[i].reproduction;
+        if left > r.refractory_ticks {
+            r.refractory_ticks = left;
+            r.surplus_ticks = 0;
+            r.window.reset();
+        }
+        if rule.litters_per_year > 0
+            && let Some(year) = conception_year(view, age_ticks, rule.gestation_ticks())
+        {
+            match self.animals[i].pack.map(|p| p.pack) {
+                Some(p) if self.pack(p).is_some() => {
+                    if let Some(rec) = self.pack_mut(p) {
+                        rec.season.count(year);
+                    }
+                }
+                _ => self.animals[i].reproduction.season.count(year),
+            }
+        }
+        true
     }
 
     /// One egg of `lineage` on `site` (module note): the count laid.
@@ -783,3 +887,7 @@ fn new_pack(id: u64, lineage: Founder, den: Site, breeder: u64) -> PackRecord {
         season: Season::default(),
     }
 }
+
+#[cfg(test)]
+#[path = "calve_tests.rs"]
+mod calve_tests;

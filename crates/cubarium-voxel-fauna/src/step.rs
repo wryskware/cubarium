@@ -4523,8 +4523,17 @@ fn wound(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage: f64, by: Found
         return;
     };
     let alert_s = fauna.config.predation.alert_s;
+    let harmed = damage.is_finite() && damage > 0.0;
+    let young = crate::roam::young_of_mother(&fauna.config, &fauna.animals[j]);
+    if let (true, Some(f)) = (harmed, fauna.animals[j].founder) {
+        let t = &mut fauna.harm_tally;
+        t.wounds[by.index()][f.index()] += 1;
+        if young {
+            t.young_wounds[by.index()][f.index()] += 1;
+        }
+    }
     let a = &mut fauna.animals[j];
-    if damage.is_finite() && damage > 0.0 {
+    if harmed {
         a.wound += damage;
     }
     if a.state == State::Asleep {
@@ -4536,6 +4545,9 @@ fn wound(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage: f64, by: Found
     a.rest = None;
     a.alert_ticks = u32::try_from(cubarium_voxel::ticks_at_least_one(alert_s)).unwrap_or(u32::MAX);
     if a.wound >= 1.0 {
+        if let (true, Some(f)) = (young, a.founder) {
+            fauna.harm_tally.young_kills[by.index()][f.index()] += 1;
+        }
         kill(fauna, flora, j, Departure::Killed { by }, view);
     }
 }

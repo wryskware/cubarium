@@ -88,6 +88,17 @@ pub struct Populated {
     pub shortfall: Option<String>,
 }
 
+/// What [`Edit::calve`] did.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Calved {
+    /// The grown bodies taken as mothers.
+    pub mothers: usize,
+    /// Each calf placed, with its mother: `(calf, mother)`.
+    pub calves: Vec<(u64, u64)>,
+    /// Each calf refused, with the mother and the reason.
+    pub refused: Vec<String>,
+}
+
 /// One animal near a point ([`Edit::pick`]).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct PickedAnimal {
@@ -277,6 +288,52 @@ impl<'a> Edit<'a> {
         let faces = self.faces_for(at)?;
         let (world, fauna) = (self.world, &mut *self.fauna);
         Self::first_ok(faces, |s| fauna.move_body(world, id, Spot::Face(s)))
+    }
+
+    /// **Give every grown body of `founder` `n` calves `age_s` old beside it** (CALF-PLACE): the
+    /// mothers are its bodies at or past `birth_body`, not riding, standing in `region` (anywhere
+    /// when `None`), taken before any calf is placed and in id order. Each calf goes on the
+    /// nearest valid face to its mother (her own face first, as a birth puts it;
+    /// [`SNAP_CELLS`]), by [`Fauna::place_calf`] (`fullness` as there); a mother with at least
+    /// one calf then gets [`Fauna::mark_birth`]. A calf no face near her takes is refused
+    /// with her id and the reason.
+    pub fn calve(&mut self, founder: Founder, n: usize, age_s: f64, fullness: Option<f64>, region: Option<Region>) -> Calved {
+        let mut out = Calved::default();
+        if !(age_s.is_finite() && age_s >= 0.0) {
+            out.refused.push(format!("age_s {age_s} is not a finite age"));
+            return out;
+        }
+        let age_ticks = (age_s * f64::from(cubarium_voxel_fauna::TICK_HZ)).round() as u64;
+        let birth = self.fauna.config().founder(founder).core.birth_body;
+        let width = self.world.config().width;
+        let mothers: Vec<(u64, f64, f64, f64)> = self
+            .fauna
+            .view()
+            .animals
+            .iter()
+            .filter(|a| a.founder == Some(founder) && a.attached.is_none() && a.body >= birth)
+            .filter(|a| region.is_none_or(|r| r.holds(width, a.site)))
+            .map(|a| (a.id, a.pose.x, a.pose.y_m, a.pose.z))
+            .collect();
+        for (mother, x, y, z) in mothers {
+            out.mothers += 1;
+            let mut born = 0;
+            for _ in 0..n {
+                let faces = self.snap_candidates(x, y, z);
+                let (world, flora, fauna) = (self.world, &*self.flora, &mut *self.fauna);
+                match Self::first_ok(faces, |s| fauna.place_calf(world, flora, mother, Spot::Face(s), age_ticks, fullness)) {
+                    Ok(id) => {
+                        born += 1;
+                        out.calves.push((id, mother));
+                    }
+                    Err(e) => out.refused.push(format!("mother {mother}: {e}")),
+                }
+            }
+            if born > 0 {
+                self.fauna.mark_birth(&self.world.view(), mother, age_ticks);
+            }
+        }
+        out
     }
 
     // ----------------------------------------------------------------- plants
@@ -622,7 +679,8 @@ impl crate::Sim {
 /// **A scenario file** (`voxel_census … edit=FILE.toml`): edits applied after founding or
 /// after `load=`, before the first tick. Applied in this order whatever order the file
 /// lists them in — every removal before any addition: `[[remove]]`, `[[clear]]`, `[[thin]]`,
-/// `[[paint]]`, `[[place]]`, `[[populate]]`; within a kind, in file order.
+/// `[[paint]]`, `[[place]]`, `[[populate]]`, `[[calve]]` (last, so the adults placed or
+/// populated above get calves too); within a kind, in file order.
 ///
 /// ```toml
 /// [[thin]]
@@ -654,6 +712,13 @@ impl crate::Sim {
 ///
 /// [[clear]]
 /// region = { x = [0, 10], z = [0, 10] }   # or faces = [[x, y, z], ...]
+///
+/// [[calve]]                               # CALF-PLACE: calves with their mothers
+/// lineage = "loftstrider"                 # a live-bearer
+/// count = 1                               # calves beside each grown body (default 1)
+/// age_s = 3600                            # their age, seconds (default 0, a newborn)
+/// fullness = 0.8                          # optional, as on `[[place]]`
+/// region = { x = [0, 40], z = [0, 20] }   # optional: only mothers standing here
 /// ```
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -670,6 +735,8 @@ pub struct Scenario {
     pub place: Vec<PlaceEntry>,
     #[serde(default)]
     pub populate: Vec<PopulateEntry>,
+    #[serde(default)]
+    pub calve: Vec<CalveEntry>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -735,6 +802,25 @@ pub struct PopulateEntry {
     pub region: Option<Region>,
     pub stage: Option<String>,
     pub fullness: Option<f64>,
+}
+
+/// `[[calve]]` ([`Edit::calve`]): a new kind rather than fields on `[[place]]` or
+/// `[[populate]]`, because a calf is placed by its mother, not at a spot or spread over a
+/// region, and it must follow the adults those two add.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CalveEntry {
+    pub lineage: String,
+    #[serde(default = "one")]
+    pub count: usize,
+    #[serde(default)]
+    pub age_s: f64,
+    pub fullness: Option<f64>,
+    pub region: Option<Region>,
+}
+
+fn one() -> usize {
+    1
 }
 
 /// What a scenario did: one line per entry applied, one per entry (or face) refused.
@@ -829,6 +915,23 @@ impl Scenario {
                 ))
             })();
             push(&mut r, format!("populate[{k}]"), res);
+        }
+        for (k, x) in self.calve.iter().enumerate() {
+            let Some(f) = lineage_named(&x.lineage) else {
+                r.refused.push(format!("calve[{k}]: no lineage {:?}", x.lineage));
+                continue;
+            };
+            let c = e.calve(f, x.count, x.age_s, x.fullness, x.region);
+            r.applied.push(format!(
+                "calve[{k}]: {} {} calves {} s old beside {} mothers",
+                c.calves.len(),
+                f.name(),
+                x.age_s,
+                c.mothers
+            ));
+            for (why, n) in tally(c.refused.into_iter()) {
+                r.refused.push(format!("calve[{k}]: {n}x {why}"));
+            }
         }
         r
     }

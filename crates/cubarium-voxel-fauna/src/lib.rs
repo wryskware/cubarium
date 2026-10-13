@@ -4403,6 +4403,9 @@ pub struct Fauna {
     /// YOUNG-ROAM's readout per lineage ([`roam::RoamTally`]). Session state: not saved.
     #[serde(skip)]
     pub(crate) roam_tally: [roam::RoamTally; Founder::COUNT],
+    /// CALF-PLACE's harm readout ([`roam::HarmTally`]). Session state: not saved.
+    #[serde(skip)]
+    pub(crate) harm_tally: roam::HarmTally,
     /// EDGE: per body, the target a reflex walk is taking it to ([`Fauna::walk_key`]: a
     /// stand's id, or a face), the tick it set out (`teachers.press_replan_s` runs from there)
     /// and the last tick it walked there. Session state: not saved.
@@ -5018,6 +5021,7 @@ impl Fauna {
             ls_teach: FxHashMap::default(),
             excursions: FxHashMap::default(),
             roam_tally: [roam::RoamTally::default(); Founder::COUNT],
+            harm_tally: roam::HarmTally::default(),
             heard: FxHashMap::default(),
             walk_targets: FxHashMap::default(),
             walk_pending: FxHashMap::default(),
@@ -5092,6 +5096,11 @@ impl Fauna {
     /// YOUNG-ROAM's readout for lineage `founder` ([`roam::RoamTally`]).
     pub fn roam_tally(&self, founder: Founder) -> roam::RoamTally {
         self.roam_tally[founder.index()]
+    }
+
+    /// CALF-PLACE's harm readout this session ([`roam::HarmTally`]).
+    pub fn harm_tally(&self) -> roam::HarmTally {
+        self.harm_tally
     }
 
     /// Body `id`'s excursion under way, if any ([`roam::excursion`]).

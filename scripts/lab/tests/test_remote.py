@@ -237,6 +237,8 @@ class RemoteTests(test_lab.LabCase):
         policy.write_bytes(b"policy input")
         genome = self.root / "genome.toml"
         genome.write_text("gene = []\n")
+        scenario = self.root / "scenario.toml"
+        scenario.write_text("[[calve]]\nlineage = \"loftstrider\"\n")
         checkpoint = self.root / "library/s4/run/ckpt/m000020"
         checkpoint.mkdir(parents=True)
         (checkpoint / "minute").write_text("20\n")
@@ -248,7 +250,7 @@ class RemoteTests(test_lab.LabCase):
         for source in (["--config=config/input.toml", "--seeds", "1"], ["--starts", str(checkpoint)]):
             job = self.submit(dict(kind="batch", hosts=["far"], parallel=1, mem_gb=1,
                                   binary=dict(tree=str(self.trees["main"]), commit=commit),
-                                  _cwd=str(self.trees["main"]), args=["--arm", f"base=policy=fixture={policy} genome={genome}",
+                                  _cwd=str(self.trees["main"]), args=["--arm", f"base=policy=fixture={policy} genome={genome} edit={scenario}",
                                   "--required", str(required), "--hours", "0.1", *source]))
             self.assertEqual(self.finished(daemon, job)[0], "done")
             view = daemon.job(job).tasks["batch"]
@@ -259,6 +261,9 @@ class RemoteTests(test_lab.LabCase):
             self.assertTrue(view.task.l3)
             self.assertIn("/far/jobs/", manifest["identity"]["required"]["path"])
             self.assertIn("/far/jobs/", manifest["identity"]["policies"]["base"]["fixture"]["path"])
+            edits = [a for a in run["command"] if a.startswith("edit=")]
+            self.assertEqual(len(edits), 1)
+            self.assertIn("/far/jobs/", edits[0], "the scenario file is staged on the host")
             if source[0].startswith("--config"):
                 self.assertEqual((view.out / "batch/base/s1/run/config-used").read_bytes(),
                                  (self.trees["main"] / "config/input.toml").read_bytes())

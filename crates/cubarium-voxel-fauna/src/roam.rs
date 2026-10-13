@@ -274,6 +274,28 @@ pub struct RoamTally {
     pub answer_samples: u64,
 }
 
+/// **A young of its mother** (CALF-PLACE's readout): a body that knows its mother
+/// ([`crate::mother_body`], living or not) and is younger than its lineage's
+/// `young.independence_s` or nursing `weaning_age_s`, whichever is later; never for a
+/// lineage with neither. Readouts only.
+pub fn young_of_mother(config: &crate::FaunaConfig, a: &crate::Animal) -> bool {
+    let Some(f) = a.founder else { return false };
+    let phys = config.founder(f);
+    let until = phys.young.independence_s.max(if phys.nursing.on() { phys.nursing.weaning_age_s } else { 0.0 });
+    crate::mother_body(a).is_some() && until > 0.0 && (a.age_ticks as f64) * DT < until
+}
+
+/// **Harm by lineage** (CALF-PLACE's readout; session state, not saved, diagnostics only),
+/// indexed `[by][prey]` in [`Founder::ALL`] order: every wounding hit (a strike landed or a
+/// kick), and the hits on and kills of a young of its mother ([`young_of_mother`], read at
+/// the hit).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HarmTally {
+    pub wounds: [[u64; Founder::COUNT]; Founder::COUNT],
+    pub young_wounds: [[u64; Founder::COUNT]; Founder::COUNT],
+    pub young_kills: [[u64; Founder::COUNT]; Founder::COUNT],
+}
+
 /// Whether body `i`'s record holds a fresh track of `cls`.
 fn senses_class(fauna: &Fauna, id: u64, cls: u8) -> bool {
     let fresh = 2 * fauna.config.perception.stagger_ticks();
