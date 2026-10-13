@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What do a lanternjaw's twins differ in? (LJ-TWIN, stdlib only)
 
-    twin_signal.py DIR [DIR...]      # lj_twin's out dirs (pairs.jsonl)
+    twin_signal.py DIR [DIR...]      # lj_twin's out dirs (pairs.jsonl, staged.jsonl)
 
 Every row of pairs.jsonl is one matched pair: one live start run twice, identical but
 for the variant sign (`all`: every lanternjaw on +eps_p / -eps_p; `focal`: one; `null`:
@@ -23,6 +23,9 @@ the same candidate in both copies, the determinism floor). Per (sigma, mode):
 - meals: the share of variant body-windows that swallowed anything (> 0.05 body
   references) and a meal (> 0.5), and of pairs whose twins differ in having a meal.
 - window length: sd(d) and ICC from the per-minute scores at 2, 5 and the full window.
+
+With staged.jsonl (lj_twin staged=N): per mode scene and sigma, d = (+) - (-) of the
+scene's competence, mode share and energy on the same seed, and its ICC over seeds.
 """
 
 import json
@@ -31,6 +34,12 @@ import statistics as st
 import sys
 from collections import defaultdict
 from pathlib import Path
+
+
+# The lanternjaw centre's top layer (lj_twin info=1: 2832 of 18208 weights) and the
+# update quality the prices are stated at.
+TOP_PARAMS = 2832
+COS = 0.2
 
 
 def icc(groups):
@@ -69,10 +78,36 @@ def tv(a, b):
     return 0.5 * sum(abs(x - y) for x, y in zip(a, b))
 
 
-def main(dirs):
+def staged(dirs):
+    """lj_twin staged=N: per (sigma, scene), d = (+) - (-) on the same seed, ICC over seeds."""
     rows = []
     for d in dirs:
-        for line in (Path(d) / "pairs.jsonl").read_text().splitlines():
+        f = Path(d) / "staged.jsonl"
+        if f.exists():
+            rows += [json.loads(l) for l in f.read_text().splitlines() if l.strip()]
+    by = defaultdict(list)
+    for r in rows:
+        by[(r["scene"], r["sigma"])].append(r)
+    for (scene, sigma), rs in sorted(by.items()):
+        print(f"== staged {scene} sigma {sigma}: {len(rs)} pairs x seeds, seeds {len({r['seed'] for r in rs})}, "
+              f"max null gap {max(max(r['null_gap']) for r in rs):.3g}")
+        for key in ("competence", "mode_share", "energy"):
+            g = defaultdict(list)
+            for r in rs:
+                g[r["pair"]].append(r[key][0] - r[key][1])
+            fl = [x for v in g.values() for x in v]
+            print(f"  {key:>10}: mean {st.fmean(r[key][0] + r[key][1] for r in rs) / 2:.3f}, sd d {st.pstdev(fl):.4f}, "
+                  f"d==0 {sum(1 for x in fl if x == 0) / len(fl):.2f}, ICC over seeds {fmt_icc(icc(g))}")
+
+
+def main(dirs):
+    staged(dirs)
+    rows = []
+    for d in dirs:
+        f = Path(d) / "pairs.jsonl"
+        if not f.exists():
+            continue
+        for line in f.read_text().splitlines():
             if line.strip():
                 rows.append(json.loads(line))
     by = defaultdict(list)
@@ -125,7 +160,19 @@ def main(dirs):
             ds = [b["score"][0] - b["score"][1] for b in r["bodies"] if b["on_variant"]]
             groups[r["pair"]].append(st.fmean(ds))
         flat = [x for v in groups.values() for x in v]
-        print(f"  consistency ICC over starts: {fmt_icc(icc(groups))}; sd d(pair) {st.pstdev(flat):.3f}, mean d {st.fmean(flat):+.3f}")
+        c = icc(groups)
+        print(f"  consistency ICC over starts: {fmt_icc(c)}; sd d(pair) {st.pstdev(flat):.3f}, mean d {st.fmean(flat):+.3f}")
+        # Price: the update's cosine with the true top gradient is about
+        # sqrt(N icc / (N icc + n)) over N pair differences (antithetic ES, n top weights), so
+        # cos >= COS needs N = n cos^2 / ((1 - cos^2) icc). Each pair costs its two copies'
+        # measured thread-seconds; at the ICC's upper bound this is the cheapest it can be.
+        cost = st.fmean(r["wall_s"] for r in rs)
+        if c is not None:
+            need = TOP_PARAMS * COS ** 2 / (1 - COS ** 2)
+            tau2 = max(c[2], 0) * st.pvariance(flat)
+            at = lambda v: "unbounded" if v <= 0 else f"{need / v:,.0f} pairs, {need / v * cost / 3600:,.1f} thread-h"
+            print(f"  price per update at cos {COS}: {cost:.1f} thread-s per pair; at the ICC's point {at(c[0])}; "
+                  f"at its 95% upper bound {at(c[2])} (variant variance <= {tau2:.4f})")
         # meals
         any_ = sum(1 for b in var for s in b["swallowed"] if s > 0.05) / (2 * len(var))
         meal = sum(1 for b in var for s in b["swallowed"] if s > 0.5) / (2 * len(var))
