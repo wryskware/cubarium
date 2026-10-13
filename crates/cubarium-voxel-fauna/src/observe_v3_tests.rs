@@ -191,3 +191,32 @@ fn every_lineages_v3_observation_is_finite_and_bounded() {
     }
     assert_eq!(checked, Founder::COUNT, "every lineage was sampled");
 }
+
+/// CLONE-AGREE: the Veilhound's `Rhythm.rest_bout` reads its own rest bout — 1 while
+/// [`crate::Animal::rest_ticks`] is above 0, else 0 — and nothing else in its observation moves.
+#[test]
+fn a_veilhounds_rest_bout_reads_on_its_rhythm_channel() {
+    let world = clock_off(7);
+    let flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(hunting_config());
+    let id = introduce(&mut fauna, &world, Founder::Chorister, StartingStores::FULL);
+    place(&mut fauna, id, 4.0, 1.5, 0.0);
+    let i = fauna.animals.iter().position(|a| a.id == id).expect("the hound");
+    let m = Founder::Chorister.manifest();
+    let rhythm = m.modules.iter().find(|x| x.name == "Rhythm").expect("the Veilhound reads its rhythm");
+    let clock = crate::observe_v3::Clock { clock_on: true, daylight: 1.0, day_phase: 0.5 };
+    let read = |fauna: &Fauna| {
+        let mut obs = vec![0.0; m.inputs()];
+        crate::observe_v3::encode(fauna, i, &world.view(), &flora.view(), &m, clock, &mut obs);
+        obs
+    };
+    fauna.animals[i].rest_ticks = 0;
+    let awake = read(&fauna);
+    fauna.animals[i].rest_ticks = 5;
+    let bout = read(&fauna);
+    assert_eq!(awake[rhythm.offset], 0.0, "awake");
+    assert_eq!(bout[rhythm.offset], 1.0, "in a rest bout");
+    for k in (0..m.inputs()).filter(|&k| k != rhythm.offset) {
+        assert_eq!(awake[k], bout[k], "channel {k} moved with the bout");
+    }
+}
