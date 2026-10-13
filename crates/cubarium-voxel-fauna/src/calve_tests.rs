@@ -234,6 +234,26 @@ fn mark_birth_holds_what_is_left_of_the_refractory_and_counts_the_conception_yea
     assert!(!f.mark_birth(&w.view(), 9_999, 0), "no such body");
 }
 
+#[test]
+fn hits_on_and_kills_of_a_calf_are_tallied_by_lineage_apart_from_an_adults() {
+    let (w, mut flora, mut f) = running(config());
+    let mother = grown(&mut f, &w, LS, 10.0, MID_Z, EAST);
+    let calf = f.place_calf(&w, &flora, mother, face_at(10.0, MID_Z), ticks(600.0), None).expect("placed");
+    let (ch, ls) = (CH.index(), LS.index());
+    crate::predation::apply_hit(&mut f, &mut flora, calf, 0.25, CH);
+    crate::predation::apply_hit(&mut f, &mut flora, mother, 0.25, CH);
+    let t = f.harm_tally();
+    assert_eq!((t.wounds[ch][ls], t.young_wounds[ch][ls], t.young_kills[ch][ls]), (2, 1, 0));
+    crate::predation::apply_hit(&mut f, &mut flora, calf, 1.0, CH);
+    assert!(f.view().animal(calf).is_none(), "killed");
+    let t = f.harm_tally();
+    assert_eq!((t.wounds[ch][ls], t.young_wounds[ch][ls], t.young_kills[ch][ls]), (3, 2, 1));
+    // A hound kicked: a wound on a Veilhound by a loftstrider.
+    let vh = grown(&mut f, &w, CH, 20.0, MID_Z, WEST);
+    crate::predation::apply_hit(&mut f, &mut flora, vh, 0.25, LS);
+    assert_eq!(f.harm_tally().wounds[ls][ch], 1);
+}
+
 /// Body `me` sees exactly `bodies` now: `(id, class, moving)`.
 fn sees(f: &mut Fauna, me: u64, bodies: &[(u64, u8, bool)]) {
     let tracks: Vec<Track> = bodies.iter().map(|&(id, c, m)| seen(f, me, id, c, m)).collect();
