@@ -1998,3 +1998,136 @@ fn a_bellwing_brushing_along_flowers_visits_none_unless_its_lineage_has_the_swit
         }
     }
 }
+
+// ------------------------------------------------------------------ BW-STUCK: water
+
+/// A plain with `cells` of standing water on every column (on the support face `y = 2`).
+fn pond(world: &mut World, cells: f64) {
+    let c = world.config().clone();
+    for z in 0..c.depth {
+        for x in 0..i64::from(c.width) {
+            world.apply(WorldCommand::AddWater { x, y: 3, z, volume_m3: cells * c.voxel_volume() });
+        }
+    }
+}
+
+/// The bellwing's vertical pace at `body`: the lift speed (`lift_speed_fraction` × cruise).
+fn lift_pace(fauna: &Fauna, body: f64) -> f64 {
+    bellwing_flight(fauna).lift_speed_fraction * fauna.config().body_manifest(BW, body).cruise_m_per_s
+}
+
+/// **BW-STUCK: a drop that ends on deep water ends there** (LIVE-CHECK, branch s5 body 176:
+/// a newborn bellwing dropped off a lost perch it could not take off from, met a pond too
+/// deep to stand in, and hung `falling` on its surface for 2.8 h with its controls
+/// overridden to "down"). A bellwing perched on a crown over a pond, too spent to pay a
+/// takeoff, loses the crown and drops; on the water the drop is over: it is a flyer
+/// hovering on the surface, and its own lift takes it off the water within the drop's and
+/// one voxel's climb at its lift pace (× 2 slack, + a second).
+#[test]
+fn a_drop_onto_deep_water_ends_and_the_flyer_climbs_off_it() {
+    let mut world = plain(16, 20, 8);
+    let mut config = FloraConfig::default();
+    config.bloomcrown.graze_refuge = 0.0;
+    let mut flora = Flora::new(config);
+    let site = full_stand(&mut flora, &world, Plant::Bloomcrown, 8, 4);
+    let top = crown_top(&flora, site);
+    let mut fconfig = FaunaConfig::default();
+    {
+        let p = &mut fconfig.founders[Founder::Bellwing.index()];
+        let flight = p.flight.as_mut().expect("a flyer");
+        let basal = p.core.maintenance_per_s * p.core.body_max;
+        flight.takeoff_s = 2.0 * (1.0 + p.core.reserve_cap) * p.core.body_max / (flight.flight_factor * basal);
+    }
+    let mut fauna = Fauna::new(fconfig);
+    let (x, z) = centre(8, 4);
+    let id = aloft(&mut fauna, &world, x, z, top + 0.3, EAST, StartingStores::FULL);
+    fly(&mut fauna, id, 0.0, 0.0, -1.0);
+    let n = until(&mut fauna, &world, &mut flora, 100, |f| mode(f, id) == MobilityMode::Perched);
+    assert_eq!(perch_kind(&fauna, id), Some(PerchKind::CrownTop), "fixture: perched in {n} ticks");
+    pond(&mut world, 1.0);
+    let water_top = SURFACE + world.view().standing_depth_m(8, 2, 4);
+    let puddle = {
+        let p = fauna.config().founder(BW);
+        p.drown_depth_m(&p.body_at(animal(&fauna, id).body))
+    };
+    assert!(water_top - SURFACE > puddle, "fixture: water deeper than the bellwing stands in");
+    assert!(top > water_top + V, "fixture: the crown stands over the water");
+    assert!(flora.take_foliage(site, 1e9).is_some(), "fixture: the crown is eaten");
+    fly(&mut fauna, id, 0.0, 0.0, 1.0);
+    let pace = lift_pace(&fauna, animal(&fauna, id).body);
+    let bound = (2.0 * ((top - water_top) + V) / pace + 1.0) * f64::from(crate::TICK_HZ);
+    let mut dropped = false;
+    let mut t = 0usize;
+    while (t as f64) < bound {
+        fauna.step(&world, &mut flora);
+        t += 1;
+        let a = animal(&fauna, id);
+        dropped |= a.mobility.falling;
+        assert!(a.pose.y_m >= water_top - 1e-9, "tick {t}: under the water at {}", a.pose.y_m);
+        if dropped && !a.mobility.falling && a.pose.y_m >= water_top + V {
+            break;
+        }
+    }
+    let a = animal(&fauna, id);
+    assert!(dropped, "fixture: too spent to take off, it dropped");
+    assert!(!a.mobility.falling, "the drop ended on the water");
+    assert_eq!(a.mobility.mode, MobilityMode::Fly);
+    assert!(
+        a.pose.y_m >= water_top + V,
+        "it climbed off the water within {bound:.0} ticks: base {} over water at {water_top}",
+        a.pose.y_m
+    );
+}
+
+/// **BW-STUCK: rising water carries a flyer on its surface, and it still flies on.** Over
+/// a pond that rises a little every tick (rain filling it), a bellwing holding forward 1
+/// and lift −1 (a rain-grounded flyer's controls) comes down to the surface and then rides
+/// it — never under it — and covers two voxels within its descent at the lift pace plus
+/// two voxels at cruise (× 2 slack, + a second). Held under each tick's newly risen water
+/// it could not move at all (body 176, 0.03 m in 3 sim-min).
+#[test]
+fn a_flyer_on_rising_water_rides_it_and_still_flies_on() {
+    let mut world = plain(16, 20, 8);
+    pond(&mut world, 0.5);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let (x, z) = centre(8, 4);
+    let y0 = SURFACE + 1.5;
+    let id = aloft(&mut fauna, &world, x, z, y0, EAST, StartingStores::FULL);
+    fly(&mut fauna, id, 1.0, 0.0, -1.0);
+    let body = animal(&fauna, id).body;
+    let cruise = fauna.config().body_manifest(BW, body).cruise_m_per_s;
+    let pace = lift_pace(&fauna, body);
+    let ring = 16.0 * V;
+    let puddle = {
+        let p = fauna.config().founder(BW);
+        p.drown_depth_m(&p.body_at(body))
+    };
+    let start_top = SURFACE + world.view().standing_depth_m(8, 2, 4);
+    assert!(start_top - SURFACE > puddle, "fixture: water deeper than the bellwing stands in");
+    // Come down onto the water first (its forward carries it round the ring meanwhile).
+    let down = until(&mut fauna, &world, &mut flora, 10_000, |f| {
+        let a = animal(f, id);
+        a.pose.y_m <= start_top + 1e-6
+    });
+    assert!((down as f64) < 2.0 * (y0 - start_top) / pace * f64::from(crate::TICK_HZ) + 20.0, "it came down to the water in {down} ticks");
+    let bound = (2.0 * 2.0 * V / cruise + 1.0) * f64::from(crate::TICK_HZ);
+    let mut path = 0.0;
+    let mut t = 0usize;
+    while (t as f64) < bound && path < 2.0 * V {
+        let before = animal(&fauna, id).pose;
+        pond(&mut world, 0.002);
+        fauna.step(&world, &mut flora);
+        t += 1;
+        let a = animal(&fauna, id);
+        let water_top = SURFACE + world.view().standing_depth_m(8, 2, 4);
+        assert!(water_top > start_top, "fixture: the water rises");
+        assert!(a.pose.y_m >= water_top - 1e-9, "tick {t}: under the risen water: base {} water {water_top}", a.pose.y_m);
+        let mut dx = (a.pose.x - before.x).rem_euclid(ring);
+        if dx > 0.5 * ring {
+            dx -= ring;
+        }
+        path += (dx * dx + (a.pose.z - before.z).powi(2)).sqrt();
+    }
+    assert!(path >= 2.0 * V, "it flew on over the rising water: {path:.3} m in {t} ticks (bound {bound:.0})");
+}

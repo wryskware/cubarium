@@ -262,7 +262,8 @@ pub struct Window {
     /// doing instead.
     states: [std::collections::BTreeMap<String, u64>; Founder::COUNT],
     /// FROZEN-PREY: each lineage's sampled body-seconds standing in `State::Resting` with
-    /// the eating or the emergency latch on: hungry, so not a rest it chose.
+    /// the eating or the emergency latch on and no chosen reason to stand still (BW-STUCK:
+    /// the excuses [`hungry_held`] takes): hungry, so not a rest it chose.
     resting_hungry: [u64; Founder::COUNT],
     /// FROZEN-PREY: per founder body, its lineage, its samples in the window, those in
     /// which it was [`hungry_held`] (hungry at every one is a body frozen by a bug) and
@@ -293,7 +294,7 @@ impl Window {
                 last.insert(a.id, a.pose);
             }
         }
-        let mut w = Window {
+        let w = Window {
             start,
             last,
             path_m: [0.0; Founder::COUNT],
@@ -308,7 +309,10 @@ impl Window {
             held: HashMap::new(),
             ticks: 0,
         };
-        w.watch(sim);
+        // BW-STUCK: no sample at the open. Right after a load no body has its steer source
+        // yet (`Fauna::steer` is not saved), so a body still for a reason it chose would be
+        // read as exposed at this one instant; the first ticked watch takes the first
+        // sample.
         w
     }
 
@@ -323,15 +327,7 @@ impl Window {
         for a in fauna.view().animals {
             let Some(f) = a.founder else { continue };
             if sample {
-                *self.states[f.index()].entry(format!("{:?}", a.state)).or_default() += 1;
-                if a.state == State::Resting && (a.eating || a.emergency) {
-                    self.resting_hungry[f.index()] += 1;
-                }
-                let reason = cubarium_voxel_fauna::still_reason(fauna, a);
-                let h = self.held.entry(a.id).or_insert((f, 0, 0, 0));
-                h.1 += 1;
-                h.2 += u64::from(hungry_held(a, reason));
-                h.3 += u64::from(reason.is_some());
+                self.sample(f, a, cubarium_voxel_fauna::still_reason(fauna, a));
             }
             if a.state != State::Asleep {
                 self.awake[f.index()] = true;
@@ -345,6 +341,25 @@ impl Window {
                 self.moved.insert(a.id, ());
             }
         }
+    }
+
+    /// One body's 1 Hz sample: its state, and whether it rested hungry, was
+    /// [`hungry_held`] or had a chosen reason to stand still (`reason`, its
+    /// [`cubarium_voxel_fauna::still_reason`]). BW-STUCK: a hungry `Resting` sample counts
+    /// against its lineage's fed rest only without such a reason: exactly the excuses
+    /// [`hungry_held`] takes (asleep or den-resting, carried, hunkered, perched — a
+    /// rain-grounded flyer included — sated, in ambush, roosting, under a threat, a pup,
+    /// held by its pack while not starving). A pack hold on a starving body is no excuse
+    /// and still counts.
+    pub(crate) fn sample(&mut self, f: Founder, a: &cubarium_voxel_fauna::Animal, reason: Option<&str>) {
+        *self.states[f.index()].entry(format!("{:?}", a.state)).or_default() += 1;
+        if a.state == State::Resting && (a.eating || a.emergency) && reason.is_none() {
+            self.resting_hungry[f.index()] += 1;
+        }
+        let h = self.held.entry(a.id).or_insert((f, 0, 0, 0));
+        h.1 += 1;
+        h.2 += u64::from(hungry_held(a, reason));
+        h.3 += u64::from(reason.is_some());
     }
 
     /// The share of a lineage's sampled body-seconds it was not asleep (0 if never seen
@@ -386,8 +401,8 @@ impl Window {
     /// Idle by choice: asleep or resting for all but [`AWAKE_SHARE_MIN`] of the window
     /// (a pack lying up at its den by day) with every body of the lineage still driven. A
     /// body with no controller is never idle: it is the frozen-world failure. FROZEN-PREY:
-    /// nor is a lineage whose resting bodies were hungry (eating or emergency latch on) for
-    /// most of their resting samples, or with a body hungry and held still the whole window.
+    /// nor is a lineage whose resting bodies were hungry (eating or emergency latch on) and
+    /// unexcused (BW-STUCK: [`Window::sample`]) for most of their resting samples, or with a body hungry and held still the whole window.
     fn idle_by_choice(&self, f: Founder, fauna: &cubarium_voxel_fauna::Fauna) -> Option<f64> {
         let idle = self.idle_share(f);
         let driven = fauna

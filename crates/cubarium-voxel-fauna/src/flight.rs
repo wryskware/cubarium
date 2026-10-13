@@ -456,6 +456,28 @@ pub(crate) struct Moved {
     pub blocked: bool,
     /// The perch it came to rest on.
     pub landed: Option<Perch>,
+    /// BW-STUCK: a descent that ended on water deeper than the body stands in (no perch):
+    /// it hovers on the surface, so a drop is over.
+    pub on_water: bool,
+}
+
+/// **Water rising under a flyer on its surface carries it up** (BW-STUCK): standing water
+/// over its disc whose surface rose above its base since the last tick lifts the base to
+/// the surface (under any roof), as a body hovering on it would be — buoyed, paying
+/// nothing. Held under the newly risen surface, every horizontal step of
+/// [`move_through_air`] was refused as entering water: a flyer on a pond filling in the
+/// rain could not move at all (LIVE-CHECK branch s5, body 176: 0.03 m in 3 sim-min). Not
+/// for a glide, whose path is its own.
+pub(crate) fn float_on_water(view: &VoxelView<'_>, shape: Shape, pose: &mut crate::Pose) {
+    let v = view.config.voxel_m;
+    if let Some((top, _, water)) = floor_under(view, shape, pose.x, pose.z, pose.y_m)
+        && water > 0.0
+        && top > pose.y_m
+    {
+        let room = roof_over(view, shape, pose.x, pose.z, pose.y_m + shape.h, top - pose.y_m + v)
+            .map_or(f64::INFINITY, |(bottom, _)| bottom - shape.h);
+        pose.y_m = top.min(room).max(pose.y_m);
+    }
 }
 
 /// Move a flyer's pose through the air (§3.2): turn, then `distance` along its heading in
@@ -557,6 +579,8 @@ pub(crate) fn move_through_air(
                     kind: PerchKind::Face,
                     anchor: PerchAnchor::Face(face),
                 });
+            } else if y <= top + EPS {
+                out.on_water = true;
             }
         }
         if out.landed.is_none() {
@@ -565,6 +589,7 @@ pub(crate) fn move_through_air(
                     kind: PerchKind::VineFace,
                     anchor: PerchAnchor::Vine(face),
                 });
+                out.on_water = false;
             }
         }
         pose.y_m = y;
@@ -1423,3 +1448,4 @@ impl OpenAir {
         self.comp.get(k).is_some_and(|&c| c == self.open)
     }
 }
+
