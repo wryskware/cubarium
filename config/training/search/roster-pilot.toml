@@ -659,6 +659,13 @@ value = 1.0
 frozen = true
 
 [[gene]]
+name = "tau_larva@seedporter"
+path = "fauna.founders.seedporter.gut.digestion_s.larva"
+range = [0.25, 4.0]
+value = 1.0
+frozen = true
+
+[[gene]]
 name = "stomach@chorister"
 path = "fauna.founders.chorister.gut.stomach_k"
 range = [0.25, 4.0]

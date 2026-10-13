@@ -954,6 +954,16 @@ fn default_fruit_cost() -> f64 {
     1.0
 }
 
+/// [`SpeciesConfig::fruit_handling`]'s default: plain fruit, taken at the gut's full bite.
+fn default_fruit_handling() -> f64 {
+    1.0
+}
+
+/// [`SpeciesConfig::fruit_seeds_in_gut`]'s default: a fleshy fruit's seeds ride in the gut.
+fn default_fruit_seeds_in_gut() -> bool {
+    true
+}
+
 /// [`SpeciesConfig::pollination_floor`]'s default: visits change nothing.
 fn default_pollination_floor() -> f64 {
     1.0
@@ -1452,6 +1462,24 @@ pub struct SpeciesConfig {
     /// but not zero (energy-rich fruit). Drawn from the stand's own mineral when taken.
     #[serde(default)]
     pub fruit_mineral_fraction: f64,
+    /// **NUTS: how fast the fruit is eaten**, a fraction of a plain fruit's bite (Wrysk
+    /// 2026-10-12, soft-shelled vaulttree nuts that seedporters open): it scales a frugivore's
+    /// bite of this species' hanging fruit, so a fruit of handling `h` costs `1 / h` of the
+    /// feeding time per unit eaten. 1: plain fruit (pulp, taken as fast as the gut allows).
+    #[serde(default = "default_fruit_handling")]
+    pub fruit_handling: f64,
+    /// **NUTS: whether an eaten fruit's seeds ride in the gut** (and are voided alive): true
+    /// for a fleshy fruit around a stone; false for a nut, which *is* the seed, so eating it
+    /// destroys it and the species spreads only by its own dispersal.
+    #[serde(default = "default_fruit_seeds_in_gut")]
+    pub fruit_seeds_in_gut: bool,
+    /// **NUTS: how far an eater sees this species' hanging fruit**, metres from its eye to the
+    /// crown's middle (Wrysk 2026-10-12: seedporters "wont be able to see larvae or nuts from
+    /// the ground in a tall vaulttree"): a frugivore takes the fruit for food by sight only
+    /// within the lesser of its own sight and this. 0: no limit (a bright fruit seen as far as
+    /// the eater sees, every species but the vaulttree).
+    #[serde(default)]
+    pub fruit_sight_m: f64,
     /// **The night budget** (`design/ecology-timescales-2026-10-02.md` 1b): while the sun
     /// is down on the ecological clock, a photosynthetic stand's reserve funds the leaf
     /// reflush (below [`SpeciesConfig::reflush_below`]), then nectar, then fruit, out of
@@ -2042,6 +2070,9 @@ impl SpeciesConfig {
             pollination_floor: default_pollination_floor(),
             pollination_visits: default_pollination_visits(),
             fruit_mineral_fraction: 0.0,
+            fruit_handling: default_fruit_handling(),
+            fruit_seeds_in_gut: default_fruit_seeds_in_gut(),
+            fruit_sight_m: 0.0,
             // 1b: the night budget's knobs, plausible defaults (not tuned).
             night_bloom_scale: default_night_bloom_scale(),
             night_floor: default_night_floor(),
@@ -2918,8 +2949,8 @@ impl SpeciesConfig {
             drown_depth_m: 0.1,
             falls: true,
             // Seeds: a **winged seed on the wind** (SHADE-REAL, Wrysk 2026-10-10: "seeds
-            // probably could travel more"). The wind is its only carrier: it sets no fruit
-            // (`fruit_per_s` 0, so no gut carries it) and has no burrs. The kernel is the
+            // probably could travel more"). The wind is its only carrier: its nuts (below)
+            // carry no seed in a gut (`fruit_seeds_in_gut` false) and it has no burrs. The kernel is the
             // mechanistic WALD from the crown: released at 0.775 of the crown height (the
             // middle of the shelves' 0.55–1.0 band, where the seeds hang), falling at
             // 1.0 m/s (a spinning samara's terminal velocity: maples 0.7–1.2 m/s, Green
@@ -2934,6 +2965,39 @@ impl SpeciesConfig {
             // `propagule_rate` ×4 with it (0.0002 → 0.0008), so a funded donor still sends
             // a seed every 300 s, and bloomcrown's 0.1 per check through a ground cover.
             hop: 4,
+            // NUTS (Wrysk 2026-10-12: "vaulttree should probably have nuts … might help with
+            // seedporter nutrition"; soft-shelled, opened by seedporters, "(a) is fine.
+            // important part is thre nutrition aspect"; `design/larva-nuts-plan-2026-10-12.md`
+            // §2). The crop machinery the lanternberry uses, on crowned stands only
+            // (`profile_stage >= 1`):
+            // - wind-set, no flowering stage (`flower_s` 0): the crop sets in full with no
+            //   pollinator, as in hazel, walnut and chestnut;
+            // - `fruit_cap` 0.02 (one lanternberry crop), made at `fruit_per_s` 1e-5 (about
+            //   half an hour of daylight), hanging 4 h (`fruit_drop_s` 14,400) before the
+            //   uneaten crop falls to the litter, then a mean rest of 2 h (`fruit_rest_s`);
+            // - `fruit_cost` 2.0: husk and soft shell, respired as overhead (real kernels are
+            //   ~40-60 % of the in-shell nut);
+            // - nut N 0.025 per organic (`fruit_mineral_fraction`): real nuts are 2.4-3.5 % N
+            //   dry (USDA FoodData Central: almond, cashew, Brazil nut), which the world's
+            //   power-law map of real N puts at 0.021-0.026; half of flesh, 2.5x fruit;
+            // - `fruit_handling` 0.33: a nut takes ~3x a fruit's feeding time (tree squirrels
+            //   spend tens of seconds to minutes per ~1 g kernel; small frugivores take pulp
+            //   at several g/min);
+            // - `fruit_seeds_in_gut` false: an eaten nut is a dead seed;
+            // - `fruit_sight_m` 2.0: a nut among a crown's leaves is found by close search
+            //   (small primates find nuts and insects by close visual search in the canopy;
+            //   Wrysk: "about 2m spotting larvae").
+            fruit_per_s: 1e-5,
+            fruit_cap: 0.02,
+            fruit_drop_s: 14_400.0,
+            fruit_rest_s: 7_200.0,
+            flower_s: 0.0,
+            fruit_cost: 2.0,
+            pollination_floor: 1.0,
+            fruit_mineral_fraction: 0.025,
+            fruit_handling: 0.33,
+            fruit_seeds_in_gut: false,
+            fruit_sight_m: 2.0,
             dispersal: Dispersal::Wald,
             seed_release_share: 0.775,
             seed_fall_m_per_s: 1.0,
@@ -3975,6 +4039,11 @@ pub struct FloraLedger {
     /// a diagnostic subset of `respired_out`.
     #[serde(default)]
     pub fruit_overhead: f64,
+    /// **NUTS: uneaten fruit fallen to the litter**, organic units per species, cumulative
+    /// (at the crop's `fruit_drop_s`): a diagnostic subset of the litter's inputs, in none of
+    /// the `expected_*` totals.
+    #[serde(default)]
+    pub fruit_fell: [f64; Species::COUNT],
     /// Organic matter the saprotrophs have withdrawn from dead wood and litter, per
     /// species, indexed by [`Species::index`]: a **diagnostic flux and not a boundary flow**, exactly like
     /// the three `propagule_*` arrays, and therefore in none of the three
@@ -6135,7 +6204,7 @@ impl Flora {
     /// The stand is the site's **plant** ([`FaceLayer::Plant`]); a fungus's cap tissue is
     /// [`Flora::take_foliage_of`].
     pub fn take_foliage(&mut self, site: Site, want: f64) -> Option<Taken> {
-        self.withdraw_foliage(site, FaceLayer::Plant, want, None).map(|t| t.taken)
+        self.withdraw_foliage(site, FaceLayer::Plant, want, None, true).map(|t| t.taken)
     }
 
     /// A consumer eats the foliage the **layers whose disc cells lie in `layers`** hold,
@@ -6162,7 +6231,7 @@ impl Flora {
         want: f64,
         layers: &std::ops::RangeInclusive<i64>,
     ) -> Option<TakenFoliage> {
-        self.withdraw_foliage(site, FaceLayer::Plant, want, Some(layers))
+        self.withdraw_foliage(site, FaceLayer::Plant, want, Some(layers), true)
     }
 
     /// [`Flora::take_foliage_in_layers`] off the stand holding `place` on `site`: a bite's
@@ -6175,7 +6244,16 @@ impl Flora {
         want: f64,
         layers: &std::ops::RangeInclusive<i64>,
     ) -> Option<TakenFoliage> {
-        self.withdraw_foliage(site, place, want, Some(layers))
+        self.withdraw_foliage(site, place, want, Some(layers), true)
+    }
+
+    /// **Leaf eaten by insects on the plant** (LARVA, `design/larva-nuts-plan-2026-10-12.md`
+    /// §3): [`Flora::take_foliage`]'s withdrawal off the site's plant, every layer, lowest
+    /// first, above each layer's grazing floor, booked the same way, but outside the
+    /// induced browse defence: larvae feeding every few seconds would otherwise hold it at
+    /// its ceiling, and the defence answers a browser's bites.
+    pub fn take_foliage_by_insects(&mut self, site: Site, want: f64) -> Option<TakenFoliage> {
+        self.withdraw_foliage(site, FaceLayer::Plant, want, None, false)
     }
 
     /// Take exposed living mycelium from the fungal place, with mineral pro rata.
@@ -6203,6 +6281,7 @@ impl Flora {
         place: FaceLayer,
         want: f64,
         layers: Option<&std::ops::RangeInclusive<i64>>,
+        defended: bool,
     ) -> Option<TakenFoliage> {
         if !(want > 0.0) || !want.is_finite() {
             return None;
@@ -6210,9 +6289,10 @@ impl Flora {
         let i = find_stand(&self.config, &self.stands, site, place).ok()?;
         let e_v = self.config.species(self.stands[i].species).energy_density;
         // The induced defence: the bite takes `(1 − defence)` of what was asked, and a
-        // bite that took anything raises the defence (below, once it is known).
-        let rise = self.config.species(self.stands[i].species).defence_per_bite;
-        let want = want * (1.0 - self.stands[i].defence.clamp(0.0, 1.0));
+        // bite that took anything raises the defence (below, once it is known). Insects on
+        // the plant (`defended` false) neither meet it nor raise it.
+        let rise = if defended { self.config.species(self.stands[i].species).defence_per_bite } else { 0.0 };
+        let want = if defended { want * (1.0 - self.stands[i].defence.clamp(0.0, 1.0)) } else { want };
         if !(want > 0.0) {
             return None;
         }

@@ -3125,6 +3125,7 @@ fn grow(
             ledger.fruit_set[usize::from(visited)] += organic;
         }
         ledger.fruit_overhead += b.overhead;
+        ledger.fruit_fell[s.species.index()] += b.fell;
     }
     for (b, s) in books.iter().zip(stands.iter()) {
         let k = s.species.index();
@@ -3174,6 +3175,8 @@ pub(crate) struct Booked {
     /// `fruit_set`), and the fruit's overhead respired (`FloraLedger::fruit_overhead`).
     crop_set: Option<(bool, f64)>,
     overhead: f64,
+    /// NUTS: the uneaten crop fallen to the litter this tick, organic (`FloraLedger::fruit_fell`).
+    fell: f64,
 }
 
 impl Booked {
@@ -3623,6 +3626,7 @@ pub(crate) fn grow_stand_cause(
             let m = (sc.fruit_mineral_fraction.max(0.0) * o).min(stand.mineral.max(0.0));
             stand.mineral -= m;
             fell = (o, m);
+            book.fell += o;
             true
         } else {
             !(stand.fruit > 0.0) && !(stand.crop.to_make > 0.0)

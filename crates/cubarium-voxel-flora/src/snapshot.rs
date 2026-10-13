@@ -72,7 +72,10 @@ use crate::{Flora, FloraConfig};
 //     rests like a fallen one.
 // 41: DECAY-GLOWCAP — Ground::fragmented_s; mycelium drying withdraws against its
 //     full footprint (wood_max) and exposed tissue does not regrow in daylight.
-pub const SCHEMA: u32 = 41;
+// 42: NUTS — `FloraLedger::fruit_fell` (uneaten fruit fallen, per species; a state layout
+//     change). The vaulttree's nut crop and `SpeciesConfig::{fruit_handling,
+//     fruit_seeds_in_gut, fruit_sight_m}` are named config, not bumps.
+pub const SCHEMA: u32 = 42;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {

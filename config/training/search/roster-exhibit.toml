@@ -438,6 +438,12 @@ range = [0.25, 4.0]
 what = "tau: the fruit pool empties at S / tau into the reserve's room"
 
 [[gene]]
+name = "tau_larva@seedporter"
+path = "fauna.founders.seedporter.gut.digestion_s.larva"
+range = [0.25, 4.0]
+what = "tau: the larva pool empties at S / tau into the reserve's room"
+
+[[gene]]
 name = "tau_carrion@chorister"
 path = "fauna.founders.chorister.gut.digestion_s.carrion"
 range = [0.25, 4.0]

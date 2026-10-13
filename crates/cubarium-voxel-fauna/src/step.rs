@@ -111,7 +111,11 @@ mod glider;
 pub(crate) mod places;
 #[cfg(test)]
 pub(crate) use glider::{better_roost, safe_crown, Roost};
-pub(crate) use glider::{on_ledge_top, refuge_height_m, OffGraph, glider_fruit_in_reach, off_graph_exit};
+#[cfg(test)]
+pub(crate) use glider::fruit_candidates;
+pub(crate) use glider::{on_ledge_top, refuge_height_m, OffGraph, glider_fruit_in_reach, glider_larva_in_reach, leafy_vine_in_reach, off_graph_exit};
+#[cfg(test)]
+pub(crate) use glider::fruit_candidates as glider_fruit_candidates;
 #[path = "jump.rs"]
 pub(crate) mod jump;
 #[path = "forage.rs"]
@@ -1961,8 +1965,11 @@ pub(crate) fn controllers(
             // the same target/shun clock covers this path as well as a refused walk.
             let fruit_stalled = heuristic && fauna.config.founder(founder).glider.is_some()
                 && a.mobility.mode == crate::MobilityMode::Ground
-                && fauna.steer.get(&id) == Some(&crate::Steer::Fruit)
-                && fb.delivered_forward <= 1e-12 && fb.delivered_turn.abs() <= 1e-12;
+                && matches!(fauna.steer.get(&id), Some(crate::Steer::Fruit | crate::Steer::Check))
+                && fb.delivered_forward <= 1e-12 && fb.delivered_turn.abs() <= 1e-12
+                // ECO-INT: the stillness of a carcass meal is not a stalled walk.
+                && !(crate::perception::is_day(&fauna.config, sky.clock_on, sky.daylight)
+                    && crate::hunt::eating_carrion_here(fauna, i, view, &fv));
             let vine_stalled = heuristic && fauna.config.founder(founder).glider.is_some()
                 && matches!(a.mobility.mode, crate::MobilityMode::Climb | crate::MobilityMode::Perched)
                 && a.mobility.perch.is_some_and(|p| matches!(p.anchor, crate::PerchAnchor::Vine(_)))
@@ -2018,9 +2025,9 @@ pub(crate) fn controllers(
         // stand in reach. Flight from a threat and the roost come after it and win.
         if driven && prey && fauna.config.founder(founder).glider.is_some() {
             let day = crate::perception::is_day(&fauna.config, sky.clock_on, sky.daylight);
-            if let Some(go) = glider::fruit_reflex(fauna, i, view, &fv, day) {
+            if let Some((go, kind)) = glider::fruit_reflex(fauna, i, view, &fv, day) {
                 actions = go;
-                src = crate::Steer::Fruit;
+                src = kind;
             }
         }
         // FORAGE-LEAVE: a heuristic body holding still to feed on a patch that cannot end a
@@ -5010,6 +5017,15 @@ fn founder_feed(
         body::Meal::Mycelium { root } => Some(Site { y: root.y + 1, ..root }),
         body::Meal::Pool { site, .. } => Some(Site { y: site.y + 1, ..site }),
     };
+    // LARVA (decision 4, "b+c"): a bite off a vaulttree host takes its larvae by accident,
+    // the eaten fraction of its edible foliage; read before the withdrawal.
+    let host_before = match meal {
+        body::Meal::Stand { root, place, food: Food::Foliage } => {
+            let fv = flora.view();
+            fv.stand_in(root, place).filter(|s| crate::larva::stand_hosts(&fv, s)).map(|s| (s.id, fv.edible_foliage(s)))
+        }
+        _ => None,
+    };
     let mut mycelium = 0.0;
     let taken = match meal {
         body::Meal::Stand { root, place, .. } => {
@@ -5033,7 +5049,7 @@ fn founder_feed(
             },
             Food::Carrion => flora.take_carrion(site, bite),
             Food::Film => flora.take_film(site, bite),
-            Food::CapTissue | Food::Foliage | Food::Nectar | Food::Fruit => {
+            Food::CapTissue | Food::Foliage | Food::Nectar | Food::Fruit | Food::Larva => {
                 unreachable!("a stand's tissue is not a ground pool")
             }
         },
@@ -5043,7 +5059,16 @@ fn founder_feed(
     };
     fauna.animals[i].bite = crate::LastBite(bitten);
     fauna.ledger.eaten_mycelium_by_founder[founder.index()] += mycelium;
-    let taken = fauna.book_eaten(taken, food);
+    let mut taken = fauna.book_eaten(taken, food);
+    // The larvae ride in the bite as foliage: a transfer inside this layer, not eaten in.
+    if let Some((id, edible)) = host_before
+        && edible > 0.0
+        && let Some(larvae) = crate::larva::browse_larvae(fauna, id, taken.organic / edible)
+    {
+        taken.organic += larvae.organic;
+        taken.mineral += larvae.mineral;
+        taken.energy += larvae.energy;
+    }
     let taken = ingest_bite(fauna, i, flora, food, taken);
     if let Some(plant) = plant {
         fauna.ledger.bites_by_plant[plant.index()] += 1;
@@ -5223,6 +5248,8 @@ fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora, dusk: b
         }
     }
     hatch(fauna, view, &mut newborns);
+    // LARVA: the larva field's deaths, growth and emergence; emerged adults are born here.
+    crate::larva::step_field(fauna, view, flora, &mut newborns);
     dormant_eggs(fauna, view, flora, dusk, &mut newborns);
     let fresh: Vec<(u64, Founder)> = newborns
         .iter()
@@ -5231,7 +5258,11 @@ fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora, dusk: b
     for mut n in newborns {
         // A newborn flyer is perched on the face it was born on (F1).
         // One hatched in the vines (VINE-C) already clings to its face.
-        if n.mobility.perch.is_none() && n.founder.is_some_and(|f| fauna.config.founder(f).flight.is_some()) {
+        // An adult emerging in a vaulttree's crown (LARVA) is already flying there.
+        if n.mobility.perch.is_none()
+            && n.mobility.mode != crate::MobilityMode::Fly
+            && n.founder.is_some_and(|f| fauna.config.founder(f).flight.is_some())
+        {
             n.pose.y_m = crate::surface_m(n.site.y, view.config.voxel_m);
             let site = n.site;
             crate::flight::perch_on_face(&mut n, site);
@@ -5586,7 +5617,7 @@ fn litter_size(fauna: &Fauna, i: usize, sc: &SpeciesConfig, rule: &crate::Reprod
 /// A newborn out of a paid `parcel`: a `body_min` juvenile with the rest of the parcel's
 /// organic matter as its reserve and all of its mineral and energy, booked born. The one
 /// construction a gestation's term and an egg's hatching share.
-fn newborn(
+pub(crate) fn newborn(
     fauna: &mut Fauna,
     (species, founder): (crate::Species, Option<crate::Founder>),
     (site, pose): (Site, crate::Pose),
@@ -5854,7 +5885,7 @@ fn lay(
     fauna: &mut Fauna,
     i: usize,
     view: &VoxelView<'_>,
-    flora: &Flora,
+    flora: &mut Flora,
     sc: &SpeciesConfig,
     rule: &crate::Reproduction,
 ) {
@@ -5900,10 +5931,23 @@ fn lay(
         return;
     };
     let mut site = fauna.animals[i].site;
+    // LARVA: a larva lineage's clutch goes into the larva field, on the host it is at (the
+    // vine face it touches or the vaulttree crown it is in); with none here it keeps it.
+    let larva_at = if fauna.config.founder(lineage).larva.is_some() && !rule.dormant {
+        match larva_goal(fauna, i, view, flora) {
+            Some(LarvaGoal::Here(at)) => Some(at),
+            _ => {
+                lay_held(fauna, i, sc, LAY_SITE);
+                return;
+            }
+        }
+    } else {
+        None
+    };
     // VINE-C: a vine nester's clutch goes on a vine face it clings to or touches, with room
     // for its hatchling to cling there; `site` becomes the support face below it.
     let egg_site = fauna.config.founder(lineage).egg_site;
-    let vine = if egg_site == crate::EggSite::Vine && !rule.dormant {
+    let vine = if egg_site == crate::EggSite::Vine && !rule.dormant && larva_at.is_none() {
         let found = vine_egg_site(fauna, i, view, flora, sc.body_min);
         if found.is_none() {
             lay_held(fauna, i, sc, LAY_SITE);
@@ -5919,7 +5963,7 @@ fn lay(
     // A dormant egg is buried in soil or litter (predation §2.13); the shredder lays in
     // the litter it lives in, the ripple-snail on the film it grazes (roster R2b,
     // [`crate::EggSite`]).
-    if !rule.dormant && vine.is_none() {
+    if !rule.dormant && vine.is_none() && larva_at.is_none() {
         let fits = egg_site_fits(fauna, lineage, view, flora, site, rule);
         if !fits {
             lay_held(fauna, i, sc, LAY_SITE);
@@ -5929,7 +5973,7 @@ fn lay(
     // A flyer's egg needs room to fly from (bellwing3 item 2): its hatchling appears in
     // the air on this face, so the face needs `egg_headroom_m` clear over the hatchling's
     // body, and its air must reach the open air.
-    if let Some(flight) = fauna.config.founder(lineage).flight.filter(|_| vine.is_none()) {
+    if let Some(flight) = fauna.config.founder(lineage).flight.filter(|_| vine.is_none() && larva_at.is_none()) {
         let phys = *fauna.config.founder(lineage);
         let shape = crate::flight::Shape::of(&phys, &flight, sc.body_min);
         let v = view.config.voxel_m;
@@ -6014,7 +6058,10 @@ fn lay(
     a.reproduction.window.reset();
     a.reproduction.clutch_wait_ticks = 0;
     let laid_tick = fauna.tick;
-    if rule.dormant {
+    if let Some(at) = larva_at {
+        crate::larva::lay_eggs(fauna, flora, lineage, at.key, at.site, at.anchor, eggs, Taken { organic: paid, mineral, energy });
+        fauna.ledger.eggs_laid += u64::from(eggs);
+    } else if rule.dormant {
         // One clutch per egg, each with its own dormancy; the last egg takes the
         // remainder so the three currencies add back up to what was paid.
         let n = eggs.max(1);
@@ -6092,11 +6139,22 @@ fn nest_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora)
     if !trip_ready(&rule, &a.reproduction, a.reserve, sc.reserve_of(a.body)) {
         return None;
     }
-    if vine_egg_site(fauna, i, view, flora, sc.body_min).is_some() && !nest_crowded(fauna, i, view, &rule) {
-        fauna.ledger.nest_holds_by_founder[founder.index()] += 1;
-        return Some((Actions { forward: 0.0, turn: 0.0, feed: 0.0 }, 0.0));
-    }
-    let t = nest_target(fauna, i, view, &flora.view(), flight.nest_search_m.max(0.0), |_| true)?;
+    // LARVA: to the host its clutch's draw names (else the other kind), and hold there.
+    let t = if phys.larva.is_some() {
+        match larva_goal(fauna, i, view, flora)? {
+            LarvaGoal::Here(_) => {
+                fauna.ledger.nest_holds_by_founder[founder.index()] += 1;
+                return Some((Actions { forward: 0.0, turn: 0.0, feed: 0.0 }, 0.0));
+            }
+            LarvaGoal::Fly(t) => t,
+        }
+    } else {
+        if vine_egg_site(fauna, i, view, flora, sc.body_min).is_some() && !nest_crowded(fauna, i, view, &rule) {
+            fauna.ledger.nest_holds_by_founder[founder.index()] += 1;
+            return Some((Actions { forward: 0.0, turn: 0.0, feed: 0.0 }, 0.0));
+        }
+        nest_target(fauna, i, view, &flora.view(), flight.nest_search_m.max(0.0), |_| true)?
+    };
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
     fauna.ledger.nest_searches_by_founder[founder.index()] += 1;
@@ -6111,6 +6169,19 @@ fn nest_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora)
 
 /// The nest reflex's nearest fitting vine face (bounded by NEST_CANDIDATES).
 pub(crate) fn nest_target(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &cubarium_voxel_flora::FloraView<'_>, reach: f64, keep: impl Fn(crate::Pose) -> bool) -> Option<crate::Pose> {
+    nest_target_where(fauna, i, view, fv, reach, |_| true, keep)
+}
+
+/// [`nest_target`] over the vine faces `face_ok` accepts (LARVA: leafy ones).
+pub(crate) fn nest_target_where(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    fv: &cubarium_voxel_flora::FloraView<'_>,
+    reach: f64,
+    face_ok: impl Fn(cubarium_voxel_flora::Face) -> bool,
+    keep: impl Fn(crate::Pose) -> bool,
+) -> Option<crate::Pose> {
     let a = fauna.animals[i];
     let founder = a.founder?;
     let phys = *fauna.config.founder(founder);
@@ -6162,7 +6233,7 @@ pub(crate) fn nest_target(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv:
     let air = fauna.open_air(view, &flight);
     let mut target = None;
     // The nearest few that would take the clutch; a scan past them would cost a tick.
-    for (_, face) in near.into_iter().take(NEST_CANDIDATES) {
+    for (_, face) in near.into_iter().filter(|(_, f)| face_ok(*f)).take(NEST_CANDIDATES) {
         if vine_nest_fits(view, &air, &phys, &flight, sc.body_min, face).is_none() {
             continue;
         }
@@ -6179,6 +6250,108 @@ pub(crate) fn nest_target(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv:
     target
 }
 
+/// **Where a larva lineage's clutch goes** (LARVA, `design/larva-nuts-plan-2026-10-12.md`
+/// §3): the host it is at and lays on now, with its litter site and (a vine) the face.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LarvaAt {
+    pub key: crate::larva::LarvaHost,
+    pub site: Site,
+    pub anchor: Option<cubarium_voxel_flora::Face>,
+}
+
+/// A larva layer's goal: lay here, or fly toward this pose.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum LarvaGoal {
+    Here(LarvaAt),
+    Fly(crate::Pose),
+}
+
+/// **A larva layer's host** (LARVA §3): a keyed draw per clutch picks the kind, a crowned
+/// vaulttree with chance `vaulttree_share`, else a latticevine; the nearest host of that kind
+/// with leaves within its nest search ([`crate::Flight::nest_search_m`]) is the goal, and
+/// with none in range the nearest of the other kind. At it (a leafy vine face within its
+/// mouth's reach, or within `lay_reach_m` of a crown's disc and band) it lays there.
+/// `None`: no host in range.
+pub(crate) fn larva_goal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora) -> Option<LarvaGoal> {
+    let a = fauna.animals[i];
+    let lineage = a.founder?;
+    let phys = *fauna.config.founder(lineage);
+    let t = phys.larva?;
+    let flight = phys.flight?;
+    let stand_first = crate::larva::draws_vaulttree(fauna, i, view.config.seed, t.vaulttree_share);
+    for stand in [stand_first, !stand_first] {
+        let goal = if stand {
+            larva_stand_goal(fauna, i, view, flora, &phys, &flight, &t)
+        } else {
+            larva_vine_goal(fauna, i, view, flora, &flight)
+        };
+        if goal.is_some() {
+            return goal;
+        }
+    }
+    None
+}
+
+fn larva_vine_goal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora, flight: &crate::Flight) -> Option<LarvaGoal> {
+    let lineage = fauna.animals[i].founder?;
+    let body = crate::larva::emerge_size(fauna, lineage).map_or(fauna.animals[i].body, |(b, _)| b);
+    if let Some((face, _)) = vine_egg_site_where(fauna, i, view, flora, body, |c| c.leafiness > 0.0) {
+        let fv = flora.view();
+        let owner = fv.cover.face(face)?.owner;
+        let root = fv.cover.vine(owner)?.root;
+        return Some(LarvaGoal::Here(LarvaAt { key: crate::larva::LarvaHost::Vine(owner), site: root, anchor: Some(face) }));
+    }
+    let fv = flora.view();
+    let leafy = |f: cubarium_voxel_flora::Face| fv.cover.face(f).is_some_and(|c| c.leafiness > 0.0);
+    nest_target_where(fauna, i, view, &fv, flight.nest_search_m.max(0.0), leafy, |_| true).map(LarvaGoal::Fly)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn larva_stand_goal(
+    fauna: &Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    flora: &Flora,
+    phys: &crate::FounderPhysiology,
+    flight: &crate::Flight,
+    t: &crate::larva::Larva,
+) -> Option<LarvaGoal> {
+    let a = fauna.animals[i];
+    let fv = flora.view();
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let reach = flight.nest_search_m.max(0.0);
+    let h = phys.body_at(a.body).height_m;
+    // (distance, stand, crown low, crown high, crown radius)
+    let mut best: Option<(f64, &cubarium_voxel_flora::Stand, f64, f64, f64)> = None;
+    for s in fv.stands.iter().filter(|s| s.species == crate::larva::STAND_HOST && s.profile_stage >= 1) {
+        let (sx, sz) = ((f64::from(s.site.x) + 0.5) * v, (f64::from(s.site.z) + 0.5) * v);
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+        let d = dx.hypot(dz);
+        if d > reach || best.is_some_and(|b| d >= b.0) || !crate::larva::stand_hosts(&fv, s) {
+            continue;
+        }
+        let Some((low, high)) = crate::larva::crown_band(&fv, s) else { continue };
+        // A crown it can reach under its ceiling over the stand's own face.
+        if low - crate::surface_m(s.site.y, v) > flight.band_max_m {
+            continue;
+        }
+        let radius = fv.config.species(s.species).crown_radius_m_at(s.wood);
+        best = Some((d, s, low, high, radius));
+    }
+    let (d, s, low, high, radius) = best?;
+    let r = t.lay_reach_m.max(0.0);
+    let y = a.pose.y_m;
+    if d <= radius + r && y + h >= low - r && y <= high + r {
+        return Some(LarvaGoal::Here(LarvaAt { key: crate::larva::LarvaHost::Stand(s.id), site: s.site, anchor: None }));
+    }
+    let (sx, sz) = ((f64::from(s.site.x) + 0.5) * v, (f64::from(s.site.z) + 0.5) * v);
+    let ground = crate::surface_m(s.site.y, v);
+    let ty = low.min(ground + flight.band_max_m - h).max(ground);
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+    Some(LarvaGoal::Fly(crate::Pose { x: sx, z: sz, y_m: ty, heading_rad: dx.atan2(dz) }))
+}
+
 /// How many of the nearest covered wall faces [`nest_reflex`] tries as a nest.
 const NEST_CANDIDATES: usize = 24;
 
@@ -6190,6 +6363,18 @@ const NEST_CANDIDATES: usize = 24;
 /// below the hatchling)`; `None` for a body that does not fly or no such face. A bloomcrown is
 /// never one.
 pub(crate) fn vine_egg_site(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora, body_min: f64) -> Option<(cubarium_voxel_flora::Face, Site)> {
+    vine_egg_site_where(fauna, i, view, flora, body_min, |_| true)
+}
+
+/// [`vine_egg_site`] over the covered faces `face_ok` accepts (LARVA: leafy ones).
+pub(crate) fn vine_egg_site_where(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    flora: &Flora,
+    body_min: f64,
+    face_ok: impl Fn(&cubarium_voxel_flora::CoveredFace) -> bool,
+) -> Option<(cubarium_voxel_flora::Face, Site)> {
     let a = fauna.animals[i];
     let phys = *fauna.config.founder(a.founder?);
     let flight = phys.flight?;
@@ -6206,7 +6391,10 @@ pub(crate) fn vine_egg_site(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, f
     faces.extend(near.into_iter().map(|r| r.face));
     let air = fauna.open_air(view, &flight);
     faces.into_iter().find_map(|face| {
-        fv.cover.face(face)?;
+        let cf = fv.cover.face(face)?;
+        if !face_ok(cf) {
+            return None;
+        }
         vine_nest_fits(view, &air, &phys, &flight, body_min, face).map(|under| (face, under))
     })
 }

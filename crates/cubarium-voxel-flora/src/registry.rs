@@ -210,7 +210,7 @@ fn species_rows() -> Vec<Row> {
         r("fruit_cap", "org-units per stand", nonneg, "the most fruit an adult stand holds").grade("N").prov("decision"),
         r("fruit_drop_s", "s", nonneg, "ripe fruit left uneaten this long falls to the litter at the stand's site").grade("N").prov("decision"),
         r("fruit_rest_s", "s", nonneg, "mean rest (exponential, per stand) after a crop falls uneaten or is eaten out before the stand flowers again; 0 none")
-            .search(0.0, 3600.0),
+            .search(0.0, 14_400.0),
         r("flower_s", "s", nonneg, "FLOWER-FRUIT: a crop's flowers stand open this long (nectar, near-IR, visits counted) before the fruit sets; 0 no flowering stage, every crop sets in full")
             .search(0.0, 3600.0).prov("decision"),
         r("fruit_cost", "reserve per unit of fruit", Range::at_least(1.0), "FLOWER-FRUIT: reserve a unit of edible fruit costs; the overhead beyond the fruit is respired")
@@ -220,6 +220,12 @@ fn species_rows() -> Vec<Row> {
         r("pollination_visits", "visits", nonneg, "FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit")
             .search(0.0, 10.0).prov("decision"),
         r("fruit_mineral_fraction", "fraction of organic", fraction, "mineral a unit of fruit carries (small, not zero)").grade("N").prov("decision"),
+        r("fruit_handling", "fraction of a plain fruit's bite", Range::closed(0.0, 1.0).open_lo(), "NUTS: scales a frugivore's bite of this fruit (vaulttree nuts 0.33: ~3x a fruit's feeding time, as a squirrel opening a kernel against pulp)")
+            .search(0.1, 1.0).grade("N").prov("decision"),
+        r("fruit_seeds_in_gut", "switch (true / false)", finite, "NUTS: an eaten fruit's seeds ride in the gut and are voided alive (false: a nut, the seed itself, destroyed)")
+            .optional().grade("N").prov("decision"),
+        r("fruit_sight_m", "m (0 = no limit)", nonneg, "NUTS: an eater sees this fruit only within this of the crown's middle (vaulttree nuts 2 m: found by close search in the canopy)")
+            .search(0.0, 6.0).grade("N").prov("decision"),
         r("night_bloom_scale", "fraction of the day rate", fraction, "nectar and fruit made at night out of the night budget")
             .search(0.0, 1.0).grade("N").prov("decision"),
         r("night_floor", "fraction of reserve cap", fraction, "the reserve a stand keeps for dawn; the night budget spends only above it")

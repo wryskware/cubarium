@@ -1418,6 +1418,9 @@ fn a_bellwing_never_lays_under_a_low_perch_or_in_closed_air() {
     // The flyer's egg room is the rule under test, on litter: VINE-C put the bellwing's own
     // nest in the vines (its vine nest asks the same room, `vine_nest_rooms` below).
     config.founders[BW.index()].egg_site = crate::EggSite::Litter;
+    // LARVA put the bellwing's own clutch into the larva field; the flyer's egg rule is
+    // tested on a flyer without one.
+    config.founders[BW.index()].larva = None;
     let mut fauna = Fauna::new(config);
     let mut ids = Vec::new();
     for (s, y) in [(low, 1.0 - 0.1), (boxed, SURFACE + 0.5), (open, SURFACE + 0.5)] {
@@ -1515,6 +1518,8 @@ fn a_clutch_from_surplus_lays_more_eggs_the_more_surplus_up_to_clutch_max() {
         };
         // The clutch's size is under test, on litter (VINE-C nests the bellwing in vines).
         config.founders[BW.index()].egg_site = crate::EggSite::Litter;
+        // LARVA: the clutch rule on a flyer without a larva field.
+        config.founders[BW.index()].larva = None;
         let mut fauna = Fauna::new(config);
         let mut ids = Vec::new();
         for (s, eggs_above) in sites.iter().zip([1.5, 2.5, 6.5]) {
@@ -1847,14 +1852,14 @@ fn a_bellwing_flying_to_a_vine_nest_records_the_nest() {
     assert!(nest > 0, "the nest reflex flew it to the vines and the tap saw it");
 }
 
-/// **VINE-C (Wrysk 2026-10-09: "bellwings can also nest in the vines"): a bellwing ready to
-/// lay lays on the vine it hovers at, and its young hatch clinging there.** A bellwing with
-/// a full reserve hovers at a vine-covered wall: within a few ticks it lays one clutch, on a
-/// covered face within its mouth's reach, booked as a vine clutch. At term every egg
-/// hatches into a bellwing perched on that face, pressed against it. The books close through
-/// the laying and the hatching.
+/// **VINE-C (Wrysk 2026-10-09: "bellwings can also nest in the vines"), with LARVA: a
+/// bellwing ready to lay lays on the vine it hovers at.** A bellwing with a full reserve
+/// hovers at a vine-covered wall: within a few ticks it lays one clutch, into the larva
+/// field on that vine, seen from a covered face within its mouth's reach. No clutch lies on
+/// a face (LARVA retired the bellwing's vine clutches and its hatchlings). The books close
+/// through the laying.
 #[test]
-fn a_ready_bellwing_lays_on_the_vine_and_its_young_hatch_clinging_there() {
+fn a_ready_bellwing_lays_on_the_vine_into_the_larva_field() {
     let (world, mut flora, faces) = vine_wall(true, FloraConfig::default());
     let organic = flora.view().organic();
     let mut fauna = Fauna::new(nesting(40.0));
@@ -1865,27 +1870,15 @@ fn a_ready_bellwing_lays_on_the_vine_and_its_young_hatch_clinging_there() {
     let n = until(&mut fauna, &world, &mut flora, 20, |f| f.view().ledger.clutches_by_founder[BW.index()] >= 1);
     let l = &fauna.view().ledger;
     assert_eq!(l.clutches_by_founder[BW.index()], 1, "a clutch within 20 ticks ({n})");
-    assert_eq!(l.vine_clutches_by_founder[BW.index()], 1, "booked as a vine clutch");
-    let c = *fauna.view().clutches.iter().find(|c| c.lineage == BW).expect("the clutch");
-    let face = c.face.expect("the clutch lies on a vine face");
+    assert!(fauna.view().clutches.iter().all(|c| c.lineage != BW), "no clutch on a face");
+    let (host, h) = fauna.view().larvae.hosts().next().map(|(k, h)| (*k, h.clone())).expect("the clutch is in the field");
+    assert!(matches!(host, crate::larva::LarvaHost::Vine(_)), "on the vine: {host:?}");
+    let face = h.anchor.expect("seen from a vine face");
     assert!(faces.contains(&face), "on the covered wall: {face:?}");
     let a = animal(&fauna, id);
     let g = fauna.config().founder(BW).body_at(a.body);
     let p = (a.pose.x, a.pose.y_m + 0.5 * g.height_m.max(1e-6), a.pose.z);
     assert!(to_face(p, face) <= r + g.mouth_reach_m + 1e-9, "within its mouth's reach");
-    ledgers_close(&fauna, &flora, organic);
-
-    let hatched = until(&mut fauna, &world, &mut flora, 80, |f| f.view().ledger.eggs_hatched_by_founder[BW.index()] >= u64::from(c.count));
-    assert_eq!(fauna.view().ledger.eggs_hatched_by_founder[BW.index()], u64::from(c.count), "every egg hatched ({hatched} ticks)");
-    let young: Vec<Animal> = fauna.view().animals.iter().filter(|b| b.founder == Some(BW) && b.id != id).copied().collect();
-    assert_eq!(young.len(), c.count as usize);
-    for b in &young {
-        assert_eq!(b.mobility.mode, MobilityMode::Perched, "{:?}", b.mobility);
-        assert_eq!(b.mobility.perch.map(|p| p.anchor), Some(crate::PerchAnchor::Vine(face)), "clinging to the nest face");
-        let gap = WALL_FACE_M - b.pose.x;
-        assert!(gap >= r - 1e-9 && gap <= r + crate::flight::CLING_M, "pressed against the wall: {gap} m from it");
-        assert_eq!(b.pose.y_m.div_euclid(V) as u32, face.y, "at the face's row");
-    }
     ledgers_close(&fauna, &flora, organic);
 }
 
@@ -1963,7 +1956,8 @@ fn a_ready_bellwing_flies_to_a_vine_it_can_find_and_lays_there() {
     assert!(fauna.set_controller(id, crate::controller::heuristic(BW, teachers)));
     let n = until(&mut fauna, &world, &mut flora, 300, |f| f.view().ledger.clutches_by_founder[BW.index()] >= 1);
     assert_eq!(fauna.view().ledger.clutches_by_founder[BW.index()], 1, "it found the vine and laid ({n} ticks), at {:?}", animal(&fauna, id).pose);
-    let face = fauna.view().clutches[0].face.expect("in the vines");
+    // LARVA: into the larva field on the vine.
+    let face = fauna.view().larvae.hosts().next().and_then(|(_, h)| h.anchor).expect("in the vines");
     assert!(faces.contains(&face));
     assert!(fauna.view().ledger.nest_searches_by_founder[BW.index()] > 0, "it searched");
 }

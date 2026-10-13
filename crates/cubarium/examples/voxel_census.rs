@@ -1971,6 +1971,15 @@ fn print_header() {
     // stands and vines (cumulative, organic).
     header.push_str(",lantern_in_flower,flower_visits_stand,flower_visits_vine,crops_set_floor,crops_set_visited");
     header.push_str(",fruit_set_floor,fruit_set_visited,fruit_overhead,fruit_eaten_seedporter,fruit_eaten_seedporter_stand,fruit_eaten_seedporter_vine");
+    // NUTS (2026-10-12): vaulttree nuts hanging now and fallen uneaten (cumulative), the
+    // seedporters' vaulttree fruit eaten (cumulative, organic), and the tree checks (session):
+    // check walks set out on, crown visits, checks made, checks that found food, and the
+    // bodies that made one.
+    header.push_str(",nut_standing,nut_fell,fruit_eaten_seedporter_vaulttree");
+    header.push_str(",tree_check_walks,tree_check_switches,tree_visits,tree_checks,tree_checks_found,tree_checkers");
+    // ... the seedporters' climbs (cumulative) and the oldest check walk under way now, seconds
+    // (a body steered by the check whose aimed host it has not reached).
+    header.push_str(",sp_climbs,tree_check_oldest_s");
     // The woody contest's readouts (package CONTEST, 2026-10-05): the edible foliage
     // standing (above every layer's grazing floor), then plant deaths by cause for the
     // turf, the pad and the two woody species, cumulative.
@@ -2006,6 +2015,13 @@ fn print_header() {
     // commitment and hunts given up (the standoffs), and kicks landed by the loftstriders and
     // the kick-backs bites drew.
     header.push_str(",hound_tests,hound_test_commits,hound_give_ups,kicks_landed_loftstrider,kick_backs");
+    // LARVA (2026-10-12, design/larva-nuts-plan-2026-10-12.md §7): larvae standing on vines
+    // and vaulttrees now (eggs included) and their tissue; then cumulative: eggs laid into the
+    // field, adults emerged, larvae dead in the background, eaten by seedporters (count and
+    // organic) and by browsers, leaf the larvae ate (organic), and larvae lost with a host or
+    // starved.
+    header.push_str(",larvae_vine,larvae_vaulttree,larva_mass,larva_eggs_in,larvae_emerged,larva_died_background");
+    header.push_str(",larva_eaten_seedporter,larva_eaten_seedporter_organic,larva_eaten_browser,larva_leaf_eaten,larva_died_host,larva_died_starved,larva_pool");
     header.push_str(",seed");
     println!("{header}");
 }
@@ -2260,6 +2276,23 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         // The seedporter is the only fruit eater; its glide-and-perch bites book here.
         row.push(format!("{:.6}", a.ledger.fruit_eaten_by_source.iter().sum::<f64>()));
         row.extend(a.ledger.fruit_eaten_by_source.iter().map(|q| format!("{q:.6}")));
+        row.push(format!("{:.6}", of(Plant::Vaulttree).map(|s| s.fruit).sum::<f64>()));
+        row.push(format!("{:.6}", l.fruit_fell[Plant::Vaulttree.index()]));
+        row.push(format!("{:.6}", a.ledger.fruit_eaten_by_plant[Plant::Vaulttree.index()]));
+        let t = sim.fauna().check_tally();
+        for n in [t.walks, t.switches, t.visits, t.checks, t.found, t.checkers] {
+            row.push(n.to_string());
+        }
+        row.push(a.ledger.climbs.to_string());
+        let fa = sim.fauna();
+        let oldest = a
+            .animals
+            .iter()
+            .filter(|b| fa.steer_of(b.id) == Some(cubarium_voxel_fauna::Steer::Check))
+            .filter_map(|b| fa.tree_checks_of(b.id).filter(|m| m.aim.is_some()).map(|m| fa.tick().saturating_sub(m.aim_since)))
+            .max()
+            .unwrap_or(0);
+        row.push(format!("{:.1}", oldest as f64 / f64::from(cubarium_voxel_fauna::TICK_HZ)));
     }
     let edible: f64 = f.stands.iter().flat_map(|s| f.layers(s)).map(|l| l.edible()).sum();
     row.push(format!("{edible:.6}"));
@@ -2337,6 +2370,24 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         row.push(l.hound_give_ups.to_string());
         row.push(l.kicks_landed_by_founder[Founder::Loftstrider.index()].to_string());
         row.push(l.kick_backs.to_string());
+    }
+    {
+        let av = sim.fauna().view();
+        let (vine, tree) = av.larvae.count_by_kind();
+        let l = &av.ledger.larva;
+        row.push(format!("{vine:.3}"));
+        row.push(format!("{tree:.3}"));
+        row.push(format!("{:.6}", av.larvae.organic()));
+        row.push(l.eggs_laid.to_string());
+        row.push(l.emerged.to_string());
+        row.push(format!("{:.3}", l.died_background));
+        row.push(format!("{:.3}", l.eaten_seedporter));
+        row.push(format!("{:.6}", l.eaten_seedporter_out.organic));
+        row.push(format!("{:.3}", l.eaten_browser));
+        row.push(format!("{:.6}", l.leaf_in.organic));
+        row.push(format!("{:.3}", l.died_host));
+        row.push(format!("{:.3}", l.died_starved));
+        row.push(format!("{:.3}", av.larvae.pool_count()));
     }
     // Read the kept world's seed, including fallback and loaded-world starts.
     row.push(sim.world().config().seed.to_string());

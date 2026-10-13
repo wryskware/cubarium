@@ -189,6 +189,9 @@ const NECTAR_YIELD: f64 = 0.95;
 /// than leaf, so a little over the foliage yield; kept under 2/3 so cubarium-search's ×1.5
 /// yield gene stays a fraction. A placeholder.
 const FRUIT_YIELD: f64 = 0.6;
+/// **Larvae's assimilation yield** for a larva eater (LARVA §4): insect flesh, the
+/// vertebrates' carrion yield (0.5).
+const LARVA_YIELD: f64 = 0.5;
 
 /// The seedporter's body volume over the frondgrazer's (F3): 0.5 × 0.25 × 0.2 m over
 /// 0.75 × 0.375 × 0.375 m, r ≈ 0.237. A derivation, not a knob, as
@@ -611,6 +614,20 @@ pub struct FounderPhysiology {
     /// transit time. `None` for every other lineage.
     #[serde(default)]
     pub gut_seeds: Option<GutSeeds>,
+    /// `Some` for a lineage whose young are **larvae on a host's leaves** (LARVA,
+    /// `design/larva-nuts-plan-2026-10-12.md` §3): its clutches go into the larva field
+    /// ([`crate::larva::LarvaField`]) on a latticevine or a crowned vaulttree, and its
+    /// adults emerge from there. `None` for every other lineage (the bellwing's only).
+    #[serde(default)]
+    pub larva: Option<crate::larva::Larva>,
+    /// Larvae's bite half-stock, raw org-units of visible larvae at the mouth (LARVA §4,
+    /// the seedporter's `larva_bite_half_stock`). `None` uses `core.bite_half_stock`.
+    #[serde(default)]
+    pub larva_bite_half_stock: Option<f64>,
+    /// **Larva sight** (LARVA §4): larvae on a host are seen within this distance, metres,
+    /// by close visual search (caterpillars are cryptic). 0: it never looks for larvae.
+    #[serde(default)]
+    pub larva_sight_m: f64,
     /// **Coat factor for burrs** (springturf spread, 2026-10-04): how readily a seed that
     /// latches on a passing body holds to this lineage's coat, multiplying the plant's
     /// per-contact pickup chance (`flora.*.burr_pickup`). 0 picks up nothing; 1 is a
@@ -1226,6 +1243,25 @@ pub struct Glider {
     /// Veilhound's strike height. 1.0 (the glide's minimum start).
     #[serde(default = "roost_ledge_min_m")]
     pub roost_ledge_min_m: f64,
+    /// **NUTS: checking trees** (Wrysk 2026-10-12: "somehow seedporters should know to liek
+    /// \"check\" trees and stuff cuz they wont be able to see larvae or nuts from the ground in
+    /// a tall vaulttree"): a hungry grounded glider on its heuristic, with no food in sight,
+    /// walks to the nearest host plant that may hold food it cannot see
+    /// ([`crate::treecheck::may_hold_hidden_food`]: a crowned vaulttree, or a leafy
+    /// latticevine for larvae) within this horizontal distance, metres, climbs into its crown
+    /// (or goes to the vine's leafy face) and looks. A heuristic world query over the plant layer (a tree
+    /// is a big, plain object), not a sense of the food. Real: tamarins and marmosets travel
+    /// tens of metres between feeding trees (Garber 1988, *Behaviour* 105). 0 turns the
+    /// check off. 16.0 (two fruit searches).
+    #[serde(default = "check_search_m")]
+    pub check_search_m: f64,
+    /// **NUTS: how long it remembers a checked tree**, seconds: whether the tree held food when
+    /// it last looked. It does not check an empty one again until that memory lapses, and
+    /// goes first to one that held food. Real: tamarins and marmosets revisit known feeding
+    /// trees along routes ("trap-lining": Garber 1989, *Am. J. Primatol.* 19). 3600 (an hour,
+    /// half a world day; a nut crop rests 2 h).
+    #[serde(default = "check_memory_s")]
+    pub check_memory_s: f64,
 }
 
 fn roost_search_m() -> f64 {
@@ -1248,6 +1284,14 @@ fn fruit_search_m() -> f64 {
     8.0
 }
 
+fn check_search_m() -> f64 {
+    Glider::SEEDPORTER.check_search_m
+}
+
+fn check_memory_s() -> f64 {
+    Glider::SEEDPORTER.check_memory_s
+}
+
 impl Glider {
     /// The seedporter's table (predation-and-flight §3.5, §3.9; Brief F3; placeholders):
     /// climbs stands from 1 m, glides from 1 m at 2.5 : 1 and 2 × its cruise for 1.2 × basal.
@@ -1262,6 +1306,8 @@ impl Glider {
         roost_budget_m: 12.0,
         roost_reserve_share: 0.5,
         roost_ledge_min_m: 1.0,
+        check_search_m: 16.0,
+        check_memory_s: 3600.0,
     };
 }
 
@@ -2120,6 +2166,9 @@ impl FounderPhysiology {
                     lifespan_median_s: LIFE_SMALL_DAYS * DAY_S,
                 },
                 fruit_bite_half_stock: None,
+                larva: None,
+                larva_bite_half_stock: None,
+                larva_sight_m: 0.0,
                 give_up_fraction: None,
                 // Full cruise at its basal rate (the motor's tie to upkeep).
                 motor_respiration_per_s: DAILY_SHREDDER / DAY_S,
@@ -2160,6 +2209,8 @@ impl FounderPhysiology {
                     // F1: nor nectar.
                     FOLIAGE_YIELD,
                     // F3: nor fruit.
+                    FOLIAGE_YIELD,
+                    // LARVA: nor larvae.
                     FOLIAGE_YIELD,
                 ],
                 organ_structure_fraction: 0.05,
@@ -2230,6 +2281,9 @@ impl FounderPhysiology {
             },
             Founder::Browser => FounderPhysiology {
                 fruit_bite_half_stock: None,
+                larva: None,
+                larva_bite_half_stock: None,
+                larva_sight_m: 0.0,
                 give_up_fraction: None,
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
                 // stand, including their deliberately mineral-hungry tissue against
@@ -2337,6 +2391,9 @@ impl FounderPhysiology {
             // Numbers the note pins are its own; the others are stated where they sit.
             Founder::Lanternjaw => FounderPhysiology {
                 fruit_bite_half_stock: None,
+                larva: None,
+                larva_bite_half_stock: None,
+                larva_sight_m: 0.0,
                 give_up_fraction: None,
                 core: SpeciesConfig {
                     maintenance_per_s: DAILY_LANTERNJAW / DAY_S,
@@ -2525,6 +2582,7 @@ impl FounderPhysiology {
                         FOLIAGE_YIELD,
                         FOLIAGE_YIELD,
                         FOLIAGE_YIELD,
+                        FOLIAGE_YIELD,
                     ],
                     diet: crate::Diet::of(&[crate::Food::CapTissue, crate::Food::Litter]),
                     // ROLES5 (role call 5A): caps are worth their yield, litter its own weak
@@ -2632,10 +2690,6 @@ impl FounderPhysiology {
                 let mut core = shredder.core;
                 core.scale_mass(BELLWING_MASS_RATIO);
                 core.maintenance_per_s = DAILY_BELLWING / DAY_S;
-                // Not the shredder's 0.05 (INSECT-N): its young grow on nectar (mineral
-                // 0.01), so at 0.05 they would take 2.5x as long to mature. It rises with
-                // the larva stage, whose body is built from leaves (Wrysk 2026-10-12).
-                core.n_tissue = 0.02;
                 // Nectar's half-stock: a tenth of a bloomcrown's nectar cap (0.02), so a
                 // full flower gives about nine tenths of a sip and a nearly drained one
                 // crumbs. Not a mass (the food's stock does not scale with the eater).
@@ -2656,16 +2710,26 @@ impl FounderPhysiology {
                 core.body_min = 0.1 * core.body_max;
                 core.birth_body = 0.5 * core.body_max;
                 core.reserve_cap = 0.8;
-                // The egg: the hatchling and a sixth of it again as its reserve.
-                core.reproduction.egg_organic = core.body_min * (1.0 + 1.0 / 6.0);
-                core.reproduction.clutch_max = 6;
+                // LARVA (Wrysk 2026-10-12, `design/larva-nuts-plan-2026-10-12.md` §3): the
+                // egg is 1 % of the adult (real moth eggs are 0.1-2 % of the female,
+                // Garcia-Barros 2000) and goes into the larva field on a host's leaves; the
+                // larva grows there and emerges an adult, so no juvenile body is ever made.
+                // Five eggs a clutch, still paid from nectar.
+                core.reproduction.egg_organic = 0.01 * core.body_max;
+                core.reproduction.clutch_max = 5;
+                // INSECT-N (Wrysk 2026-10-12): insect flesh at 0.05 nitrogen, as the other
+                // invertebrates. The bellwing's waited for its larva, whose body is built
+                // from leaves rather than nectar (decision 6).
+                core.n_tissue = 0.05;
                 core.reproduction.clutch_hold_max_s = 300.0;
                 core.reproduction.surplus_hold_s = 300.0;
                 FounderPhysiology {
                     core,
                     // VINE-C (Wrysk 2026-10-09): it nests in the vines, never on a bloomcrown
-                    // (it was the shredder's litter).
+                    // (it was the shredder's litter). LARVA: its eggs go into the larva
+                    // field on a latticevine or a crowned vaulttree ([`crate::larva`]).
                     egg_site: EggSite::Vine,
+                    larva: Some(crate::larva::Larva::BELLWING),
                     // Cruise 8 BL/s, 1 m/s at 0.125 m (§3.3).
                     cruise_body_lengths_per_s: 8.0,
                     adult_length_m: 0.125,
@@ -2750,10 +2814,21 @@ impl FounderPhysiology {
                     yield_by_food: {
                         let mut y = [FOLIAGE_YIELD; crate::Food::COUNT];
                         y[crate::Food::Fruit.index()] = FRUIT_YIELD;
+                        y[crate::Food::Larva.index()] = LARVA_YIELD;
                         y
                     },
                     active: crate::Activity::Leaning,
-                    diet: crate::Diet::of(&[crate::Food::Fruit, crate::Food::Carrion]),
+                    // LARVA (Wrysk 2026-10-12, decision 4: "b+c"): it eats the bellwing's
+                    // larvae on vines and vaulttree crowns.
+                    diet: crate::Diet::of(&[crate::Food::Fruit, crate::Food::Carrion, crate::Food::Larva]),
+                    // LARVA §4: caterpillars are cryptic, found by close visual search
+                    // (primates and birds glean them from leaves at arm's length): seen
+                    // within 2 m (Wrysk 2026-10-12: "about 2m spotting larvae").
+                    larva_sight_m: 2.0,
+                    // A sixth of one grown larva (~0.07): a host holding a single grown
+                    // larva is eaten near the gut's rate once found; the finding is the walk
+                    // and the climb.
+                    larva_bite_half_stock: Some(0.01),
                     catch_bellwings: true,
                     opportunist: true,
                     catch_foray_m: 5.0,
@@ -3019,6 +3094,8 @@ impl FounderPhysiology {
     pub fn bite_half_stock_for(&self, food: crate::Food) -> f64 {
         if food == crate::Food::Fruit {
             self.fruit_bite_half_stock.unwrap_or(self.core.bite_half_stock)
+        } else if food == crate::Food::Larva {
+            self.larva_bite_half_stock.unwrap_or(self.core.bite_half_stock)
         } else {
             self.core.bite_half_stock
         }
@@ -4189,7 +4266,7 @@ fn pool_stock(fv: &FloraView<'_>, site: Site, food: crate::Food) -> f64 {
         crate::Food::Film => fv.edible_film(g),
         // Neither is a ground pool; a mouth never asks this of them. Nectar (F1) is a
         // flower product, not a pool, and fruit (F3) a hanging one.
-        crate::Food::CapTissue | crate::Food::Foliage | crate::Food::Nectar | crate::Food::Fruit => 0.0,
+        crate::Food::CapTissue | crate::Food::Foliage | crate::Food::Nectar | crate::Food::Fruit | crate::Food::Larva => 0.0,
     })
 }
 
