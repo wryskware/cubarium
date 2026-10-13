@@ -1,0 +1,10 @@
+# LIVE-TWINS quick-lane smoke: the lanternjaw on `twins` with a small layout (2 generations
+# at sigma 0.05 must fit the 15-minute quick lane). Not a training layout.
+[lanternjaw]
+comparison = "twins"
+stage = "top"
+[lanternjaw.twins]
+window_s = 120.0
+pairs = 64
+starts = 1
+nulls = 2
