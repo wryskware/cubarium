@@ -6,6 +6,7 @@
 //! - [`score`]: the kin-weighted score and its parts.
 //! - [`compare`]: the comparison switch's scorers, family placement, the pair update.
 //! - [`matched`]: the matched-copies runner over any scene, and the null pair.
+//! - [`twins`]: all-sign twins of a live world's boundary start (the `twins` comparison).
 //! - [`stage`]: stage 1 (the top only) and stage 2 perturbations.
 //! - [`checks`]: the frozen-brain noise, signal and held-out checks a run switches on.
 
@@ -16,11 +17,12 @@ pub mod matched;
 pub mod roster;
 pub mod score;
 pub mod stage;
+pub mod twins;
 
 #[cfg(test)]
 mod tests;
 
 pub use compare::{PairScores, ascend_pairs, place_families};
-pub use config::{BrainStage, Comparison, KinConfig, KinShares, LineageKin};
+pub use config::{BrainStage, Comparison, KinConfig, KinShares, LineageKin, TwinKnobs};
 pub use roster::{KinRecord, Relation, Roster};
 pub use score::{KinParts, kin_scores};

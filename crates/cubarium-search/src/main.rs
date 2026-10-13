@@ -1090,8 +1090,10 @@ enum Command {
         #[arg(long)]
         curiosity: Option<PathBuf>,
         /// Per-lineage kin knobs (KIN-TRAIN, `config/training/kin-2026-10-12.toml`): the
-        /// shares of relatives' scores, the comparison (`per_body`, `family`) and the brain
-        /// stage. Without it every lineage trains as before (shares 0, `per_body`).
+        /// shares of relatives' scores, the comparison (`per_body`, `family`, or `twins`:
+        /// all-sign twin copies of each world's boundary start, LIVE-TWINS,
+        /// `config/training/kin-twins-2026-10-13.toml`) and the brain stage. Without it
+        /// every lineage trains as before (shares 0, `per_body`).
         #[arg(long)]
         kin: Option<PathBuf>,
         /// Experimental energy potential includes digestible stomach; both deltas are logged.

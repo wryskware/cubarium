@@ -121,6 +121,10 @@ pub struct LineageUpdate {
     pub mean_own: f64,
     pub mean_relatives: f64,
     pub mean_combined: f64,
+    /// The `twins` comparison's readout (LIVE-TWINS); absent for every other lineage, so
+    /// their records are written as before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub twins: Option<crate::es::voxel::kin::twins::TwinsReadout>,
 }
 
 /// One world replaced after a generation.
@@ -145,6 +149,10 @@ pub struct GenerationRecord {
     pub replaced: Vec<Replacement>,
     pub intake_anomalies: u64,
     pub readout: Vec<(String, f64)>,
+    /// Wall seconds of the generation's twin copies (LIVE-TWINS); absent without a lineage
+    /// on the `twins` comparison.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub twins_wall_s: Option<f64>,
 }
 
 /// A lineage being trained: its centre's weights and optimizer, and the file the centre
@@ -232,8 +240,19 @@ impl Lineage {
         }
     }
 
+    /// Whether the lineage is on the `twins` comparison (LIVE-TWINS).
+    fn twins(&self, spec: &LiveSpec) -> bool {
+        spec.kin.of(self.founder).comparison == crate::es::voxel::kin::Comparison::Twins
+    }
+
+    /// Its pairs per generation: the run's, or its twins layout's.
+    fn pairs(&self, spec: &LiveSpec) -> usize {
+        if self.twins(spec) { spec.kin.of(self.founder).twins.pairs } else { spec.pairs }
+    }
+
     /// This generation's `2·pairs` variants.
     fn table(&self, spec: &LiveSpec, generation: u32) -> Result<VariantTable, String> {
+        let pairs = self.pairs(spec);
         match &self.template {
             BrainFile::Plain(_) => VariantTable::antithetic(
                 self.founder,
@@ -241,7 +260,7 @@ impl Lineage {
                 spec.train_seed,
                 spec.sigma,
                 generation,
-                spec.pairs,
+                pairs,
             ),
             BrainFile::TwoLayer(f) => VariantTable::antithetic_two_layer(
                 &self.two_layer_at(f),
@@ -250,7 +269,7 @@ impl Lineage {
                 spec.train_seed,
                 spec.sigma,
                 generation,
-                spec.pairs,
+                pairs,
             ),
         }
     }
@@ -401,7 +420,8 @@ fn update(spec: &LiveSpec, l: &mut Lineage, results: &[WindowResult], generation
             };
             (by_candidate.iter().map(|s| s.unwrap_or(f64::NAN)).collect::<Vec<_>>(), n, pairs.missing, step)
         }
-        // `matched` is refused at the start of the run.
+        // `matched` is refused at the start of the run; a `twins` lineage is updated from
+        // its twin copies ([`update_twins`]), never from the live windows.
         _ => {
             let refs: Vec<&[BodyScore]> = per_world.iter().map(Vec::as_slice).collect();
             let (scores, n) = crate::es::voxel::kin::compare::per_body(&refs, candidates);
@@ -437,7 +457,135 @@ fn update(spec: &LiveSpec, l: &mut Lineage, results: &[WindowResult], generation
         mean_own: mean(|b| b.kin.own),
         mean_relatives: mean(|b| b.kin.relatives),
         mean_combined: mean(|b| b.kin.combined),
+        twins: None,
     }
+}
+
+/// A `twins` lineage's update from its twin copies (LIVE-TWINS): each scored pair's
+/// `(d̄/2, −d̄/2)` through the same antithetic step and perturbation stream as `family`.
+fn update_twins(spec: &LiveSpec, l: &mut Lineage, r: &crate::es::voxel::kin::twins::TwinsResult, generation: u32) -> LineageUpdate {
+    let candidates = 2 * l.pairs(spec);
+    let perturber = l.perturber(spec);
+    let train_seed = spec.train_seed;
+    let (gradient_norm, update_rms) = if matches!(l.template, BrainFile::TwoLayer(_)) {
+        crate::es::voxel::kin::ascend_pairs(&mut l.theta, &mut l.adam, &r.scores, spec.sigma,
+            |p, out| perturber.eps(train_seed, generation, p, out))
+    } else {
+        let generation = u64::from(generation);
+        crate::es::voxel::kin::ascend_pairs(&mut l.theta, &mut l.adam, &r.scores, spec.sigma,
+            |p, out| perturbation(train_seed, generation, p as u64, out))
+    };
+    LineageUpdate {
+        lineage: l.founder.name().into(),
+        bodies: r.bodies,
+        newborn_bodies: r.newborns,
+        candidates_placed: 2 * r.scores.pairs.len(),
+        mean_raw_score: r.mean_own,
+        gradient_norm,
+        update_rms,
+        candidate_scores: r.scores.candidates(candidates).iter().map(|s| s.unwrap_or(f64::NAN)).collect(),
+        comparison: crate::es::voxel::kin::Comparison::Twins,
+        pairs_missing: r.scores.missing,
+        mean_own: r.mean_own,
+        mean_relatives: r.mean_relatives,
+        mean_combined: r.mean_combined,
+        twins: Some(r.readout.clone()),
+    }
+}
+
+/// A world's window under this generation's main tables and its placement start.
+type WindowFn<'a> = dyn Fn(&mut LiveWorld, &[Option<VariantTable>], &[usize]) -> Result<WindowResult, String> + Sync + 'a;
+
+/// **One generation's measurements and updates** (steps 1–3 of the loop):
+///
+/// 1. every lineage's table, and where each world's placement starts;
+/// 2. with a lineage on `twins` (LIVE-TWINS): its current centre is put on its bodies and
+///    birth factory in every world, every world is captured at this boundary and the
+///    lineage's twin copies run from those starts ([`crate::es::voxel::kin::twins`]);
+/// 3. every world runs its window (`window`), a `twins` lineage on its centre (no table),
+///    every other lineage on its variants as before;
+/// 4. one update per lineage: `twins` from its copies, the rest from the windows.
+///
+/// Without a `twins` lineage this is the loop's old steps 1–3 exactly. Returns the window
+/// results, the updates and the twin copies' wall seconds.
+fn run_generation(
+    spec: &LiveSpec,
+    lineages: &mut [Lineage],
+    worlds: &mut [LiveWorld],
+    generation: u32,
+    window: &WindowFn<'_>,
+    check: &dyn Fn() -> Result<(), String>,
+) -> Result<(Vec<WindowResult>, Vec<LineageUpdate>, Option<f64>), String> {
+    // 1. This generation's tables, and where each world's placement starts.
+    let tables = tables_for(spec, lineages, generation)?;
+    let mut first: Vec<Vec<usize>> = Vec::with_capacity(worlds.len());
+    let mut cursor = vec![0usize; Founder::COUNT];
+    for w in worlds.iter() {
+        first.push(cursor.clone());
+        let pop = window::population(&w.sim);
+        for f in Founder::ALL {
+            cursor[f.index()] = (cursor[f.index()] + pop[f.index()].div_ceil(2)) % spec.pairs;
+        }
+    }
+
+    // 2. The twins lineages' copies, from this boundary.
+    let twinned: Vec<Founder> = lineages.iter().filter(|l| l.twins(spec)).map(|l| l.founder).collect();
+    let mut twins = Vec::new();
+    let mut twins_wall = None;
+    let mut main_tables = None;
+    if !twinned.is_empty() {
+        let started = Instant::now();
+        let drivers: Vec<(Founder, crate::es::voxel::EpisodeDriver)> =
+            lineages.iter().map(|l| Ok((l.founder, l.driver(spec)?))).collect::<Result<_, String>>()?;
+        let mine: Vec<_> = drivers.iter().filter(|d| twinned.contains(&d.0)).cloned().collect();
+        let starts: Vec<crate::es::voxel::kin::twins::TwinStart> = worlds
+            .iter_mut()
+            .map(|w| {
+                super::install_centres(w.sim.fauna_mut(), &mine);
+                crate::es::voxel::kin::twins::TwinStart::capture(w.id, &w.sim, &drivers, spec.water_every, &w.memory)
+            })
+            .collect();
+        let jobs: Vec<crate::es::voxel::kin::twins::TwinJob<'_>> = twinned
+            .iter()
+            .map(|f| crate::es::voxel::kin::twins::TwinJob {
+                lineage: *f,
+                table: tables[f.index()].as_ref().expect("a trained lineage has a table"),
+                knobs: spec.kin.of(*f).twins,
+            })
+            .collect();
+        let metering = crate::es::voxel::kin::twins::Metering {
+            kin: spec.kin.clone(),
+            curiosity: spec.curiosity.clone(),
+            stomach_aware_reward: spec.stomach_aware_reward,
+        };
+        twins = crate::es::voxel::kin::twins::measure(&jobs, &starts, &metering, spec.threads)?;
+        twins_wall = Some(started.elapsed().as_secs_f64());
+        let mut t = tables.clone();
+        for f in &twinned {
+            t[f.index()] = None;
+        }
+        main_tables = Some(t);
+        check()?;
+    }
+
+    // 3. Every world runs its window.
+    let jobs: Vec<(&mut LiveWorld, Vec<usize>)> = worlds.iter_mut().zip(first).collect();
+    let tables_ref = main_tables.as_ref().unwrap_or(&tables);
+    let results: Vec<Result<WindowResult, String>> =
+        parallel(jobs, spec.threads, |(w, first)| window(w, tables_ref, &first));
+    let results: Vec<WindowResult> = results.into_iter().collect::<Result<_, _>>()?;
+    check()?;
+
+    // 4. One update per lineage, from the scores normalised within each world (or, on
+    // `twins`, from its twin copies).
+    let updates: Vec<LineageUpdate> = lineages
+        .iter_mut()
+        .map(|l| match twins.iter().find(|r| r.lineage == l.founder) {
+            Some(r) => update_twins(spec, l, r, generation),
+            None => update(spec, l, &results, generation),
+        })
+        .collect();
+    Ok((results, updates, twins_wall))
 }
 
 /// Found training world `slot` from `base`. A base the founding refuses is redrawn
@@ -686,9 +834,14 @@ fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Re
             return Err(format!(
                 "{}: the `matched` comparison runs through the matched-copies runner \
                  (es::voxel::kin::matched), not the live loop; matched live windows are a priced \
-                 trial (design/behaviour-ai-2026-10-11.md §11.7)",
+                 trial (design/behaviour-ai-2026-10-11.md §11.7); `twins` is the live loop's \
+                 matched comparison",
                 f.name()
             ));
+        }
+        if spec.kin.of(*f).comparison == crate::es::voxel::kin::Comparison::Twins {
+            crate::es::voxel::kin::twins::layout(&spec.kin.of(*f).twins, spec.worlds)
+                .map_err(|why| format!("{}: {why}", f.name()))?;
         }
     }
     cubarium_voxel::world::set_thread_override(1);
@@ -744,32 +897,14 @@ fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Re
         run.check()?;
         run.status(generation, 0, 0.0, "drivers and ledgers OK", "RUNNING")?;
         let started = Instant::now();
-        // 1. This generation's tables, and where each world's placement starts.
-        let tables = tables_for(spec, &lineages, generation)?;
-        let mut first: Vec<Vec<usize>> = Vec::with_capacity(worlds.len());
-        let mut cursor = vec![0usize; Founder::COUNT];
-        for w in &worlds {
-            first.push(cursor.clone());
-            let pop = window::population(&w.sim);
-            for f in Founder::ALL {
-                cursor[f.index()] = (cursor[f.index()] + pop[f.index()].div_ceil(2)) % spec.pairs;
-            }
-        }
-
-        // 2. Every world runs its window.
-        let jobs: Vec<(&mut LiveWorld, Vec<usize>)> = worlds.iter_mut().zip(first).collect();
-        let tables_ref = &tables;
-        let results: Vec<Result<WindowResult, String>> = parallel(jobs, spec.threads, |(w, first)| {
-            staged_window(w, tables_ref, &first, spec, run, generation, generation == first_generation || w.windows == 0)
-        });
-        let results: Vec<WindowResult> = results.into_iter().collect::<Result<_, _>>()?;
-        run.check()?;
-
-        // 3. One update per lineage, from the scores normalised within each world.
-        let updates: Vec<LineageUpdate> = lineages
-            .iter_mut()
-            .map(|l| update(spec, l, &results, generation))
-            .collect();
+        // 1–3. The tables, the twin copies (a `twins` lineage only), every world's window,
+        // one update per lineage.
+        let staged = |w: &mut LiveWorld, tables: &[Option<VariantTable>], first: &[usize]| {
+            let full = generation == first_generation || w.windows == 0;
+            staged_window(w, tables, first, spec, run, generation, full)
+        };
+        let (results, updates, twins_wall_s) =
+            run_generation(spec, &mut lineages, &mut worlds, generation, &staged, &|| run.check())?;
 
         // 4. The readout, pooled.
         let per_world: Vec<_> = results.iter().map(|r| r.readout.clone()).collect();
@@ -829,6 +964,7 @@ fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Re
             replaced,
             intake_anomalies: results.iter().map(|r| r.intake_anomalies).sum(),
             readout: pooled,
+            twins_wall_s,
         };
         println!("{}", summary_line(&record));
         writeln!(log, "{}", serde_json::to_string(&record).map_err(|e| e.to_string())?)
@@ -917,6 +1053,15 @@ pub fn summary_line(r: &GenerationRecord) -> String {
         get("cost.tick_ms"),
         r.replaced.len()
     ));
+    for l in &r.lineages {
+        if let Some(t) = &l.twins {
+            s.push_str(&format!(
+                " | twins {}: {} pairs d={:+.4} |d|={:.4} sd={:.4} zero={:.2} div={:.2} null={}/{} g={:.3e} {:.0}s",
+                l.lineage, t.pairs_scored, t.mean_d, t.mean_abs_d, t.sd_d, t.share_d_zero,
+                t.share_diverged, t.nulls_identical, t.nulls, l.gradient_norm, r.twins_wall_s.unwrap_or(0.0),
+            ));
+        }
+    }
     s
 }
 
@@ -1025,3 +1170,7 @@ mod recovery_tests {
 #[cfg(test)]
 #[path = "trainer_brain_tests.rs"]
 mod brain_tests;
+
+#[cfg(test)]
+#[path = "trainer_twins_tests.rs"]
+mod twins_tests;

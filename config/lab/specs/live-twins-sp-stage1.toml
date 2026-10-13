@@ -1,0 +1,27 @@
+# LIVE-TWINS: a seedporter stage-1 run on the `twins` comparison (NOT SUBMITTED; Wrysk decides).
+# Submit after live-twins is merged (the kin file is read from the main checkout):
+#   scripts/lab/lab submit config/lab/specs/live-twins-sp-stage1.toml
+# Layout (config/training/kin-twins-2026-10-13.toml): 1024 pairs x 1 start, 2-minute twin
+# windows, 1 null twin per generation; sigma 0.05; top-up seedporter=8:0.3; checks every 10.
+# Price: ~2050 copies x ~0.7 thread-s (smoke 0.66-0.76) = ~1450 thread-s of twins, ~90 s
+# on 16 threads, plus ~8 s of main windows: ~100 s a generation, ~100 generations
+# (about 10 checks) in the 3-hour wall; 48 desktop thread-hours, no EC2.
+name = "live-twins-sp-stage1"
+kind = "command"
+argv = ["/home/wrysk/wryskware/cubarium/runs/bin/cubarium-search-b618f3ff", "voxel-live-train",
+  "--centre", "seedporter=/home/wrysk/wryskware/cubarium/runs/lab/1012-154002-brest-clone-seedporter-72f7/run/run/seedporter-two-layer.json",
+  "--worlds", "16", "--threads", "16", "--pairs", "16", "--window-min", "10",
+  "--generations", "1000", "--wall", "10800", "--first-generation-seconds", "1800",
+  "--sigma", "0.05", "--top-up", "seedporter=8:0.3",
+  "--kin", "config/training/kin-twins-2026-10-13.toml",
+  "--check-every", "10", "--check-seeds", "21,31,32,41,42,51", "--check-seconds", "600",
+  "--check-scene-seeds", "101,102,103,104",
+  "--save-every", "5", "--out", "{out}/run"]
+cwd = "/home/wrysk/wryskware/cubarium"
+threads = 16
+mem_gb = 24
+hosts = ["desktop"]
+est_h = 3.1
+timeout_h = 4.5
+done_marker = "run/centres/final-seedporter.json"
+priority = 1

@@ -1,5 +1,5 @@
 //! **The kin knobs**, per lineage: the shares `r` (§10.3), the comparison switch (§11.7,
-//! topic 10) and the brain stage (§10.4). Training knobs, like curiosity's: a TOML file of
+//! topic 10), the `twins` comparison's layout and the brain stage (§10.4). Training knobs, like curiosity's: a TOML file of
 //! one `[<lineage>]` table per lineage (`--kin FILE`), nothing in the sim or a save.
 //!
 //! **The defaults are today's training exactly**: every share 0 and the `per_body`
@@ -68,6 +68,53 @@ pub enum Comparison {
     /// in the other, everything else identical ([`super::matched`]). The staged
     /// encounters' default.
     Matched,
+    /// **All-sign twins** (LIVE-TWINS; LJ-TWIN's measured comparison): at each world's
+    /// window boundary the world is captured as one saved start; from it, two copies run a
+    /// short twin window ([`TwinKnobs::window_s`]) with **every body of the lineage** on
+    /// `+ε_p` in one copy and on `−ε_p` in the other (its newborns too), every other body on
+    /// its lineage's centre or heuristic. A copy's score is the lineage's **summed**
+    /// kin-weighted score over the window (every body of the lineage the copy metered,
+    /// newborns included, relatives counted as the kin shares say) **over the number of
+    /// bodies put on the variant at the start**: summed, so a birth or a death in one twin
+    /// moves the score by what it did to the lineage rather than by how it changed a head
+    /// count (a mean over the bodies alive would score a birth as a lower average); over the
+    /// start's head count, a constant shared by both twins, so a start with many bodies does
+    /// not outweigh one with few. The twin's measurement is `+` minus `−`
+    /// ([`super::twins`]). The live world itself then runs its window with this lineage on
+    /// its centre, so the worlds live on as before. Distinct from the focal `matched`.
+    Twins,
+}
+
+/// **The twins comparison's layout** (LIVE-TWINS): how many twin measurements a
+/// generation makes and how long each runs. Read only by a lineage on
+/// [`Comparison::Twins`]; every other lineage ignores it. The defaults are the layout chosen
+/// from LJ-TWIN's measured ICCs (`design/handoffs/live-twins-2026-10-13.md`; the run's
+/// handback says why).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TwinKnobs {
+    /// One twin window, simulated seconds (each copy runs this long from its start).
+    pub window_s: f64,
+    /// Antithetic pairs drawn per generation (the lineage's table has `2·pairs` variants).
+    pub pairs: usize,
+    /// Starts each pair is measured on (distinct worlds' boundary starts; at most the
+    /// run's worlds). A pair's score is the mean of its measurements.
+    pub starts: usize,
+    /// Null twins per generation: both copies on candidate 0 from one start, the
+    /// determinism floor (their gap must be 0); readout only, never in the update.
+    pub nulls: usize,
+}
+
+impl Default for TwinKnobs {
+    fn default() -> TwinKnobs {
+        TwinKnobs { window_s: 120.0, pairs: 1024, starts: 1, nulls: 1 }
+    }
+}
+
+impl TwinKnobs {
+    pub fn is_default(&self) -> bool {
+        *self == TwinKnobs::default()
+    }
 }
 
 /// Which layers of a two-layer brain the variants perturb (§10.4). A plain brain has no
@@ -89,6 +136,10 @@ pub struct LineageKin {
     pub shares: KinShares,
     pub comparison: Comparison,
     pub stage: BrainStage,
+    /// The `twins` comparison's layout (`[<lineage>.twins]`); left out of a written
+    /// config at its default, so a run that never names it writes what it wrote before.
+    #[serde(skip_serializing_if = "TwinKnobs::is_default")]
+    pub twins: TwinKnobs,
 }
 
 impl LineageKin {
@@ -156,6 +207,14 @@ pub fn kin_rows() -> Vec<Row> {
         share("mother", "KIN-TRAIN: share of its mother's own base score added to a body's training score; 0 = today"),
         share("sibling", "KIN-TRAIN: share of each sibling's (shared recorded mother id) own base score added to a body's training score; 0 = today"),
         share("packmate", "KIN-TRAIN: share of each packmate's own base score added to a body's training score; 0 = today"),
+        Row::new("kin.lineages.*.twins.window_s", "s", Range::closed(1.0, 3600.0),
+            "LIVE-TWINS: one twin window on the `twins` comparison, simulated seconds per copy"),
+        Row::new("kin.lineages.*.twins.pairs", "count", Range::closed(1.0, 65536.0),
+            "LIVE-TWINS: antithetic pairs per generation on the `twins` comparison"),
+        Row::new("kin.lineages.*.twins.starts", "count", Range::closed(1.0, 4096.0),
+            "LIVE-TWINS: distinct boundary starts each pair is measured on (at most the run's worlds)"),
+        Row::new("kin.lineages.*.twins.nulls", "count", Range::closed(0.0, 4096.0),
+            "LIVE-TWINS: null twins (both copies on one candidate) per generation, the determinism readout"),
     ]
 }
 

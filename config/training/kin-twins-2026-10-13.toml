@@ -1,0 +1,36 @@
+# LIVE-TWINS: train a lineage on matched all-sign twin windows (design/handoffs/
+# live-twins-2026-10-13.md; the comparison switch of design/behaviour-ai-2026-10-11.md
+# §11.7, topic 10). `--kin` on voxel-live-train. Wrysk decides whether training uses it;
+# a lineage left out of this file trains as before (`per_body`, every share 0).
+#
+# `twins`: at each world's window boundary the world is captured; from it two copies run
+# a short twin window with every body of the lineage on +eps_p in one and -eps_p in the
+# other (newborns too). A copy scores the lineage's summed window score over its bodies at
+# the start; the update ranks each pair's twin difference d (as (d/2, -d/2)). The live
+# world then runs its window with the lineage on its centre.
+#
+# [<lineage>.twins]: window_s (seconds per copy), pairs (per generation), starts (distinct
+# boundary starts per pair, at most --worlds), nulls (null twins per generation, readout).
+# The layout below is the code default, chosen from LJ-TWIN's ICCs (one start per pair:
+# at ICC ~0.12 a second start on a pair buys 0.12 of a new measurement's signal).
+#
+# Shares stay 0: on all-sign twins every body of the lineage carries the variant and the
+# summed score already counts what each relative gained.
+
+[lanternjaw]
+comparison = "twins"
+stage = "top"
+[lanternjaw.twins]
+window_s = 120.0
+pairs = 1024
+starts = 1
+nulls = 1
+
+[seedporter]
+comparison = "twins"
+stage = "top"
+[seedporter.twins]
+window_s = 120.0
+pairs = 1024
+starts = 1
+nulls = 1
