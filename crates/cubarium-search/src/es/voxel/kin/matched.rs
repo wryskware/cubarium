@@ -409,6 +409,60 @@ pub fn run_copy<S: Scene>(
     Ok(CopyOutcome { plan, ticks: r.ticks, scores, installed, decisions })
 }
 
+/// One copy run by [`run_assigned`].
+#[derive(Clone, Debug, Serialize)]
+pub struct AssignedOutcome {
+    /// Ticks the copy ran.
+    pub ticks: u64,
+    /// Every metered body's kin-weighted score.
+    pub scores: BTreeMap<u64, KinParts>,
+    /// Every metered body's window score and its parts (intake, motor, death).
+    pub metered: Vec<crate::es::voxel::live::window::MeteredBody>,
+}
+
+/// **Several bodies on variants in one copy** (LJ-TWIN's probe): run one copy of `scene`
+/// with every body of `assign` on its candidate of `table` and every other body on its
+/// scene driver, metered over the episode as [`run_copy`] meters it; `observe` reads the
+/// sim after every tick. One entry is [`run_copy`]'s copy without the decision log.
+pub fn run_assigned<S: Scene>(
+    scene: &S,
+    assign: &[(u64, usize)],
+    table: &VariantTable,
+    kin: &KinConfig,
+    observe: &mut dyn FnMut(&Sim),
+) -> Result<AssignedOutcome, String> {
+    let mut copy = scene.open()?;
+    for &(id, c) in assign {
+        if c >= table.len() {
+            return Err(format!("candidate {c} is not in a table of {}", table.len()));
+        }
+        if !copy.sim_mut().fauna_mut().set_controller(id, table.controller(c)) {
+            return Err(format!("body {id} is not in the scene"));
+        }
+    }
+    let tables = vec![None; Founder::COUNT];
+    let mut w = Window::begin_kin(
+        copy.sim_mut(),
+        &tables,
+        &[0; Founder::COUNT],
+        scene.ticks(),
+        &Curiosity::default(),
+        Memory::default(),
+        kin,
+    );
+    while !w.done() {
+        let mark = w.before_step(copy.sim());
+        if !copy.step() {
+            break;
+        }
+        w.after_step(copy.sim_mut(), mark);
+        observe(copy.sim());
+    }
+    let r = w.finish(copy.sim(), 0);
+    let scores = kin_scores(&r.metered, &r.roster, kin).into_iter().collect();
+    Ok(AssignedOutcome { ticks: r.ticks, scores, metered: r.metered })
+}
+
 /// One matched pair's result.
 #[derive(Clone, Debug, Serialize)]
 pub struct MatchedPair {
