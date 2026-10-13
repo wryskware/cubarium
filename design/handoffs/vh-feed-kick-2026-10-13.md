@@ -72,3 +72,18 @@ a rest/eat posture that must stand first, a carcass hold, the motor refusing the
 action the pack layer overrides later in the tick), fix it if absurd (knob + registry row for any
 number, mechanism test), and re-run the s7 trace (quick lane). Work on branch `vh-feed-kick`
 after `git merge main` (fast-forward). Hand back as before.
+
+## Follow-up 2 (parent, 2026-10-13 ~15:50)
+
+Merged 8334c4e9 (c974f73c: `kickers_seen`). Now the hound walks clear, but past `clear_lengths`
+the feed branch walks it straight back to the carcass 2 m from the family, and ls55/ls56 kill
+it on a return (s7 from `runs/saves/s7-m203` in this worktree: 104@204.427, 102@204.743).
+Parent's call, option (a) from the last report: **a hound weighs a carcass inside a remembered
+or sensed kicker's clear distance the way the hunt weighs a kick** — reuse the hunt's risk term
+(`tactics.rs` ~:753: expected kicks × `wound_cost` × (1 + own wound) × (1 − `hunger_relief` ×
+hunger)) against the carcass's value to it, so a sated or wounded hound waits it out at the edge
+(rest/watch outside the clear distance, the way wolves wait off a carcass) and a starving one
+may risk it. No new numbers if the hunt's terms cover it; otherwise knob + registry row.
+Mechanism tests (fed hound waits; starving hound goes; the kicker leaves -> it eats). Re-run the
+s7 trace from m203 and from m183 (quick lane) and the s4 one from m183; hand back as before.
+Branch `vh-feed-kick` after `git merge main` (fast-forward).
