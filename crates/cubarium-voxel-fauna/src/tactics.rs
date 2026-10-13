@@ -141,8 +141,9 @@ pub struct Tactics {
     /// behind it, out of sight; [`note_kickers`]), walks straight away from it before anything else — eating, resting, the walk home, a give-up's rest — unless the
     /// kicker is of the lineage it is hunting (the chase's own `dc` rule meets those). A carcass
     /// within that distance of such a kicker is weighed as the hunt weighs a kick
-    /// ([`weigh_carcass`]): not worth it, the hound waits off it; worth it, it goes, not kept
-    /// clear of those kickers. Off: as
+    /// ([`weigh_carcass`]): not worth it, the hound gives it up as a hunt is given up
+    /// ([`give_up_carcass`]: shunned for `shun_s`, a rest off for `rest_s`; in an emergency it
+    /// waits off it); worth it, it goes, not kept clear of those kickers. Off: as
     /// before (a hound fed, rested and walked home through a guarding mother's kicks). A switch.
     pub keep_clear: bool,
     /// ...the distance it keeps, in the kicker's lengths as it sees them (centre to centre).
@@ -172,10 +173,11 @@ pub struct Tactics {
     pub give_up_spent: f64,
     pub give_up_stall_s: f64,
     pub progress_m: f64,
-    /// A body given up on (or a group broken off) is not taken again for this, seconds.
+    /// A body given up on (or a group broken off), or a carcass given up to a kicker
+    /// (VH-FEED-KICK, [`give_up_carcass`]), is not taken again for this, seconds.
     pub shun_s: f64,
-    /// After giving up it goes home, or walks `retreat_m` off the target and rests, for
-    /// `rest_s` before it hunts again. Seconds, metres.
+    /// After giving up (a hunt, or a carcass to a kicker) it goes home, or walks `retreat_m` off
+    /// the target and rests, for `rest_s` before it hunts again. Seconds, metres.
     pub rest_s: f64,
     pub retreat_m: f64,
     /// **Encircle** (Escobedo et al. 2014): approach to `dc` (a kicker's reach as judged plus
@@ -1290,6 +1292,47 @@ fn wait_off(a: &Animal, s: Site, v: f64, ring: f64) -> Actions {
     if d > 1e-9 { head(a, dx.atan2(dz), 0.0, 0.0) } else { Actions::REST }
 }
 
+/// The tag of a carcass in a hound's shun list ([`Hound::shunned`], whose entries are body
+/// ids): a carcass is no body, so its site is packed under the top bit, which no body id
+/// reaches (VH-FEED-KICK follow-up 3; no saved field added, no schema bump).
+const CARCASS_KEY: u64 = 1 << 63;
+
+/// Carcass `s` as an entry of a hound's shun list ([`CARCASS_KEY`]; 21 bits a coordinate).
+fn carcass_key(s: Site) -> u64 {
+    const M: u64 = (1 << 21) - 1;
+    CARCASS_KEY | ((u64::from(s.x) & M) << 42) | ((u64::from(s.y) & M) << 21) | (u64::from(s.z) & M)
+}
+
+/// Hound `a` (memory `mem`) shuns carcass `s` now: it gave it up to a kicker within `shun_s`
+/// ([`give_up_carcass`]). Never in an emergency (its hunger past its reserve's floor): then it
+/// weighs the carcass again ([`weigh_carcass`]).
+fn shuns_carcass(a: &Animal, mem: &Hound, s: Site, now: u64) -> bool {
+    !a.emergency && mem.shuns(carcass_key(s), now)
+}
+
+/// **A carcass given up to a kicker** (VH-FEED-KICK follow-up 3), as a hunt is given up
+/// ([`start_give_up`]): hound `i`, judging carcass `s` not worth the kicks of the kickers over
+/// it ([`weigh_carcass`]), shuns it for `shun_s` (it keeps it in mind and weighs it again after;
+/// not in an emergency, [`shuns_carcass`]) and rests off it for `rest_s` ([`rest_off`]: clear of
+/// the kicker first, then home or `retreat_m` off the carcass), labelled a give-up on kicker
+/// `k`. Before this the hound stood waiting at the kicker's kept distance and walked straight
+/// back the moment it lost the kicker from its senses and its kick from memory: kicked dead on
+/// the return (s7, m203 save: h102 at 204.92, 31 s after its last kick).
+#[allow(clippy::too_many_arguments)]
+fn give_up_carcass(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, tac: &Tactics, pk: &Pack, h: &crate::Hunter, geometry: &crate::Body, den: Site, s: Site, k: &Track) -> Actions {
+    let a = fauna.animals[i];
+    let now = fauna.tick;
+    let v = view.config.voxel_m;
+    let mut mem = memory(fauna, a.id);
+    mem.shun(carcass_key(s), now + cubarium_voxel::ticks_at_least_one(tac.shun_s));
+    mem.gave_up_tick = now;
+    let (cx, cz) = centre(s, v);
+    mem.gave_up_at = [cx, cz];
+    fauna.hounds.insert(a.id, mem);
+    label(fauna, a.id, "give_up", Subject::of_track(k));
+    rest_off(fauna, i, view, tac, pk, h, geometry, mem, den)
+}
+
 /// **A hunt cue heard** (§11.2): the freshest one's point, if any.
 fn cue_heard(fauna: &Fauna, me: u64, keep_s: f64) -> Option<crate::calls::CallRecord> {
     let now = fauna.tick;
@@ -1554,15 +1597,16 @@ pub(crate) fn tactic(
     let hunting = memory(fauna, id).target.and_then(|t| fauna.percept(id).and_then(|p| p.track(t)).map(|k| k.lineage));
     // Follow-up 2: a hungry hound off a hunt that judges the carcass it would feed at worth the
     // kicks of the kickers over it ([`weigh_carcass`]) goes, and is not kept clear of them.
-    let dared: Vec<u64> = {
+    // Follow-up 3: a carcass it gave up to a kicker is shunned for `shun_s` ([`shuns_carcass`]).
+    let (feed_site, weighed): (Option<Site>, Option<Weighed>) = {
         let mem = memory(fauna, id);
         let resting_off = mem.gave_up_tick > 0 && now.saturating_sub(mem.gave_up_tick) as f64 * DT < tac.rest_s;
         let feeds = a.eating && (a.emergency || !wants_rest(fauna, i, clock_on, daylight)) && !mem.committed && !resting_off;
         let scan = fauna.config.hunt.carcass_scan_m.max(0.0);
-        let site = feeds.then(|| mem.carcass.filter(|&s| feast_left(s))).flatten().or_else(|| {
+        let site = feeds.then(|| mem.carcass.filter(|&s| feast_left(s) && !shuns_carcass(&a, &mem, s, now))).flatten().or_else(|| {
             feeds.then(|| fauna.percept(id).and_then(|p| {
                 p.carcass_sites()
-                    .filter(|&s| feast_left(s))
+                    .filter(|&s| feast_left(s) && !shuns_carcass(&a, &mem, s, now))
                     .map(|s| {
                         let (x, z) = centre(s, v);
                         (distance(&a, x, z, ring), s)
@@ -1573,9 +1617,16 @@ pub(crate) fn tactic(
             }))
             .flatten()
         });
-        site.and_then(|s| weigh_carcass(fauna, i, &tac, s, fv.ground_at(s).map_or(0.0, |g| g.carrion), v, ring)).filter(|w| w.dare).map(|w| w.over).unwrap_or_default()
+        (site, site.and_then(|s| weigh_carcass(fauna, i, &tac, s, fv.ground_at(s).map_or(0.0, |g| g.carrion), v, ring)))
     };
+    let dared: Vec<u64> = weighed.as_ref().filter(|w| w.dare).map(|w| w.over.clone()).unwrap_or_default();
     if let Some((act, k)) = keep_clear_but(fauna, i, &tac, hunting, ring, &dared) {
+        // Follow-up 3: walked off the carcass it would feed at by a kicker over it that it
+        // judges not worth the kicks: the carcass is given up (shunned, rest off).
+        if let (Some(s), Some(w)) = (feed_site, weighed.as_ref().filter(|w| !w.dare && !a.emergency)) {
+            let act = give_up_carcass(fauna, i, view, &tac, &pk, &h, &geometry, den, s, &w.kicker);
+            return Some(clamp(fauna, act));
+        }
         label(fauna, id, "give_up", Subject::of_track(&k));
         return Some(clamp(fauna, act));
     }
@@ -1605,11 +1656,12 @@ pub(crate) fn tactic(
         drop_hunt(fauna, i, own, crate::ChaseEnd::Spent);
         label(fauna, id, "den", Subject::None);
         if a.eating {
-            let mut sites: Vec<(f64, Site)> = memory(fauna, id)
+            let mem = memory(fauna, id);
+            let mut sites: Vec<(f64, Site)> = mem
                 .carcass
                 .into_iter()
                 .chain(fauna.percept(id).map(|p| p.carcass_sites().collect::<Vec<_>>()).unwrap_or_default())
-                .filter(|&s| in_den(s) && feast_left(s))
+                .filter(|&s| in_den(s) && feast_left(s) && !shuns_carcass(&a, &mem, s, now))
                 .map(|s| {
                     let (x, z) = centre(s, v);
                     (distance(&a, x, z, ring), s)
@@ -1617,10 +1669,14 @@ pub(crate) fn tactic(
                 .collect();
             sites.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
             // Follow-up 2: one under a kicker not worth its kicks is left out; with only
-            // those, it waits off the nearest.
+            // those, it gives the nearest up (follow-up 3), or in an emergency waits off it.
             let held_off: Vec<(Site, Track)> = sites.iter().filter_map(|&(_, s)| holds_off(fauna, i, &tac, fv, s, v, ring).map(|k| (s, k))).collect();
             if !sites.is_empty() && held_off.len() == sites.len() {
                 let (s, k) = held_off[0];
+                if !a.emergency {
+                    let act = give_up_carcass(fauna, i, view, &tac, &pk, &h, &geometry, den, s, &k);
+                    return Some(clamp(fauna, act));
+                }
                 label(fauna, id, "give_up", Subject::of_track(&k));
                 return Some(clamp(fauna, wait_off(&a, s, v, ring)));
             }
@@ -1734,9 +1790,15 @@ pub(crate) fn tactic(
             mem.carcass = None;
             fauna.hounds.insert(id, mem);
         }
-        if let Some(s) = known {
-            // Follow-up 2: a carcass under a kicker not worth its kicks: wait it out off it.
+        // Follow-up 3: one it gave up to a kicker it keeps in mind, shunned for `shun_s`.
+        if let Some(s) = known.filter(|&s| !shuns_carcass(&a, &mem, s, now)) {
+            // Follow-up 2: a carcass under a kicker not worth its kicks: given up (follow-up
+            // 3), or in an emergency waited out off it.
             if let Some(k) = holds_off(fauna, i, &tac, fv, s, v, ring) {
+                if !a.emergency {
+                    let act = give_up_carcass(fauna, i, view, &tac, &pk, &h, &geometry, den, s, &k);
+                    return Some(clamp(fauna, act));
+                }
                 label(fauna, id, "give_up", Subject::of_track(&k));
                 return Some(clamp(fauna, wait_off(&a, s, v, ring)));
             }
@@ -1755,7 +1817,8 @@ pub(crate) fn tactic(
         }
         if mem.target.is_none() {
             // Follow-up 2: the carcasses it senses under a kicker not worth its kicks are left
-            // out; with only those, it waits off the nearest.
+            // out; with only those, it gives the nearest up (follow-up 3; in an emergency it
+            // waits off it). Those it shuns (follow-up 3) are left out.
             let scan = fauna.config.hunt.carcass_scan_m.max(0.0);
             let mut sensed: Vec<(f64, Site)> = fauna
                 .percept(id)
@@ -1771,15 +1834,22 @@ pub(crate) fn tactic(
                 })
                 .unwrap_or_default();
             sensed.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
+            let shunned = sensed.iter().any(|&(_, s)| shuns_carcass(&a, &mem, s, now));
+            sensed.retain(|&(_, s)| !shuns_carcass(&a, &mem, s, now));
             let held_off: Vec<(Site, Track)> = sensed.iter().filter_map(|&(_, s)| holds_off(fauna, i, &tac, fv, s, v, ring).map(|k| (s, k))).collect();
-            let step = if held_off.is_empty() {
+            let step = if held_off.is_empty() && !shunned {
                 crate::hunt::meal_step(fauna, i, view, fv)
             } else if let Some(&(_, s)) = sensed.iter().find(|(_, s)| !held_off.iter().any(|(h, _)| h == s)) {
                 crate::hunt::meal_step_to(fauna, i, view, fv, s)
-            } else {
-                let (s, k) = held_off[0];
+            } else if let Some(&(s, k)) = held_off.first() {
+                if !a.emergency {
+                    let act = give_up_carcass(fauna, i, view, &tac, &pk, &h, &geometry, den, s, &k);
+                    return Some(clamp(fauna, act));
+                }
                 label(fauna, id, "give_up", Subject::of_track(&k));
                 return Some(clamp(fauna, wait_off(&a, s, v, ring)));
+            } else {
+                None
             };
             if let Some(go) = step {
                 // The carcass it fed at becomes one it knows.
