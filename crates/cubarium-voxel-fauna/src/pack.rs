@@ -543,7 +543,8 @@ pub fn den_reach_census(fauna: &Fauna, view: &VoxelView<'_>) -> Vec<(u64, u64, b
 /// keeps its den — on the range of its first member there (the breeder when it is there),
 /// the next such component when that one has no site. A share of 0 judges the breeder's
 /// reach alone, the rule before DEN-REACH. With every member in one component both rules
-/// choose alike.
+/// choose alike. A dry den with the pack's pups in it is kept whatever the share: a litter
+/// can't follow a move.
 pub(crate) fn renew_dens(fauna: &mut Fauna, view: &VoxelView<'_>, glowcap: &cubarium_voxel_flora::SpeciesConfig) {
     let records = fauna.packs().to_vec();
     let v = view.config.voxel_m;
@@ -578,6 +579,10 @@ pub(crate) fn renew_dens(fauna: &mut Fauna, view: &VoxelView<'_>, glowcap: &cuba
             let held = den_component.map_or(0, held_by);
             let need = ((share.min(1.0) * on.len() as f64).ceil() as usize).max(1);
             if den_component.is_some() && held >= need { continue; }
+            // A dry den with a litter in it stays: its pups can't follow a move.
+            if den_component.is_some() && fauna.animals.iter().any(|a| a.pack.is_some_and(|m| m.pack == rec.id && m.pup)) {
+                continue;
+            }
             let mut ks: Vec<usize> = Vec::new();
             for (_, n) in &on {
                 let k = graph.components[*n];

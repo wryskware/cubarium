@@ -975,3 +975,29 @@ fn a_den_every_member_walks_to_is_kept_and_an_even_split_keeps_its_den() {
     crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
     assert_eq!(fauna.pack(pack).unwrap().den, den);
 }
+
+#[test]
+fn a_den_with_pups_in_it_is_kept_though_most_grown_members_cannot_walk_to_it() {
+    let (world, mut fauna, pack, den, b) = split_pack(4);
+    let others: Vec<usize> = (0..fauna.animals.len()).filter(|&i| i != b).collect();
+    place_at(&mut fauna, b, site(20, 6));
+    place_at(&mut fauna, others[0], site(5, 6));
+    place_at(&mut fauna, others[1], site(7, 6));
+    // The third is a pup at the den.
+    place_at(&mut fauna, others[2], site(20, 7));
+    let mut m = fauna.animals[others[2]].pack.unwrap();
+    m.pup = true;
+    fauna.animals[others[2]].pack = Some(m);
+    let flora = Flora::new(FloraConfig::default());
+    let glowcap = flora.config().species(Species::Glowcap);
+    fauna.config.founders[C.index()].pack.as_mut().unwrap().den_reach_share = 1.0;
+    crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
+    assert_eq!(fauna.pack(pack).unwrap().den, den);
+    // Grown, the same body leaves the den to move to where most of the pack stands.
+    let mut m = fauna.animals[others[2]].pack.unwrap();
+    m.pup = false;
+    fauna.animals[others[2]].pack = Some(m);
+    place_at(&mut fauna, others[2], site(9, 6));
+    crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
+    assert_ne!(fauna.pack(pack).unwrap().den, den);
+}
