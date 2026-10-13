@@ -13,7 +13,12 @@
 //!         [window_min=10] [sigmas=0.02,0.05,0.1] [pairs=8] [modes=all,focal]
 //!         [threads=16] [world_seed=3001] [train_seed=20260924] [generation=0]
 //!         [top_up=lanternjaw=8:0.3] [water_every=4] [info=1: print the centre's size, run nothing]
+//! lj_twin centre=CENTRE.json out=DIR staged=SEEDS [sigmas=…] [pairs=…] [threads=…]
 //! ```
+//!
+//! `staged=N` runs the lanternjaw's staged mode scenes instead (`feed`, `give_way`; the
+//! brain checks' scenes), each pair's `+` and `−` brain on the same N seeds, into
+//! `DIR/staged.jsonl` (competence, mode share, energy per sign).
 //!
 //! One JSON line per matched pair in `DIR/pairs.jsonl` (per lanternjaw: score, intake,
 //! swallowed, intent shares and switches in each twin, and when the twins first differ in
@@ -268,6 +273,87 @@ fn first_diff<T: PartialEq>(a: &[T], b: &[T]) -> Option<usize> {
     a.iter().zip(b).position(|(x, y)| x != y).or_else(|| (a.len() != b.len()).then(|| a.len().min(b.len())))
 }
 
+#[derive(Serialize)]
+struct StagedRow {
+    sigma: f64,
+    scene: &'static str,
+    seed: u64,
+    pair: usize,
+    /// `+`, `−`.
+    competence: [f64; 2],
+    mode_share: [f64; 2],
+    /// The lineage's energy change over the scene, organic units.
+    energy: [f64; 2],
+    deaths: [u64; 2],
+    null_gap: [f64; 2],
+}
+
+#[allow(clippy::too_many_arguments)]
+fn staged(
+    out: &std::path::Path,
+    file: &TwoLayerPolicyFile,
+    sigmas: &[f64],
+    pairs: usize,
+    train_seed: u64,
+    generation: u32,
+    arbitration: cubarium_search::es::voxel::two_layer::IntentArbitration,
+    seeds: u64,
+    threads: usize,
+) {
+    use cubarium_voxel_sim::mode_scenes::{self, ModeScene};
+    let started = std::time::Instant::now();
+    let cfg = mode_scenes::Config::default();
+    let mut items = Vec::new();
+    for &sigma in sigmas {
+        let nets = cubarium_search::es::voxel::kin::stage::two_layer_variants(file, BrainStage::Top, train_seed, sigma, generation, pairs)
+            .expect("variants");
+        let nets = std::sync::Arc::new(nets);
+        for m in ModeScene::of(LJ) {
+            for seed in 0..seeds {
+                for p in 0..pairs {
+                    items.push((sigma, std::sync::Arc::clone(&nets), m, seed, p));
+                }
+            }
+        }
+    }
+    let total = items.len();
+    let rows = parallel(items, threads, |(sigma, nets, m, seed, p)| {
+        let run = |c: usize| {
+            let d = EpisodeDriver::two_layer(nets[c].clone(), arbitration, LJ);
+            cubarium_search::es::voxel::two_layer::scenes::competence(&cfg, m, seed, Some(&d))
+        };
+        let (a, b) = (run(2 * p)?, run(2 * p + 1)?);
+        Ok::<_, String>(StagedRow {
+            sigma,
+            scene: m.name(),
+            seed,
+            pair: p,
+            competence: [a.competence, b.competence],
+            mode_share: [a.mode_share, b.mode_share],
+            energy: [a.energy_end - a.energy_start, b.energy_end - b.energy_start],
+            deaths: [a.deaths, b.deaths],
+            null_gap: [a.null_gap, b.null_gap],
+        })
+    });
+    let mut text = String::new();
+    let mut failed = 0;
+    for r in rows {
+        match r {
+            Ok(r) => {
+                text.push_str(&serde_json::to_string(&r).expect("json"));
+                text.push('\n');
+            }
+            Err(why) => {
+                failed += 1;
+                eprintln!("# staged failed: {why}");
+            }
+        }
+    }
+    std::fs::write(out.join("staged.jsonl"), text).expect("staged.jsonl");
+    eprintln!("# staged: {total} pairs ({failed} failed) in {:.1}s", started.elapsed().as_secs_f64());
+    std::fs::write(out.join("DONE"), "").expect("DONE");
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let centre = arg(&args, "centre").expect("centre=CENTRE.json");
@@ -312,10 +398,18 @@ fn main() {
     if arg(&args, "info").is_some() {
         return;
     }
+    let staged_seeds = num("staged", 0.0) as u64;
     let tables: Vec<VariantTable> = sigmas
         .iter()
         .map(|&s| VariantTable::antithetic_two_layer(&file, BrainStage::Top, arbitration, train_seed, s, generation, pairs).expect("table"))
         .collect();
+
+    // 0. The staged scenes (`staged=N`): the lanternjaw's mode scenes on N seeds, each
+    // pair's `+` and `−` brain on the same seed; then nothing else runs.
+    if staged_seeds > 0 {
+        staged(&out, &file, &sigmas, pairs, train_seed, generation, arbitration, staged_seeds, threads);
+        return;
+    }
 
     // 1. The starts: found as the training worlds are, warm up on the centre, capture.
     let started = std::time::Instant::now();
