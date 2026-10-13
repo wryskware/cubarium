@@ -31,6 +31,11 @@ fn main() -> Result<(), String> {
         .unwrap_or_default();
     let scenario = arg(&args, "scenario").map(|p| cubarium_voxel_sim::edit::Scenario::read(std::path::Path::new(p))).transpose()?;
     let lines = arg(&args, "lines").is_some();
+    // LS-MOVEOFF: what the body is doing at the sample (speed, state, rest bout, eating latch,
+    // the nearest threat track's range) beside its record.
+    let detail = arg(&args, "detail").is_some();
+    let dump = arg(&args, "dump").is_some();
+    let top: usize = arg(&args, "top").and_then(|v| v.parse().ok()).unwrap_or(14);
     let menu = f.manifest().menu;
     let want: Vec<usize> = arg(&args, "intents")
         .unwrap_or("watch")
@@ -74,6 +79,8 @@ fn main() -> Result<(), String> {
                     Some(a) if a <= stagger => "fresh".to_string(),
                     Some(a) => format!("{}s", (a as f64 / per_s as f64).ceil()),
                 };
+                let near = threats.iter().map(|t| t.d_m).fold(f64::INFINITY, f64::min);
+                let near_band = if near.is_finite() { format!("{}m", (near / 10.0).floor() * 10.0) } else { "-".to_string() };
                 let sight = threats.iter().any(|t| t.modes & cubarium_voxel_fauna::perception::SIGHT != 0);
                 let v = p.map(|p| p.vigil).unwrap_or_default();
                 let heed = fauna.config().founder(f).calls.heed_s;
@@ -83,6 +90,29 @@ fn main() -> Result<(), String> {
                     .filter(|r| heed.get(usize::from(r.kind)).is_some_and(|&h| now.saturating_sub(r.tick) as f64 * cubarium_voxel::DT <= h))
                     .max_by_key(|r| r.tick)
                     .map_or("none".to_string(), |r| format!("{}{}", ["alarm", "distress"].get(usize::from(r.kind)).unwrap_or(&"?"), ["", "-mother", "-own_young"][usize::from(r.relation).min(2)]));
+                if dump && detail && v.calm_walk && a.speed_m_s <= 0.1 {
+                    let t = threats.iter().min_by(|p, q| p.d_m.total_cmp(&q.d_m));
+                    eprintln!(
+                        "DUMP seed={seed} id={} tick={now} x={:.1} z={:.1} y={:.1} head={:.0} spd={:.2} state={:?} mode={:?} still={} held_fwd={:.2} att={:.3} del={:.3} delf={:.3} threat={:?}",
+                        a.id, a.pose.x, a.pose.z, a.pose.y_m, a.pose.heading_rad.to_degrees(), a.speed_m_s, a.state, a.mobility.mode, a.still_ticks, a.founder_state.held.forward, a.founder_state.feedback.attempted_equivalent, a.founder_state.feedback.delivered_equivalent, a.founder_state.feedback.delivered_forward,
+                        t.map(|t| (t.id, (t.x * 10.0).round() / 10.0, (t.z * 10.0).round() / 10.0, (t.d_m * 10.0).round() / 10.0, t.moving))
+                    );
+                }
+                let body = if detail {
+                    format!(
+                        " pressed={} stood={} calm_walk={} moving={} state={:?} rest_bout={} eating={} still_s={} near_threat={near_band}",
+                        fauna.press_of(a.id).0 > 0,
+                        a.still_ticks >= fauna.config().predation.still_after_ticks(),
+                        v.calm_walk,
+                        a.speed_m_s > 0.1,
+                        a.state,
+                        a.rest_ticks > 0,
+                        a.eating,
+                        (a.still_ticks as f64 / per_s as f64).min(30.0).floor() as u64 / 10 * 10,
+                    )
+                } else {
+                    String::new()
+                };
                 seen.insert(
                     (a.id, now),
                     format!(
@@ -93,7 +123,7 @@ fn main() -> Result<(), String> {
                         v.scanning(now),
                         v.heard_from != 0,
                         a.body < fauna.config().founder(f).core.birth_body
-                    ),
+                    ) + &body,
                 );
             }
         }
@@ -114,10 +144,13 @@ fn main() -> Result<(), String> {
                 }
                 let masked = !d.prep.intent_mask.get(k).copied().unwrap_or(false);
                 let key = format!(
-                    "steer={:?} {} held_before={} {}",
+                    "steer={:?} fwd={:.1} turn={:.0} {} held_before={} held={} {}",
                     steer.get(&d.tick),
+                    d.executed.actions.forward,
+                    d.executed.actions.turn,
                     if carried { "carried" } else { "fresh" },
                     menu.name(usize::from(d.held_before)),
+                    menu.name(usize::from(d.held)),
                     seen.get(&(id, d.tick)).map_or("?", String::as_str)
                 );
                 if lines && masked {
@@ -134,7 +167,7 @@ fn main() -> Result<(), String> {
             let total: usize = rows.iter().map(|r| r.1).sum();
             println!("== {name} {} {total}", if masked { "MASKED" } else { "valid" });
             rows.sort_by(|a, b| b.1.cmp(&a.1));
-            for (key, n) in rows.into_iter().take(14) {
+            for (key, n) in rows.into_iter().take(top) {
                 println!("{n:6} {key}");
             }
         }

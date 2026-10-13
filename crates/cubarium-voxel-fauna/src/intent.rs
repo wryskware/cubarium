@@ -519,7 +519,8 @@ fn body_subject(fauna: &crate::Fauna, me: u64, id: u64) -> Subject {
 ///   rest bout → `rest`;
 /// - loftstrider: its defence layer's own labels ([`crate::defend::steer`]); else its ground
 ///   response answering a heeded alarm → `stay_with_family`, flight
-///   standing (no forward) → `watch`, flight walking → `move_off`, the herd pull →
+///   standing (no forward) → `watch`, flight walking its motor refused → `rest`, flight
+///   walking → `move_off`, the herd pull →
 ///   `stay_with_family`, its own steering standing still in a rest bout or sated → `rest`,
 ///   else its own steering → `graze`;
 /// - Veilhound: the pack tactic's own reading ([`crate::Fauna::pack_hint`]: rest, den,
@@ -583,6 +584,17 @@ pub(crate) fn teacher_label(
             // labels, and 401 of 603 `move_off`, were this answer with no threat track).
             S::Flee if fauna.call_answer.get(&a.id) == Some(&0) => t("stay_with_family", nearest(fauna, a.id, class::KIN)),
             S::Flee if still => t("watch", nearest(fauna, a.id, class::THREAT)),
+            // LS-MOVEOFF: a flight walk its motor refused (EDGE's pressed clock, [`Fauna::pressed`]:
+            // the interval just ended with forward held and `Self.motor_delivery` under
+            // `teachers.motor_refused`) is a body standing, awake and taking no food: `rest`, as
+            // CLONE-AGREE reads a standing body. It was `move_off`; but its walk off a calm hunter
+            // (FEAR's `calm_walk`) or to a distress call, blocked, re-asks every
+            // `press_replan_s` and the body stands for minutes (traced on the held-out training
+            // world, seed 9: 1528 of 1874 `move_off` labels pressed and still, 1229 of them
+            // still past `still_after_s`; the clone read 1852 of 2364 as `rest`). Not `watch`:
+            // that faces a threat it does not take as calm, and these face away from a calm one
+            // or have none in their record.
+            S::Flee if fauna.pressed.get(&a.id).is_some_and(|&n| n > 0) => t("rest", Subject::None),
             S::Flee => t("move_off", nearest(fauna, a.id, class::THREAT)),
             S::Heuristic | S::Search | S::Leave if herded => t("stay_with_family", nearest(fauna, a.id, class::KIN)),
             // CLONE-AGREE: its `rest` is a body standing that takes no food — still in a rest
