@@ -15,12 +15,17 @@
 //!    over `period_s`, paying the lineage's upkeep, as far as the leaf they take funds it:
 //!    tissue built ≤ `foliage_yield` × leaf and ≤ the leaf's mineral / `n_tissue`; the
 //!    absorbed rest is respired, the unabsorbed rest and its unused mineral go to litter as
-//!    frass. An upkeep the leaf cannot pay comes off the tissue (its mineral to litter);
-//! 3. **emerge**: a cohort whose larvae reach the emergence size becomes `floor(count)`
-//!    adult bodies, each with exactly one larva's tissue, mineral and energy; the fraction
-//!    left over goes to litter.
+//!    frass. An upkeep the leaf cannot pay comes off the tissue (its mineral to litter), and
+//!    larvae unfed for [`Larva::starve_s`] die (`died_starved`);
+//! 3. **emerge**: a cohort whose larvae reach the emergence size joins its lineage's
+//!    **pool of ready larvae** (count, tissue, mineral, energy; no death, no upkeep), and
+//!    each whole larva the pool then holds emerges at that host as one adult body with a
+//!    pool larva's share. No fractional adult is lost (LARVA-FIX).
 //!
-//! A host that dies, or loses its last leaf, drops its larvae to litter. Seedporters eat
+//! A host that no longer exists (its stand gone, its vine gone from the cover) drops its
+//! larvae to litter. A host that stands but offers no leaf this step (a dormant or leafless
+//! vine, a vaulttree with no edible leaf) keeps them: they pay upkeep from tissue and starve
+//! (LARVA-FIX: real larvae on a defoliated plant starve; they do not vanish). Seedporters eat
 //! larvae ([`take_larvae`]) and browsers take them by accident with a vaulttree's leaves
 //! ([`browse_larvae`]). The field grazes through the plant layer's own take APIs, so
 //! organic matter, mineral and energy only move; [`LarvaLedger`] books every flow.
@@ -71,9 +76,16 @@ pub struct Larva {
     /// Founding: adults the founding cohorts are sized to emerge per hour. ~15/h, today's
     /// hourly maturing in h5-8.
     pub founding_emerge_per_h: f64,
-    /// Founding: the nearest this many hosts to the founders take the founding cohorts, so
-    /// each cohort emerges whole bodies. 12.
+    /// Founding: the this many hosts offering the most leaf now (a vine's leafy faces, a
+    /// vaulttree's edible foliage; nearer the founders first among equals) take the founding
+    /// cohorts, each in proportion to its leaf. 12.
     pub founding_hosts: u32,
+    /// A hatched larva whose leaf does not pay its upkeep for this long dies
+    /// (`died_starved`); a step that pays its upkeep in full resets the clock, a step that
+    /// pays part runs it by the unpaid share. Early-instar caterpillars die within ~1-3 days
+    /// unfed against a 2-4-week larval period (recalled from the rearing literature, not a
+    /// measured source), about an eighth of it: 1800 s of the 4-h period.
+    pub starve_s: f64,
 }
 
 impl Larva {
@@ -91,6 +103,7 @@ impl Larva {
         lay_reach_m: 0.25,
         founding_emerge_per_h: 15.0,
         founding_hosts: 12,
+        starve_s: 1800.0,
     };
 }
 
@@ -115,6 +128,10 @@ pub struct Cohort {
     pub mineral: f64,
     pub energy: f64,
     pub age_s: f64,
+    /// Seconds unfed (upkeep unpaid, weighted by the unpaid share); at
+    /// [`Larva::starve_s`] the cohort dies.
+    #[serde(default)]
+    pub unfed_s: f64,
 }
 
 impl Cohort {
@@ -139,9 +156,38 @@ impl Cohort {
         self.mineral -= out.1.mineral;
         self.energy -= out.1.energy;
         if s >= 1.0 {
-            *self = Cohort { age_s: self.age_s, ..Cohort::default() };
+            *self = Cohort { age_s: self.age_s, unfed_s: self.unfed_s, ..Cohort::default() };
         }
         out
+    }
+}
+
+/// **A lineage's pool of ready larvae** (LARVA-FIX): emergence remainders, larvae that
+/// reached the emergence size but not a whole adult, with what they carry. It takes no
+/// death and no upkeep; each whole larva it holds emerges.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ReadyPool {
+    pub count: f64,
+    pub organic: f64,
+    pub mineral: f64,
+    pub energy: f64,
+}
+
+impl ReadyPool {
+    /// The `share` of the pool taken out of it (all of it at 1).
+    fn take_share(&mut self, share: f64) -> Taken {
+        let s = share.clamp(0.0, 1.0);
+        if s >= 1.0 {
+            let all = Taken { organic: self.organic, mineral: self.mineral, energy: self.energy };
+            *self = ReadyPool::default();
+            return all;
+        }
+        let t = Taken { organic: self.organic * s, mineral: self.mineral * s, energy: self.energy * s };
+        self.count -= self.count * s;
+        self.organic -= t.organic;
+        self.mineral -= t.mineral;
+        self.energy -= t.energy;
+        t
     }
 }
 
@@ -179,6 +225,8 @@ impl HostLarvae {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LarvaField {
     hosts: BTreeMap<LarvaHost, HostLarvae>,
+    /// Each lineage's pool of ready larvae (LARVA-FIX).
+    pool: Vec<(Founder, ReadyPool)>,
 }
 
 /// An empty field, for a view built without one (a renderer snapshot: larvae are undrawn).
@@ -186,7 +234,28 @@ pub static NO_LARVAE: LarvaField = LarvaField::new();
 
 impl LarvaField {
     pub const fn new() -> LarvaField {
-        LarvaField { hosts: BTreeMap::new() }
+        LarvaField { hosts: BTreeMap::new(), pool: Vec::new() }
+    }
+
+    /// A lineage's pool of ready larvae (empty when it has none).
+    pub fn pool_of(&self, lineage: Founder) -> ReadyPool {
+        self.pool.iter().find(|(f, _)| *f == lineage).map(|(_, p)| *p).unwrap_or_default()
+    }
+
+    /// Ready larvae pooled, every lineage.
+    pub fn pool_count(&self) -> f64 {
+        self.pool.iter().map(|(_, p)| p.count).sum()
+    }
+
+    fn pool_mut(&mut self, lineage: Founder) -> &mut ReadyPool {
+        let k = match self.pool.iter().position(|(f, _)| *f == lineage) {
+            Some(k) => k,
+            None => {
+                self.pool.push((lineage, ReadyPool::default()));
+                self.pool.len() - 1
+            }
+        };
+        &mut self.pool[k].1
     }
 
     pub fn hosts(&self) -> impl Iterator<Item = (&LarvaHost, &HostLarvae)> {
@@ -197,20 +266,24 @@ impl LarvaField {
         self.hosts.get(&host)
     }
 
+    /// No host holds larvae and no pool holds ready ones.
     pub fn is_empty(&self) -> bool {
-        self.hosts.is_empty()
+        self.hosts.is_empty() && self.pool.iter().all(|(_, p)| !(p.count > 0.0) && !(p.organic > 0.0))
     }
 
+    /// The field's organic matter: every host's larvae and the ready pools.
     pub fn organic(&self) -> f64 {
-        self.hosts.values().map(HostLarvae::organic).sum()
+        self.hosts.values().map(HostLarvae::organic).sum::<f64>() + self.pool.iter().map(|(_, p)| p.organic).sum::<f64>()
     }
 
     pub fn mineral(&self) -> f64 {
-        self.hosts.values().flat_map(|h| h.cohorts.iter()).map(|c| c.mineral).sum()
+        self.hosts.values().flat_map(|h| h.cohorts.iter()).map(|c| c.mineral).sum::<f64>()
+            + self.pool.iter().map(|(_, p)| p.mineral).sum::<f64>()
     }
 
     pub fn energy(&self) -> f64 {
-        self.hosts.values().flat_map(|h| h.cohorts.iter()).map(|c| c.energy).sum()
+        self.hosts.values().flat_map(|h| h.cohorts.iter()).map(|c| c.energy).sum::<f64>()
+            + self.pool.iter().map(|(_, p)| p.energy).sum::<f64>()
     }
 
     /// Larvae standing (eggs included), by host kind: `(vine, vaulttree)`.
@@ -221,12 +294,12 @@ impl LarvaField {
         })
     }
 
-    /// Larvae standing of one lineage, eggs included.
+    /// Larvae standing on hosts of one lineage, eggs included (the ready pool is not).
     pub fn count_of(&self, lineage: Founder) -> f64 {
         self.hosts.values().filter(|h| h.lineage == lineage).map(HostLarvae::count).sum()
     }
 
-    /// Larval tissue standing of one lineage.
+    /// Larval tissue standing on hosts of one lineage (the ready pool is not).
     pub fn organic_of(&self, lineage: Founder) -> f64 {
         self.hosts.values().filter(|h| h.lineage == lineage).map(HostLarvae::organic).sum()
     }
@@ -270,12 +343,11 @@ pub struct LarvaLedger {
     pub eaten_seedporter_out: Books,
     pub eaten_browser: f64,
     pub eaten_browser_out: Books,
-    /// Larvae dead (count): background, their host lost, starved, and the emergence
-    /// remainder.
+    /// Larvae dead (count): background, their host gone, starved (an emergence remainder
+    /// is pooled, not killed: LARVA-FIX).
     pub died_background: f64,
     pub died_host: f64,
     pub died_starved: f64,
-    pub died_remainder: f64,
     /// Everything that went to litter: deaths, frass, an egg's unfunded share.
     pub litter_out: Books,
     pub respired_out: f64,
@@ -356,7 +428,7 @@ pub(crate) fn lay_eggs(
     fauna.ledger.larva.eggs_in.add(paid);
     let tissue = if n > 0.0 { paid.organic.min(paid.mineral / n) } else { paid.organic }.max(0.0);
     let energy = if paid.organic > 0.0 { paid.energy * tissue / paid.organic } else { 0.0 };
-    let cohort = Cohort { count: f64::from(eggs), organic: tissue, mineral: n * tissue, energy, age_s: 0.0 };
+    let cohort = Cohort { count: f64::from(eggs), organic: tissue, mineral: n * tissue, energy, age_s: 0.0, unfed_s: 0.0 };
     let excess = Taken {
         organic: (paid.organic - cohort.organic).max(0.0),
         mineral: (paid.mineral - cohort.mineral).max(0.0),
@@ -392,6 +464,7 @@ fn insert_cohort(
         let a = &mut h.cohorts[0];
         let n = a.count + b.count;
         a.age_s = if n > 0.0 { (a.age_s * a.count + b.age_s * b.count) / n } else { a.age_s.max(b.age_s) };
+        a.unfed_s = if n > 0.0 { (a.unfed_s * a.count + b.unfed_s * b.count) / n } else { a.unfed_s.max(b.unfed_s) };
         a.count = n;
         a.organic += b.organic;
         a.mineral += b.mineral;
@@ -494,38 +567,42 @@ fn step_host(
     let phys = *fauna.config.founder(lineage);
     let sc = phys.core;
     let dt = cubarium_voxel::ticks_at_least_one(t.step_s.max(DT)) as f64 * DT;
-    // The host, and what it offers.
-    let (offer, mf) = {
+    // The host, and what it offers. A host that no longer exists drops its larvae; one that
+    // stands but offers no leaf this step (a dormant or leafless vine, a vaulttree with no
+    // edible leaf) keeps them, unfed (LARVA-FIX).
+    let (exists, offer, mf) = {
         let fv = flora.view();
         match key {
-            LarvaHost::Stand(id) => match host_stand(&fv, host.site, id).filter(|s| stand_hosts(&fv, s)) {
-                Some(s) => {
+            LarvaHost::Stand(id) => match host_stand(&fv, host.site, id) {
+                Some(s) if stand_hosts(&fv, s) => {
                     let mat = s.material();
-                    (Some(Offer::Stand(s.site)), if mat > 0.0 { s.mineral / mat } else { 0.0 })
+                    (true, Some(Offer::Stand(s.site)), if mat > 0.0 { s.mineral / mat } else { 0.0 })
                 }
-                None => (None, 0.0),
+                Some(_) => (true, None, 0.0),
+                None => (false, None, 0.0),
             },
-            LarvaHost::Vine(id) => {
-                let faces = vine_faces.get(&id).cloned().unwrap_or_default();
-                let alive = fv.cover.vine(id).is_some_and(|v| !v.dormant);
-                if alive && !faces.is_empty() {
-                    if let Some(v) = fv.cover.vine(id) {
-                        host.site = v.root;
+            LarvaHost::Vine(id) => match fv.cover.vine(id) {
+                None => (false, None, 0.0),
+                Some(v) => {
+                    host.site = v.root;
+                    let faces = vine_faces.get(&id).cloned().unwrap_or_default();
+                    if !v.dormant && !faces.is_empty() {
+                        if host.anchor.is_none_or(|a| !faces.iter().any(|(f, _)| *f == a)) {
+                            host.anchor =
+                                faces.iter().max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0))).map(|(f, _)| *f);
+                        }
+                        (true, Some(Offer::Vine(faces)), flora.config().latticevine.mineral_fraction)
+                    } else {
+                        (true, None, 0.0)
                     }
-                    if host.anchor.is_none_or(|a| !faces.iter().any(|(f, _)| *f == a)) {
-                        host.anchor = faces.iter().max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0))).map(|(f, _)| *f);
-                    }
-                    (Some(Offer::Vine(faces)), flora.config().latticevine.mineral_fraction)
-                } else {
-                    (None, 0.0)
                 }
-            }
+            },
         }
     };
-    let Some(offer) = offer else {
+    if !exists {
         drop_host(fauna, flora, host);
         return;
-    };
+    }
     let site = host.site;
     let mut litter = Taken::default();
     let add = |l: &mut Taken, t: Taken| {
@@ -572,7 +649,10 @@ fn step_host(
     };
     let demand: Vec<f64> = wants.iter().map(|&(g, u)| leaf_for(g, u)).collect();
     let total: f64 = demand.iter().filter(|d| d.is_finite()).sum();
-    let leaf = if total > 0.0 { take_leaf(flora, &offer, total) } else { Taken::default() };
+    let leaf = match &offer {
+        Some(o) if total > 0.0 => take_leaf(flora, o, total),
+        _ => Taken::default(),
+    };
     if leaf.organic > 0.0 || leaf.mineral > 0.0 {
         let l = &mut fauna.ledger;
         l.eaten_organic_in += leaf.organic;
@@ -630,8 +710,24 @@ fn step_host(
                 add(&mut litter, Taken { organic: 0.0, mineral: m_s, energy: 0.0 });
             }
         }
+        // The starvation clock: run by the unpaid share of the upkeep, reset by a step
+        // that pays it in full; at `starve_s` the cohort dies, its tissue to litter.
+        if c.count > 0.0 && u > 0.0 {
+            if short > 0.0 {
+                c.unfed_s += dt * (short / u).min(1.0);
+            } else {
+                c.unfed_s = 0.0;
+            }
+            if c.unfed_s >= t.starve_s.max(0.0) - 1e-9 && short > 0.0 {
+                let (dead, all) = c.take_share(1.0);
+                fauna.ledger.larva.died_starved += dead;
+                add(&mut litter, all);
+            }
+        }
     }
-    // 3. Emergence.
+    // 3. Emergence: a ready cohort joins its lineage's pool of ready larvae (LARVA-FIX), and
+    // each whole larva the pool then holds emerges here, at the host that completed it, with
+    // a pool larva's share of tissue, mineral and energy.
     let mut k = 0;
     while k < host.cohorts.len() {
         let c = host.cohorts[k];
@@ -641,26 +737,25 @@ fn step_host(
             continue;
         }
         host.cohorts.remove(k);
-        let whole = (c.count + 1e-9).floor().min(c.count.ceil());
-        let bodies = whole.max(0.0) as u64;
-        let per = Taken { organic: c.organic / c.count, mineral: c.mineral / c.count, energy: c.energy / c.count };
-        let mut left = Taken { organic: c.organic, mineral: c.mineral, energy: c.energy };
-        for _ in 0..bodies {
-            let parcel = Taken {
-                organic: per.organic.min(left.organic),
-                mineral: per.mineral.min(left.mineral),
-                energy: per.energy.min(left.energy),
-            };
-            left.organic -= parcel.organic;
-            left.mineral -= parcel.mineral;
-            left.energy -= parcel.energy;
+        {
+            let pool = fauna.larvae.pool_mut(lineage);
+            pool.count += c.count;
+            pool.organic += c.organic;
+            pool.mineral += c.mineral;
+            pool.energy += c.energy;
+        }
+        loop {
+            let pool = fauna.larvae.pool_mut(lineage);
+            if pool.count < 1.0 - 1e-9 {
+                break;
+            }
+            let share = if pool.count > 1.0 { 1.0 / pool.count } else { 1.0 };
+            let parcel = pool.take_share(share);
             let adult = emerge(fauna, view, &flora.view(), lineage, key, &host, emerge_body.min(parcel.organic), parcel);
             fauna.ledger.larva.emerged += 1;
             fauna.ledger.larva.emerged_out.add(parcel);
             newborns.push(adult);
         }
-        fauna.ledger.larva.died_remainder += (c.count - bodies as f64).max(0.0);
-        add(&mut litter, Taken { organic: left.organic.max(0.0), mineral: left.mineral.max(0.0), energy: left.energy.max(0.0) });
     }
     // Spent cohorts leave their dust to litter.
     host.cohorts.retain(|c| {
@@ -676,7 +771,7 @@ fn step_host(
     }
 }
 
-/// A host's whole field to litter (its plant gone, or leafless).
+/// A host's whole field to litter (its plant gone).
 fn drop_host(fauna: &mut Fauna, flora: &mut Flora, host: HostLarvae) {
     let mut all = Taken::default();
     for c in &host.cohorts {
@@ -859,10 +954,14 @@ pub(crate) fn draws_vaulttree(fauna: &Fauna, i: usize, seed: u64, share: f64) ->
     rng.unit() < share
 }
 
-/// **Founding cohorts** (LARVA §3): the nearest [`Larva::founding_hosts`] hosts to the
-/// lineage's living bodies each take [`Larva::cohorts_max`] cohorts at ages staggered over
-/// the time to emergence, sized at the background death rate so ~`founding_emerge_per_h`
-/// adults emerge each hour. Introduced matter, booked `introduced_*`. How many larvae.
+/// **Founding cohorts** (LARVA §3; LARVA-FIX): the [`Larva::founding_hosts`] hosts that
+/// offer the most leaf now (a non-dormant vine's leafy faces, a crowned vaulttree's edible
+/// foliage; nearer the lineage's living bodies first among equals) each take
+/// [`Larva::cohorts_max`] cohorts, sized in proportion to the host's leaf (a seedling vine
+/// cannot feed what a crown can), at ages staggered over the time to emergence and sized at
+/// the background death rate so ~`founding_emerge_per_h` adults emerge each hour. Each host's
+/// cohorts sit at the midpoint of its share of the leaf, so the emergence stream is even.
+/// Introduced matter, booked `introduced_*`. How many larvae.
 pub(crate) fn found(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &Flora, lineage: Founder) -> f64 {
     let Some(t) = table(fauna, lineage) else { return 0.0 };
     let sc = fauna.config.founder(lineage).core;
@@ -890,47 +989,54 @@ pub(crate) fn found(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &Flora, line
             .fold(f64::INFINITY, f64::min)
     };
     let fv = flora.view();
-    // (distance, host, site, anchor)
-    let mut cands: Vec<(f64, LarvaHost, Site, Option<VineFace>)> = Vec::new();
+    let leaf_mass = flora.config().latticevine.leaf_mass;
+    // (leaf offered, distance, host, site, anchor)
+    let mut cands: Vec<(f64, f64, LarvaHost, Site, Option<VineFace>)> = Vec::new();
     for s in fv.stands.iter().filter(|s| stand_hosts(&fv, s)) {
         let d = near((f64::from(s.site.x) + 0.5) * v, (f64::from(s.site.z) + 0.5) * v);
-        cands.push((d, LarvaHost::Stand(s.id), s.site, None));
+        cands.push((fv.edible_foliage(s), d, LarvaHost::Stand(s.id), s.site, None));
     }
-    let mut best_face: BTreeMap<VineId, (f64, VineFace)> = BTreeMap::new();
+    // Per vine: its leaf, and its nearest leafy face.
+    let mut vines: BTreeMap<VineId, (f64, f64, VineFace)> = BTreeMap::new();
     for f in fv.cover.iter().filter(|f| f.leafiness > 0.0) {
         if fv.cover.vine(f.owner).is_none_or(|vn| vn.dormant) {
             continue;
         }
         let d = near((f64::from(f.face.x) + 0.5) * v, (f64::from(f.face.z) + 0.5) * v);
-        let e = best_face.entry(f.owner).or_insert((d, f.face));
-        if d < e.0 || (d == e.0 && f.face < e.1) {
-            *e = (d, f.face);
+        let e = vines.entry(f.owner).or_insert((0.0, d, f.face));
+        e.0 += f.leafiness * leaf_mass;
+        if d < e.1 || (d == e.1 && f.face < e.2) {
+            e.1 = d;
+            e.2 = f.face;
         }
     }
-    for (id, (d, face)) in best_face {
+    for (id, (leaf, d, face)) in vines {
         if let Some(vn) = fv.cover.vine(id) {
-            cands.push((d, LarvaHost::Vine(id), vn.root, Some(face)));
+            cands.push((leaf, d, LarvaHost::Vine(id), vn.root, Some(face)));
         }
     }
-    cands.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    cands.retain(|c| c.0 > 0.0 && c.0.is_finite());
+    cands.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
     cands.truncate(t.founding_hosts as usize);
-    let hosts = cands.len();
-    if hosts == 0 {
+    let leaf_total: f64 = cands.iter().map(|c| c.0).sum();
+    if cands.is_empty() || !(leaf_total > 0.0) {
         return 0.0;
     }
     let k = t.cohorts_max.max(1) as usize;
     let to_emerge = inc + t.period_s;
-    let slots = (hosts * k) as f64;
-    // Each slot stands for its share of the hours to emergence.
-    let survivors = t.founding_emerge_per_h * (to_emerge / 3600.0) / slots;
+    // Survivors per round of cohorts (one per host), every host together.
+    let per_round = t.founding_emerge_per_h * (to_emerge / 3600.0) / k as f64;
     let mut larvae = 0.0;
     let mut added = Taken::default();
-    for (j, (_, host, site, anchor)) in cands.into_iter().enumerate() {
+    let mut before = 0.0;
+    for (leaf, _, host, site, anchor) in cands {
+        let w = leaf / leaf_total;
+        // The host's phase: the midpoint of its share of the leaf.
+        let phase = before + 0.5 * w;
+        before += w;
         for c in 0..k {
-            // Ages spread evenly over [0, to_emerge) across every slot.
-            let slot = (c * hosts + j) as f64 + 0.5;
-            let age = to_emerge * slot / slots;
-            let count = survivors * (t.death_per_s.max(0.0) * (to_emerge - age)).exp();
+            let age = to_emerge * (c as f64 + phase) / k as f64;
+            let count = per_round * w * (t.death_per_s.max(0.0) * (to_emerge - age)).exp();
             let body = if age <= inc { egg } else { (egg * (r * (age - inc)).exp()).min(target) };
             let organic = count * body;
             let cohort = Cohort {
@@ -939,6 +1045,7 @@ pub(crate) fn found(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &Flora, line
                 mineral: sc.n_tissue * organic,
                 energy: sc.energy_density * organic,
                 age_s: age,
+                unfed_s: 0.0,
             };
             added.organic += cohort.organic;
             added.mineral += cohort.mineral;

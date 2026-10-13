@@ -1572,7 +1572,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.04 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4536 rows)
+**`fauna.*`** (4545 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1667,7 +1667,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
 | `fauna.founders.littershredder.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
 | `fauna.founders.littershredder.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
-| `fauna.founders.littershredder.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
+| `fauna.founders.littershredder.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the this many hosts offering the most leaf now take the founding cohorts, each in proportion to its leaf |
+| `fauna.founders.littershredder.larva.starve_s` | (absent) | s | [0, inf) |  | - | placeholder | LARVA-FIX: a hatched larva whose leaf does not pay its upkeep this long dies (early-instar caterpillars die in ~1-3 days unfed of a 2-4-week larval period; recalled) |
 | `fauna.founders.littershredder.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.littershredder.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.littershredder.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -2146,7 +2147,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
 | `fauna.founders.frondgrazer.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
 | `fauna.founders.frondgrazer.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
-| `fauna.founders.frondgrazer.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
+| `fauna.founders.frondgrazer.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the this many hosts offering the most leaf now take the founding cohorts, each in proportion to its leaf |
+| `fauna.founders.frondgrazer.larva.starve_s` | (absent) | s | [0, inf) |  | - | placeholder | LARVA-FIX: a hatched larva whose leaf does not pay its upkeep this long dies (early-instar caterpillars die in ~1-3 days unfed of a 2-4-week larval period; recalled) |
 | `fauna.founders.frondgrazer.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.frondgrazer.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.frondgrazer.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -2625,7 +2627,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
 | `fauna.founders.lanternjaw.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
 | `fauna.founders.lanternjaw.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
-| `fauna.founders.lanternjaw.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
+| `fauna.founders.lanternjaw.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the this many hosts offering the most leaf now take the founding cohorts, each in proportion to its leaf |
+| `fauna.founders.lanternjaw.larva.starve_s` | (absent) | s | [0, inf) |  | - | placeholder | LARVA-FIX: a hatched larva whose leaf does not pay its upkeep this long dies (early-instar caterpillars die in ~1-3 days unfed of a 2-4-week larval period; recalled) |
 | `fauna.founders.lanternjaw.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.lanternjaw.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.lanternjaw.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -3104,7 +3107,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
 | `fauna.founders.capgnawer.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
 | `fauna.founders.capgnawer.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
-| `fauna.founders.capgnawer.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
+| `fauna.founders.capgnawer.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the this many hosts offering the most leaf now take the founding cohorts, each in proportion to its leaf |
+| `fauna.founders.capgnawer.larva.starve_s` | (absent) | s | [0, inf) |  | - | placeholder | LARVA-FIX: a hatched larva whose leaf does not pay its upkeep this long dies (early-instar caterpillars die in ~1-3 days unfed of a 2-4-week larval period; recalled) |
 | `fauna.founders.capgnawer.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.capgnawer.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.capgnawer.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -3583,7 +3587,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
 | `fauna.founders.loftstrider.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
 | `fauna.founders.loftstrider.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
-| `fauna.founders.loftstrider.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
+| `fauna.founders.loftstrider.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the this many hosts offering the most leaf now take the founding cohorts, each in proportion to its leaf |
+| `fauna.founders.loftstrider.larva.starve_s` | (absent) | s | [0, inf) |  | - | placeholder | LARVA-FIX: a hatched larva whose leaf does not pay its upkeep this long dies (early-instar caterpillars die in ~1-3 days unfed of a 2-4-week larval period; recalled) |
 | `fauna.founders.loftstrider.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.loftstrider.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.loftstrider.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -4062,7 +4067,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
 | `fauna.founders.ripple-snail.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
 | `fauna.founders.ripple-snail.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
-| `fauna.founders.ripple-snail.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
+| `fauna.founders.ripple-snail.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the this many hosts offering the most leaf now take the founding cohorts, each in proportion to its leaf |
+| `fauna.founders.ripple-snail.larva.starve_s` | (absent) | s | [0, inf) |  | - | placeholder | LARVA-FIX: a hatched larva whose leaf does not pay its upkeep this long dies (early-instar caterpillars die in ~1-3 days unfed of a 2-4-week larval period; recalled) |
 | `fauna.founders.ripple-snail.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.ripple-snail.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.ripple-snail.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -4541,7 +4547,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.larva.step_s` | 10.0 | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
 | `fauna.founders.bellwing.larva.lay_reach_m` | 0.25 | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
 | `fauna.founders.bellwing.larva.founding_emerge_per_h` | 15.0 | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
-| `fauna.founders.bellwing.larva.founding_hosts` | 12 | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
+| `fauna.founders.bellwing.larva.founding_hosts` | 12 | hosts | [0, inf) |  | - | placeholder | LARVA: the this many hosts offering the most leaf now take the founding cohorts, each in proportion to its leaf |
+| `fauna.founders.bellwing.larva.starve_s` | 1800.0 | s | [0, inf) |  | - | placeholder | LARVA-FIX: a hatched larva whose leaf does not pay its upkeep this long dies (early-instar caterpillars die in ~1-3 days unfed of a 2-4-week larval period; recalled) |
 | `fauna.founders.bellwing.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.bellwing.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.bellwing.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -5020,7 +5027,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
 | `fauna.founders.seedporter.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
 | `fauna.founders.seedporter.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
-| `fauna.founders.seedporter.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
+| `fauna.founders.seedporter.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the this many hosts offering the most leaf now take the founding cohorts, each in proportion to its leaf |
+| `fauna.founders.seedporter.larva.starve_s` | (absent) | s | [0, inf) |  | - | placeholder | LARVA-FIX: a hatched larva whose leaf does not pay its upkeep this long dies (early-instar caterpillars die in ~1-3 days unfed of a 2-4-week larval period; recalled) |
 | `fauna.founders.seedporter.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.seedporter.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.seedporter.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -5499,7 +5507,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
 | `fauna.founders.chorister.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
 | `fauna.founders.chorister.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
-| `fauna.founders.chorister.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
+| `fauna.founders.chorister.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the this many hosts offering the most leaf now take the founding cohorts, each in proportion to its leaf |
+| `fauna.founders.chorister.larva.starve_s` | (absent) | s | [0, inf) |  | - | placeholder | LARVA-FIX: a hatched larva whose leaf does not pay its upkeep this long dies (early-instar caterpillars die in ~1-3 days unfed of a 2-4-week larval period; recalled) |
 | `fauna.founders.chorister.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.chorister.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.chorister.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |

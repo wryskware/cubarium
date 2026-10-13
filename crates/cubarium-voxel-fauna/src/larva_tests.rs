@@ -126,7 +126,7 @@ fn n_tissue(fauna: &Fauna) -> f64 {
 fn cohort(fauna: &Fauna, count: f64, body: f64, age_s: f64) -> Cohort {
     let organic = count * body;
     let sc = fauna.config().founder(BW).core;
-    Cohort { count, organic, mineral: sc.n_tissue * organic, energy: sc.energy_density * organic, age_s }
+    Cohort { count, organic, mineral: sc.n_tissue * organic, energy: sc.energy_density * organic, age_s, unfed_s: 0.0 }
 }
 
 fn put(fauna: &mut Fauna, host: LarvaHost, site: Site, anchor: Option<Face>, (n, body, age): (f64, f64, f64)) {
@@ -222,6 +222,7 @@ fn the_books_close_every_step_for_organic_mineral_and_energy() {
     let (world, mut flora, mut fauna, _, _) = hosted(FaunaConfig::default());
     layers_close(&fauna, &flora);
     let mut emerged = 0;
+    let mut pooled = false;
     for _ in 0..60 {
         let (f0, l0) = (field(&fauna), ledger(&fauna));
         emerged += field_step(&mut fauna, &world, &mut flora).len();
@@ -245,8 +246,10 @@ fn the_books_close_every_step_for_organic_mineral_and_energy() {
             );
         }
         layers_close(&fauna, &flora);
+        pooled |= fauna.view().larvae.pool_of(BW).count > 0.0;
     }
     assert!(emerged > 0, "fixture: the step's flows include an emergence");
+    assert!(pooled, "fixture: the ready pool held larvae (LARVA-FIX)");
     assert!(ledger(&fauna).leaf_in.organic > 0.0, "fixture: and leaf eaten");
 }
 
@@ -382,35 +385,76 @@ fn flora_view(flora: &Flora) -> cubarium_voxel_flora::FloraView<'_> {
 
 // ------------------------------------------------------------------ 5. emergence
 
-/// **Emergence yields `floor(count)` bodies at the emergence body, the remainder to litter**
-/// (§7). A cohort of 3.7 larvae at the emergence size becomes three adult bellwings at the
-/// next turn of the clock, each with the emergence body and exactly one larva's tissue,
-/// mineral and energy; the 0.7 left over is booked dead and goes to litter.
+/// A row of full-grown vaulttrees on `z = 8`, one per `x`: their sites and ids.
+fn vaulttrees(flora: &mut Flora, world: &World, xs: &[i64]) -> Vec<(Site, u64)> {
+    xs.iter().map(|&x| vaulttree(flora, world, x, 8)).collect()
+}
+
+/// **No fractional adult is lost: ready remainders pool per lineage** (LARVA-FIX). Five
+/// vaulttrees each hold one cohort of a fractional count at the emergence size; at the next
+/// turn of the clock the field emerges, in all, the floor of the summed count, each body at
+/// the host whose cohort carried the pool over a whole larva (hosts in the field's order),
+/// with a pool larva's share; the pool keeps the rest; nothing goes to litter; every
+/// currency is conserved exactly (field, pool and emerged together). No upkeep or death
+/// here, so emergence is the only flow.
 #[test]
-fn emergence_yields_floor_count_adults_at_the_emergence_body_and_the_rest_to_litter() {
-    let world = world(40, 64, 16);
+fn ready_remainders_pool_per_lineage_and_emerge_whole_adults_with_nothing_to_litter() {
+    let world = world(48, 64, 16);
     let mut flora = Flora::new(flora_config());
-    let tree = vaulttree(&mut flora, &world, 20, 8);
-    let mut fauna = Fauna::new(with_larva(|t| t.death_per_s = 0.0));
+    let trees = vaulttrees(&mut flora, &world, &[12, 18, 24, 30, 36]);
+    let mut cfg = with_larva(|t| t.death_per_s = 0.0);
+    cfg.founders[BW.index()].core.maintenance_per_s = 0.0;
+    let mut fauna = Fauna::new(cfg);
     let (body, target) = emerge(&fauna);
     let inc = incubation(&fauna);
-    put(&mut fauna, LarvaHost::Stand(tree.1), tree.0, None, (3.7, target, inc + 1.0));
-    let litter0 = ledger(&fauna).litter_out.organic;
+    let counts = [0.3, 0.45, 0.6, 0.35, 0.5];
+    for (t, n) in trees.iter().zip(counts) {
+        put(&mut fauna, LarvaHost::Stand(t.1), t.0, None, (n, target, inc + 1.0));
+    }
+    // Where each whole larva completes, walking the hosts in the field's (key) order.
+    let mut order: Vec<(LarvaHost, Site, f64)> = trees.iter().zip(counts).map(|(t, n)| (LarvaHost::Stand(t.1), t.0, n)).collect();
+    order.sort_by(|a, b| a.0.cmp(&b.0));
+    let (mut sum, mut want_sites) = (0.0, Vec::new());
+    for (_, site, n) in &order {
+        let before = sum;
+        sum += n;
+        for _ in 0..((sum + 1e-9).floor() - (before + 1e-9).floor()) as usize {
+            want_sites.push(*site);
+        }
+    }
+    let total: f64 = counts.iter().sum();
+    let [o0, m0, e0] = field(&fauna);
+    let litter0 = ledger(&fauna).litter_out;
     let born = field_step(&mut fauna, &world, &mut flora);
-    assert_eq!(born.len(), 3, "floor(3.7) adults");
+    assert_eq!(born.len() as f64, total.floor(), "the floor of the summed count");
     let l = ledger(&fauna);
-    assert_eq!(l.emerged, 3);
-    close(l.died_remainder, 0.7, "the remainder is booked dead");
-    let per = l.emerged_out.organic / 3.0;
+    assert_eq!(l.emerged, born.len() as u64);
+    assert_eq!(l.litter_out, litter0, "nothing to litter at emergence");
+    let pool = fauna.view().larvae.pool_of(BW);
+    close(pool.count, total - total.floor(), "the pool keeps the rest");
+    assert_eq!(fauna.view().larvae.hosts().count(), 0, "every ready cohort left its host");
+    let [o1, m1, e1] = field(&fauna);
+    close(o1 + l.emerged_out.organic, o0, "organic conserved");
+    close(m1 + l.emerged_out.mineral, m0, "mineral conserved");
+    close(e1 + l.emerged_out.energy, e0, "energy conserved");
+    close(o1, pool.organic, "the field's matter is the pool's");
+    let mut sites: Vec<Site> = born.iter().map(|a| a.site).collect();
+    sites.sort_by_key(|s| (s.x, s.y, s.z));
+    want_sites.sort_by_key(|s| (s.x, s.y, s.z));
+    assert_eq!(sites, want_sites, "each adult at the host that completed it");
     for a in &born {
         assert_eq!(a.founder, Some(BW));
         close(a.body, body, "the emergence body");
-        close(a.body + a.reserve, per, "one larva's tissue");
-        close(a.mineral, l.emerged_out.mineral / 3.0, "one larva's mineral");
-        close(a.energy, l.emerged_out.energy / 3.0, "one larva's energy");
+        close(a.body + a.reserve, target, "a pool larva's tissue");
     }
-    assert!(l.litter_out.organic - litter0 >= 0.7 * per * (1.0 - 1e-9), "the remainder's tissue went to litter");
-    assert!(fauna.view().larvae.host(LarvaHost::Stand(tree.1)).is_none(), "the cohort is spent");
+    layers_close(&fauna, &flora);
+    // The pool carries over: more ready larvae on one host complete the next adult there.
+    let more = 1.0 - pool.count + 0.25;
+    put(&mut fauna, LarvaHost::Stand(trees[0].1), trees[0].0, None, (more, target, inc + 1.0));
+    let born = field_step(&mut fauna, &world, &mut flora);
+    assert_eq!(born.len(), 1, "the carried remainder completes an adult");
+    assert_eq!(born[0].site, trees[0].0, "at the host that completed it");
+    close(fauna.view().larvae.pool_of(BW).count, 0.25, "and the pool keeps the new rest");
 }
 
 // ------------------------------------------------------------------ 6. a host's loss
@@ -437,6 +481,114 @@ fn a_hosts_death_drops_its_larvae_to_litter() {
     assert!(fauna.view().larvae.is_empty(), "the host's larvae are gone");
     close(ledger(&fauna).died_host, n, "booked dead with their host");
     close(litter(&flora) - before, organic, "their tissue in the litter of its face");
+    layers_close(&fauna, &flora);
+}
+
+/// **A standing host that offers no leaf keeps its larvae, which starve; a host that is gone
+/// drops them** (LARVA-FIX). A vine stripped of every leaf, and a vaulttree stripped of its
+/// edible foliage, keep their hatched larvae: they lose tissue to upkeep each step and die
+/// once unfed for `starve_s`, booked starved and never as host loss. A vine taken out of the
+/// cover drops its larvae at the next turn of the clock, booked dead with their host.
+#[test]
+fn a_leafless_host_keeps_its_larvae_which_starve_and_a_removed_vine_drops_them() {
+    let world = world(40, 64, 16);
+    let mut flora = Flora::new(flora_config());
+    let tree = vaulttree(&mut flora, &world, 20, 8);
+    let (vine_id, faces) = vine(&mut flora, &world);
+    let mut fauna = Fauna::new(with_larva(|t| t.death_per_s = 0.0));
+    let starve = larva_table(&fauna).starve_s;
+    assert!(starve > 0.0, "fixture: larvae last a while unfed");
+    let egg = fauna.config().founder(BW).core.reproduction.egg_organic;
+    let inc = incubation(&fauna);
+    let root = flora.view().cover.vine(vine_id).expect("the vine").root;
+    for f in &faces {
+        let _ = flora.crop(*f, 1.0e9);
+    }
+    let _ = flora.take_foliage_by_insects(tree.0, 1.0e9);
+    {
+        let fv = flora.view();
+        assert!(fv.cover.iter().filter(|f| f.owner == vine_id).all(|f| f.leafiness <= 0.0), "fixture: no leafy face");
+        assert!(!crate::larva::stand_hosts(&fv, fv.stand_at(tree.0).expect("the tree")), "fixture: no edible leaf");
+    }
+    put(&mut fauna, LarvaHost::Vine(vine_id), root, Some(faces[2]), (20.0, 3.0 * egg, inc + 300.0));
+    put(&mut fauna, LarvaHost::Stand(tree.1), tree.0, None, (10.0, 3.0 * egg, inc + 300.0));
+    let n = count(&fauna);
+    let dt = dt_step(&fauna);
+    let most = (starve / dt).ceil() as usize + 2;
+    let mut steps = 0;
+    let mut last = fauna.view().larvae.organic();
+    while !fauna.view().larvae.is_empty() && steps < most {
+        field_step(&mut fauna, &world, &mut flora);
+        steps += 1;
+        let now = fauna.view().larvae.organic();
+        if !fauna.view().larvae.is_empty() {
+            assert!(now < last, "unfed larvae lose tissue to upkeep: {last} to {now}");
+            for (k, _) in [(LarvaHost::Vine(vine_id), ()), (LarvaHost::Stand(tree.1), ())] {
+                assert!(fauna.view().larvae.host(k).is_some(), "{k:?} keeps its larvae while they last");
+            }
+        }
+        last = now;
+    }
+    assert!(fauna.view().larvae.is_empty(), "they starved within starve_s ({steps} steps)");
+    assert!(steps as f64 * dt >= starve - dt, "not before starve_s unfed ({steps} steps of {dt} s)");
+    let l = ledger(&fauna);
+    assert_eq!(l.died_host, 0.0, "no host loss");
+    close(l.died_starved, n, "every larva starved");
+    assert_eq!(l.emerged, 0);
+
+    // A vine taken out of the cover drops its larvae.
+    let world = self::world(40, 64, 16);
+    let mut flora = Flora::new(flora_config());
+    let (vine_id, faces) = vine(&mut flora, &world);
+    let mut fauna = Fauna::new(with_larva(|t| t.death_per_s = 0.0));
+    let root = flora.view().cover.vine(vine_id).expect("the vine").root;
+    put(&mut fauna, LarvaHost::Vine(vine_id), root, Some(faces[2]), (20.0, 3.0 * egg, inc + 300.0));
+    let n = count(&fauna);
+    assert_eq!(flora.clear_vines_at(root), 1, "fixture: the vine is removed");
+    field_step(&mut fauna, &world, &mut flora);
+    assert!(fauna.view().larvae.is_empty(), "the removed vine's larvae are gone");
+    close(ledger(&fauna).died_host, n, "booked dead with their host");
+    assert_eq!(ledger(&fauna).died_starved, 0.0);
+}
+
+/// **Founding places no cohort on a host that offers no leaf** (LARVA-FIX): of two vines
+/// and two vaulttrees, one of each stripped of its leaf, the founding cohorts go only to the
+/// leafy ones (both take some).
+#[test]
+fn founding_places_no_cohort_on_a_host_that_offers_no_leaf() {
+    let world = world(40, 64, 16);
+    let mut flora = Flora::new(flora_config());
+    let leafy_tree = vaulttree(&mut flora, &world, 20, 8);
+    let bare_tree = vaulttree(&mut flora, &world, 30, 8);
+    let (leafy_vine, _) = vine(&mut flora, &world);
+    let bare_z = 10;
+    let first = Face::new(WALL_X as u32, 3, bare_z, FaceDir::NegX);
+    let bare_vine = flora
+        .seed_vine(&world, VineSeed { root: Site { x: WALL_X as u32 - 1, y: 2, z: bare_z }, first, reserve: 100.0, lineage: None })
+        .expect("fixture: the second vine");
+    let mut bare_faces = vec![first];
+    for y in 4..=6 {
+        let f = Face::new(WALL_X as u32, y, bare_z, FaceDir::NegX);
+        assert!(flora.cover_face(&world, bare_vine, f, 1.0), "fixture: cover {f:?}");
+        bare_faces.push(f);
+    }
+    for f in &bare_faces {
+        let _ = flora.crop(*f, 1.0e9);
+    }
+    let _ = flora.take_foliage_by_insects(bare_tree.0, 1.0e9);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    assert!(fauna.apply(
+        &world,
+        Command::IntroduceAloft { pose: Pose { x: 4.0, z: 2.0, heading_rad: EAST, y_m: 1.25 }, founder: BW, stores: StartingStores::FULL },
+    ));
+    assert!(larva_table(&fauna).founding_hosts >= 4, "fixture: room for every host");
+    let n = fauna.found_larvae(&world, &flora, BW);
+    assert!(n > 0.0, "founding put larvae down");
+    let f = fauna.view().larvae;
+    assert!(f.host(LarvaHost::Stand(bare_tree.1)).is_none(), "none on the leafless vaulttree");
+    assert!(f.host(LarvaHost::Vine(bare_vine)).is_none(), "none on the leafless vine");
+    assert!(f.host(LarvaHost::Stand(leafy_tree.1)).is_some(), "the leafy vaulttree takes some");
+    assert!(f.host(LarvaHost::Vine(leafy_vine)).is_some(), "the leafy vine takes some");
     layers_close(&fauna, &flora);
 }
 

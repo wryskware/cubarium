@@ -203,7 +203,10 @@ use crate::{Fauna, FaunaConfig};
 //     `FounderPhysiology::{larva, larva_bite_half_stock, larva_sight_m}` are named config.
 //     ECO-INT (same bump): the tree-check memory keys its hosts by `LarvaHost` (a stand or a
 //     vine), not a stand id.
-pub const SCHEMA: u32 = 87;
+// 88: LARVA-FIX — `LarvaField::pool` (each lineage's pool of ready larvae), `Cohort::unfed_s`
+//     (the starvation clock) and the ledger loses `died_remainder` (a state layout change).
+//     `Larva::starve_s` is named config.
+pub const SCHEMA: u32 = 88;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {

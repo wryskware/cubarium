@@ -2021,7 +2021,7 @@ fn print_header() {
     // organic) and by browsers, leaf the larvae ate (organic), and larvae lost with a host or
     // starved.
     header.push_str(",larvae_vine,larvae_vaulttree,larva_mass,larva_eggs_in,larvae_emerged,larva_died_background");
-    header.push_str(",larva_eaten_seedporter,larva_eaten_seedporter_organic,larva_eaten_browser,larva_leaf_eaten,larva_died_host,larva_died_starved");
+    header.push_str(",larva_eaten_seedporter,larva_eaten_seedporter_organic,larva_eaten_browser,larva_leaf_eaten,larva_died_host,larva_died_starved,larva_pool");
     header.push_str(",seed");
     println!("{header}");
 }
@@ -2387,6 +2387,7 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         row.push(format!("{:.6}", l.leaf_in.organic));
         row.push(format!("{:.3}", l.died_host));
         row.push(format!("{:.3}", l.died_starved));
+        row.push(format!("{:.3}", av.larvae.pool_count()));
     }
     // Read the kept world's seed, including fallback and loaded-world starts.
     row.push(sim.world().config().seed.to_string());
