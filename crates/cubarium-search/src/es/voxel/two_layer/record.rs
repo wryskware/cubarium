@@ -317,6 +317,10 @@ pub struct PerMode {
     /// scored.
     #[serde(default)]
     pub masked_labels: Vec<usize>,
+    /// CLONE-AGREE: every scored top label as `[record, sample, label, pick]` (pick
+    /// `usize::MAX` for none), in the records' order: for a per-sample dump. Not saved.
+    #[serde(skip)]
+    pub picks: Vec<[usize; 4]>,
     /// Per held intent (the mode the bottom acts in): samples and summed squared action
     /// error per action value.
     pub mode_samples: Vec<usize>,
@@ -370,11 +374,12 @@ pub fn per_mode(
         switch_hits: vec![0; menu],
         confusion: vec![vec![0; menu]; menu],
         masked_labels: vec![0; menu],
+        picks: Vec::new(),
         mode_samples: vec![0; menu],
         mode_se: vec![0.0; menu],
     };
     let heads = shape.heads();
-    for record in records {
+    for (ri, record) in records.iter().enumerate() {
         let xs = super::clone::bottom_inputs(shape, arbitration, record);
         let cs = super::clone::readout_conditioning(shape, arbitration, record);
         let us = super::clone::top_conditioning(shape, arbitration, record);
@@ -398,6 +403,7 @@ pub fn per_mode(
                     if let Some(k) = pick.filter(|&k| k < menu) {
                         m.confusion[p.intent][k] += 1;
                     }
+                    m.picks.push([ri, t, p.intent, pick.unwrap_or(usize::MAX)]);
                     m.intent_labels[p.intent] += 1;
                     m.intent_hits[p.intent] += usize::from(hit);
                     if before != Some(p.intent) {

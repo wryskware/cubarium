@@ -35,7 +35,9 @@
 //! One JSON summary in `out/summary.json` and a per-mode table on stdout; the clones' files in
 //! `out/`. `confusion=1` (CLONE-AGREE) also prints the two-layer top's confusion matrix
 //! (label row, pick column) on the held-out live teacher records and, in sample, on the
-//! training teacher records, and adds both to the summary as `confusion`.
+//! training teacher records, and adds both to the summary as `confusion`; `dump=1` also
+//! writes every scored held-out live label to `out/heldout_picks.jsonl` (label, pick, the
+//! hold before, the observation) for reading which senses separate a confused pair.
 
 
 use cubarium_search::es::voxel::live::{self, balance, ecology::EcologyParams, world};
@@ -446,7 +448,27 @@ fn main() {
     }
 
     let confusion = (num(&args, "confusion", 0u8) > 0).then(|| {
-        let live = per_mode(&two, &arb, &theta2, &teacher(&held_live), names.len());
+        let held_teacher = teacher(&held_live);
+        let live = per_mode(&two, &arb, &theta2, &held_teacher, names.len());
+        if num(&args, "dump", 0u8) > 0 {
+            use std::io::Write;
+            let mut channels = vec![String::new(); two.observation];
+            for m in f.manifest().modules.iter() {
+                for k in 0..m.width {
+                    if let Some(c) = channels.get_mut(m.offset + k) {
+                        *c = format!("{}.{}", m.name, m.channels.get(k).copied().unwrap_or("?"));
+                    }
+                }
+            }
+            std::fs::write(out.join("obs_channels.json"), json!({"intents": names, "channels": channels}).to_string()).expect("channels");
+            let mut w = std::io::BufWriter::new(std::fs::File::create(out.join("heldout_picks.jsonl")).expect("dump file"));
+            for &[r, t, label, pick] in &live.picks {
+                let s = &held_teacher[r].samples[t];
+                let before = if t > 0 { Some(held_teacher[r].samples[t - 1].held.intent) } else { None };
+                let row = json!({"record": r, "t": t, "label": label, "pick": (pick != usize::MAX).then_some(pick), "before": before, "obs": s.observation});
+                writeln!(w, "{row}").expect("dump");
+            }
+        }
         let fit_on = per_mode(&two, &arb, &theta2, &teacher(&train), names.len());
         println!("{}", confusion_text("held-out live teacher", &names, &live.confusion, &live.masked_labels));
         println!("{}", confusion_text("training teacher (in sample)", &names, &fit_on.confusion, &fit_on.masked_labels));
