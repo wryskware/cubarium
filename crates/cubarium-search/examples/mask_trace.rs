@@ -69,9 +69,24 @@ fn main() -> Result<(), String> {
                 };
                 let sight = threats.iter().any(|t| t.modes & cubarium_voxel_fauna::perception::SIGHT != 0);
                 let v = p.map(|p| p.vigil).unwrap_or_default();
+                let heed = fauna.config().founder(f).calls.heed_s;
+                // The freshest call it heard and still heeds by age: its kind and voice.
+                let call = cubarium_voxel_fauna::calls::heard(fauna, a.id)
+                    .iter()
+                    .filter(|r| heed.get(usize::from(r.kind)).is_some_and(|&h| now.saturating_sub(r.tick) as f64 * cubarium_voxel::DT <= h))
+                    .max_by_key(|r| r.tick)
+                    .map_or("none".to_string(), |r| format!("{}{}", ["alarm", "distress"].get(usize::from(r.kind)).unwrap_or(&"?"), ["", "-mother", "-own_young"][usize::from(r.relation).min(2)]));
                 seen.insert(
                     (a.id, now),
-                    format!("threat_tracks={} freshest={age_band} sight={sight} fleeing={} heard={}", threats.len(), v.fleeing, v.heard_from != 0),
+                    format!(
+                        "threat_tracks={} freshest={age_band} sight={sight} fleeing={} bolt={} scan={} heeding={} call={call} young={}",
+                        threats.len(),
+                        v.fleeing,
+                        now < v.bolt_until,
+                        v.scanning(now),
+                        v.heard_from != 0,
+                        a.body < fauna.config().founder(f).core.birth_body
+                    ),
                 );
             }
         }

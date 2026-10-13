@@ -69,6 +69,11 @@ static FULLNESS: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
 /// Veilhounds, which the training worlds found none of.
 static ALSO: std::sync::OnceLock<Vec<world::TopUp>> = std::sync::OnceLock::new();
 
+/// LS-TEACH: a scenario (`scenario=PATH`, the `[[calve]]`/`[[place]]`/`[[populate]]` file of
+/// `cubarium_voxel_sim::edit::Scenario`) applied to every live world this run founds, after
+/// the top-ups: the teacher worlds' calves. Unset: the worlds as before.
+static SCENARIO: std::sync::OnceLock<Option<cubarium_voxel_sim::edit::Scenario>> = std::sync::OnceLock::new();
+
 const TICKS_PER_S: u64 = cubarium_voxel_fauna::TICK_HZ as u64;
 
 /// The training world (`small`, still water) with the ecology's own founders, then the
@@ -89,6 +94,10 @@ fn found(seed: u64, f: Founder, bodies: usize) -> Result<cubarium_voxel_sim::Sim
     let had = lineage_ids(&sim, f).len();
     let placed = world::top_up(&mut sim, world::TopUp { founder: f, bodies, fullness: FULLNESS.get().copied().flatten() });
     eprintln!("# seed {seed}: {had} {} founded, {placed} placed by the top-up", f.name());
+    if let Some(sc) = SCENARIO.get().and_then(Option::as_ref) {
+        let r = sim.edit(|e| sc.apply(e));
+        eprintln!("# seed {seed}: scenario applied {:?} refused {:?}", r.applied, r.refused);
+    }
     Ok(sim)
 }
 
@@ -272,6 +281,9 @@ fn main() {
         .unwrap_or_default();
     assert!(also.iter().all(|t| t.founder != f), "also= tops up other lineages");
     ALSO.set(also.clone()).expect("set once");
+    let scenario_path = arg(&args, "scenario").map(str::to_string);
+    let scenario = scenario_path.as_deref().map(|p| cubarium_voxel_sim::edit::Scenario::read(std::path::Path::new(p)).expect("scenario"));
+    SCENARIO.set(scenario).expect("set once");
     let mut scene_cfg = mode_scenes::Config::default();
     if let Some(s) = arg(&args, "scene_s").and_then(|v| v.parse().ok()) {
         scene_cfg.duration_s = s;
@@ -478,7 +490,7 @@ fn main() {
 
     let summary = json!({
         "founder": f.name(),
-        "bodies": bodies, "fullness": fullness, "also": also.iter().map(|t| json!({"founder": t.founder.name(), "bodies": t.bodies, "fullness": t.fullness})).collect::<Vec<_>>(), "record_s": record_s, "closed_s": closed_s, "alt_period_s": alt_period_s, "alt_len_s": alt_len_s,
+        "bodies": bodies, "fullness": fullness, "also": also.iter().map(|t| json!({"founder": t.founder.name(), "bodies": t.bodies, "fullness": t.fullness})).collect::<Vec<_>>(), "scenario": scenario_path, "record_s": record_s, "closed_s": closed_s, "alt_period_s": alt_period_s, "alt_len_s": alt_len_s,
         "scene_s": scene_cfg.duration_s, "scene_seeds": scene_seeds, "scene_heldout": scene_heldout, "refit_rounds": refit_rounds,
         "train_labels": train_labels,
         "samples": {"train_teacher": samples(&train, RecordSource::Teacher), "train_alternative_mode": samples(&train, RecordSource::AlternativeMode),
