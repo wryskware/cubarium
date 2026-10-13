@@ -51,6 +51,8 @@ fn main() -> Result<(), String> {
     let mut hound_line: BTreeMap<u64, String> = BTreeMap::new();
     // At each windup's start: what the kicker held and saw of its target.
     let mut asked: BTreeMap<u64, String> = BTreeMap::new();
+    // Landed kicks each hound has taken in the trace (its wound rose at a contact).
+    let mut taken: BTreeMap<u64, u32> = BTreeMap::new();
     let mut n = 0u64;
     loop {
         sim.step();
@@ -73,6 +75,37 @@ fn main() -> Result<(), String> {
         let show = minute - minute0 as f64 >= from;
         let ls: Vec<_> = view.animals.iter().filter(|a| a.founder == Some(Founder::Loftstrider)).collect();
         let vh: Vec<_> = view.animals.iter().filter(|a| a.founder == Some(Founder::Chorister)).collect();
+        let fv = sim.flora().view();
+        let (width, depth) = {
+            let c = sim.world().config();
+            (c.width, c.depth)
+        };
+        // VH-FEED-KICK: the nearest carcass to a hound (2 voxels around it, its level ±1):
+        // whose body, how far, carrion left.
+        let carcass_near = |h: &cubarium_voxel_fauna::Animal| {
+            let mut best: Option<(f64, String)> = None;
+            for dy in -1i64..=1 {
+                for dz in -2i64..=2 {
+                    for dx in -2i64..=2 {
+                        let y = i64::from(h.site.y) + dy;
+                        let z = i64::from(h.site.z) + dz;
+                        if y < 0 || z < 0 || z >= i64::from(depth) {
+                            continue;
+                        }
+                        let x = (i64::from(h.site.x) + dx).rem_euclid(i64::from(width));
+                        let s = cubarium_voxel_flora::Site { x: x as u32, y: y as u32, z: z as u32 };
+                        let Some(g) = fv.ground_at(s) else { continue };
+                        let Some(c) = g.carcass.filter(|_| g.carrion > 0.0) else { continue };
+                        let d = gap(h.pose.x, h.pose.z, (x as f64 + 0.5) * vm, (z as f64 + 0.5) * vm);
+                        if best.as_ref().is_none_or(|b| d < b.0) {
+                            let who = Founder::ALL.get(usize::from(c.lineage)).map_or("?".to_string(), |f| format!("{f:?}"));
+                            best = Some((d, format!("{who}@{d:.1}m carrion {:.0}/{:.0} at ({x},{y},{z})", g.carrion, c.organic)));
+                        }
+                    }
+                }
+            }
+            best.map_or("none".to_string(), |b| b.1)
+        };
         let hound_desc = |h: &cubarium_voxel_fauna::Animal| {
             let pup = h.pack.is_some_and(|m| m.pup);
             let den = h.pack.and_then(|m| fauna.pack(m.pack)).map(|p| {
@@ -81,7 +114,7 @@ fn main() -> Result<(), String> {
             let m = fauna.hound(h.id).copied().unwrap_or_default();
             let nl = ls.iter().map(|l| (l.id, gap(h.pose.x, h.pose.z, l.pose.x, l.pose.z))).min_by(|p, q| p.1.total_cmp(&q.1));
             format!(
-                "hound {} body {:.2} pup {pup} breeder {} gest {} intent {} eating {} emerg {} state {:?} wound {:.2} reserve {:.2} den_d {:.1} tgt {:?} com {} at ({:.1},{:.1}) hd {:.0} near_ls {:?} held {:?} steer {:?}",
+                "hound {} body {:.2} pup {pup} breeder {} gest {} intent {} eating {} emerg {} state {:?} wound {:.2} reserve {:.2} den_d {:.1} tgt {:?} com {} at ({:.1},{:.1}) hd {:.0} near_ls {:?} held {:?} steer {:?} carcass {}",
                 h.id,
                 h.body,
                 h.pack.and_then(|m| fauna.pack(m.pack)).is_some_and(|p| p.breeder == Some(h.id)),
@@ -101,6 +134,7 @@ fn main() -> Result<(), String> {
                 nl.map(|(i, d)| format!("{i}@{d:.1}")),
                 h.founder_state.held,
                 fauna.steer_of(h.id),
+                carcass_near(h),
             )
         };
         // Kicks resolving: a kicker whose windup ended this tick.
@@ -131,7 +165,21 @@ fn main() -> Result<(), String> {
                     let calves = ls.iter().filter(|c| c.body < 0.8 * fauna.config().founder(Founder::Loftstrider).core.body_max && c.id != l.id).map(|c| format!("{}@{:.1}", c.id, gap(l.pose.x, l.pose.z, c.pose.x, c.pose.z))).collect::<Vec<_>>();
                     let desc = match t {
                         Some(h) if h.founder == Some(Founder::Chorister) => {
-                            format!("{} dist {:.2} wound {w0:.2}->{:.2}", hound_desc(h), gap(l.pose.x, l.pose.z, h.pose.x, h.pose.z), h.wound)
+                            if h.wound > w0 + 1e-9 {
+                                *taken.entry(h.id).or_default() += 1;
+                            }
+                            let calf_d = ls
+                                .iter()
+                                .filter(|c| c.body < 0.8 * fauna.config().founder(Founder::Loftstrider).core.body_max)
+                                .map(|c| gap(h.pose.x, h.pose.z, c.pose.x, c.pose.z))
+                                .fold(f64::INFINITY, f64::min);
+                            format!(
+                                "{} dist {:.2} calf_d {calf_d:.1} landed_on_it {} wound {w0:.2}->{:.2}",
+                                hound_desc(h),
+                                gap(l.pose.x, l.pose.z, h.pose.x, h.pose.z),
+                                taken.get(&h.id).copied().unwrap_or(0),
+                                h.wound
+                            )
                         }
                         Some(o) => format!("non-hound {} {:?}", o.id, o.founder),
                         None => format!("target {target} gone (died this tick? last line: {})", hound_line.get(&target).cloned().unwrap_or_default()),

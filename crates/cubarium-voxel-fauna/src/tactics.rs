@@ -130,8 +130,18 @@ pub struct Tactics {
     /// A kick it saw counts for this long (it keeps farther off that body), seconds.
     pub kick_memory_s: f64,
     /// ...and the kicker is taken as recovering for this long after it (no kick expected),
-    /// seconds. Only a kick the hound saw; otherwise unknown.
+    /// seconds. Only a kick the hound saw (or felt land on itself: [`felt_kick`]); otherwise
+    /// unknown.
     pub kick_recovery_s: f64,
+    /// **VH-FEED-KICK: keep clear of a kicker** ([`keep_clear`]). On: a grown hound that senses
+    /// a kicker it saw kick (or felt kick it) within `kick_memory_s`, or sees in guard stance,
+    /// nearer than `clear_lengths` of that kicker's lengths, walks straight away from it
+    /// before anything else — eating, resting, the walk home, a give-up's rest — unless the
+    /// kicker is of the lineage it is hunting (the chase's own `dc` rule meets those). Off: as
+    /// before (a hound fed, rested and walked home through a guarding mother's kicks). A switch.
+    pub keep_clear: bool,
+    /// ...the distance it keeps, in the kicker's lengths as it sees them (centre to centre).
+    pub clear_lengths: f64,
     /// **Commitment**: a chase starts on a value of at least this.
     pub commit_value: f64,
     /// ...a group (a prey with another of its lineage within `group_m`) is tested first when
@@ -285,6 +295,10 @@ impl Tactics {
     ///   each grown body facing the pack half (MacNulty et al. 2007; Mech 1970);
     /// - a grown body 1.2 × the hound's length kicks: 0.3 expected kicks, doubled facing a
     ///   hound, at half a meal each (topic 6: three kicks kill);
+    /// - VH-FEED-KICK: it keeps two of a kicker's lengths from one that guards or kicked
+    ///   within the kick memory (on a hunt, one not of the hunted lineage; centre to centre:
+    ///   past a hoof's reach from the front of a body that long, about where a defending
+    ///   ungulate's short charge ends);
     /// - groups are tested from 5 m, 3 s watching, a 3 s rush; chases held 30 s; give up at a
     ///   wound of a third, winded, or 20 s without progress; shun 2 min; rest a minute;
     /// - encircle beyond a kick's reach (0.6 of the kicker's length) plus 0.5 m, repulsion
@@ -320,6 +334,8 @@ impl Tactics {
         kick_reach_fraction: 0.6,
         kick_memory_s: 30.0,
         kick_recovery_s: 2.5,
+        keep_clear: true,
+        clear_lengths: 2.0,
         commit_value: 0.0,
         group_m: 6.0,
         test_floor: -1.0,
@@ -1055,6 +1071,72 @@ fn observe_kicks(fauna: &mut Fauna, me: u64) {
     }
 }
 
+/// **A kick felt** (VH-FEED-KICK): a kick that landed on pack body `target` is remembered as
+/// a kick from `kicker` it saw — its own body tells it whose hoof it was, whether or not its
+/// eyes were on the kicker (a feeding hound's head is down). With [`Tactics::keep_clear`]
+/// off, nothing (as before).
+pub(crate) fn felt_kick(fauna: &mut Fauna, target: u64, kicker: u64) {
+    let now = fauna.tick;
+    let Ok(j) = fauna.animals.binary_search_by_key(&target, |a| a.id) else { return };
+    let a = &fauna.animals[j];
+    let on = a.pack.is_some() && a.founder.and_then(|f| fauna.config.founder(f).pack).is_some_and(|pk| pk.tactics.enabled && pk.tactics.keep_clear);
+    if on {
+        fauna.hounds.entry(target).or_default().saw_kick(kicker, now);
+    }
+}
+
+/// **Keep clear of a kicker** (VH-FEED-KICK, [`Tactics::keep_clear`]) for hound `i`, from its
+/// own record: the kickers it senses (grown, at least `kicker_length_ratio` of its length)
+/// that it saw or felt kick within `kick_memory_s`, or sees in guard stance, standing nearer
+/// than `clear_lengths` of their own length — except those of lineage `hunting`, the one its
+/// hunt is on. `Some`: walk straight away from them (each weighted by how far inside its
+/// distance the hound stands), feeding off, with the nearest as the subject.
+pub(crate) fn keep_clear(fauna: &Fauna, i: usize, tac: &Tactics, hunting: Option<u8>, ring: f64) -> Option<(Actions, Track)> {
+    if !tac.keep_clear {
+        return None;
+    }
+    let a = &fauna.animals[i];
+    let now = fauna.tick;
+    let len = Me::of(fauna, a).len;
+    let mem = memory(fauna, a.id);
+    let fresh = 2 * fauna.config.perception.stagger_ticks();
+    let (mut sx, mut sz) = (0.0, 0.0);
+    let mut nearest: Option<(f64, Track)> = None;
+    for t in fauna.percept(a.id)?.tracks() {
+        if !t.known || t.class != class::PREY || now.saturating_sub(t.tick) > fresh || Some(t.lineage) == hunting {
+            continue;
+        }
+        if !kicker(tac, t, len) || looks_young(&fauna.config, tac, t) {
+            continue;
+        }
+        let kicked = mem.kick_seen(t.id).is_some_and(|at| now.saturating_sub(at) as f64 * DT <= tac.kick_memory_s);
+        if !kicked && !guarding(t) {
+            continue;
+        }
+        let keep = tac.clear_lengths * t.size_m;
+        let (dx, dz, d) = gap(a.pose.x, a.pose.z, t.x, t.z, ring);
+        if !(d < keep) {
+            continue;
+        }
+        let w = (keep - d) / keep.max(1e-9);
+        if d > 1e-9 {
+            sx -= dx / d * w;
+            sz -= dz / d * w;
+        }
+        if nearest.is_none_or(|(nd, n)| d < nd || (d == nd && t.id < n.id)) {
+            nearest = Some((d, *t));
+        }
+    }
+    let (_, k) = nearest?;
+    let away = if sx * sx + sz * sz > 1e-18 {
+        sx.atan2(sz)
+    } else {
+        // On top of it (or exactly between two): turn from the way it faces.
+        a.pose.heading_rad + PI
+    };
+    Some((head(a, away, 1.0, 0.0), k))
+}
+
 /// **A hunt cue heard** (§11.2): the freshest one's point, if any.
 fn cue_heard(fauna: &Fauna, me: u64, keep_s: f64) -> Option<crate::calls::CallRecord> {
     let now = fauna.tick;
@@ -1312,6 +1394,14 @@ pub(crate) fn tactic(
         }
     }
     let hungry = a.eating || a.emergency;
+
+    // VH-FEED-KICK: a kicker that guards or kicked it, near: away first — off the carcass,
+    // out of the rest or the walk home; on a hunt, from any kicker but the hunted lineage's.
+    let hunting = memory(fauna, id).target.and_then(|t| fauna.percept(id).and_then(|p| p.track(t)).map(|k| k.lineage));
+    if let Some((act, k)) = keep_clear(fauna, i, &tac, hunting, ring) {
+        label(fauna, id, "give_up", Subject::of_track(&k));
+        return Some(clamp(fauna, act));
+    }
 
     // Fed or out of phase: home to rest; a hunt in hand is dropped.
     if !a.emergency && (wants_rest(fauna, i, clock_on, daylight) || !a.eating) {
@@ -1705,6 +1795,10 @@ fn rest_off(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, tac: &Tactics, _p
     let a = fauna.animals[i];
     let Some(founder) = a.founder else { return Actions::REST };
     let ring = f64::from(view.config.width) * view.config.voxel_m;
+    // VH-FEED-KICK: the kicker that ended the hunt first (the hunt is dropped: every kicker).
+    if let Some((act, _)) = keep_clear(fauna, i, tac, None, ring) {
+        return act;
+    }
     if must_walk_home(fauna, i, view) {
         let (to, routed) = way_home(fauna, view, founder, &a, geometry, h, den);
         if routed {

@@ -1476,3 +1476,177 @@ fn the_dry_teacher_keeps_a_brain_hounds_hunt_between_samples() {
     assert!(first > 0 && matches!(held[first - 1], "stalk" | "drive" | "test"), "after a sample of the hunt: {held:?}");
     assert!(held[first..].iter().all(|&n| n == "give_up"), "and holds the give-up: {held:?}");
 }
+
+// ------------------------------------------------------------------ VH-FEED-KICK: keep clear
+
+/// Hound `h` (of a pack of two) at `(8, MID_Z)` facing east, its mouth over a carcass it knows,
+/// hungry; a grown loftstrider `ls` at `ls_at` facing `ls_heading`, standing, which the hound
+/// sees. Returns the world, flora, fauna, the hound and the loftstrider.
+fn kicker_scene(ls_at: (f64, f64), ls_heading: f64) -> (World, Flora, Fauna, u64, u64) {
+    let w = arena(11);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut f = Fauna::new(config());
+    let hs = pack(&mut f, &w, 2);
+    let h = hs[0];
+    place(&mut f, h, 8.0, MID_Z, EAST);
+    place(&mut f, hs[1], 28.0, MID_Z, WEST);
+    let ls = strider(&mut f, &w, false, ls_at.0, ls_at.1, ls_heading);
+    let a = animal(&f, h);
+    let geometry = crate::body_of(&f.config, &a).expect("a body");
+    let (x, z) = crate::body::mouth_columns(&w.view(), &a.pose, &geometry)[0];
+    let site = Site { x: x.rem_euclid(i64::from(W)) as u32, y: a.site.y, z };
+    assert!(flora.deposit(site, cubarium_voxel_flora::Deposit { kind: cubarium_voxel_flora::DepositKind::Carrion, organic: 5.0, mineral: 0.25, energy: 10.0 }));
+    assert!(flora.lay_carcass(site, cubarium_voxel_flora::Carcass { lineage: Founder::Browser.index() as u8, heading_rad: 0.0, organic: 5.0 }));
+    f.hounds.entry(h).or_default().carcass = Some(site);
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    (w, flora, f, h, ls)
+}
+
+/// The loftstrider `ls` in hound `h`'s record shown in guard stance.
+fn shows_guard(f: &mut Fauna, h: u64, ls: u64) {
+    let p = f.percepts.get_mut(&h).expect("a record");
+    let k = p.tracks[..usize::from(p.n)].iter_mut().find(|t| t.id == ls).expect("its track");
+    k.stance = crate::perception::stance::GUARD;
+}
+
+/// The distance hound `h` keeps from loftstrider `ls` under `keep_clear`, from its track.
+fn keep_of(f: &Fauna, ls: u64) -> f64 {
+    tac(f).clear_lengths * length(f, ls)
+}
+
+/// **A hound eating at its carcass beside a kicker that kicked it leaves the carcass** (VH-FEED-KICK):
+/// with the kick felt (the step's hook, [`felt_kick`]) and the kicker inside `clear_lengths` of its
+/// lengths behind it, its next sample walks away from the kicker, feeding off, labelled a give-up
+/// on the kicker; with the switch off, the kicker past that distance, or the felt kick older than
+/// `kick_memory_s`, it eats on.
+#[test]
+fn a_hound_eating_beside_a_kicker_that_kicked_it_walks_away_from_it() {
+    let leaves = |f: &mut Fauna, w: &World, flora: &Flora, h: u64| {
+        let act = decide(f, w, flora, h);
+        (act, f.hound_teach.get(&h).map(|t| (t.held, t.subject)))
+    };
+    // The kicker behind it (west), inside the distance: away is the way it faces.
+    let probe = kicker_scene((8.0 - 1.0, MID_Z), EAST);
+    let inside = 0.5 * keep_of(&probe.2, probe.4);
+    let (w, flora, mut f, h, ls) = kicker_scene((8.0 - inside, MID_Z), EAST);
+    let (act, _) = leaves(&mut f, &w, &flora, h);
+    assert_eq!(act.feed, 1.0, "before any kick it eats: {act:?}");
+    felt_kick(&mut f, h, ls);
+    assert_eq!(f.hounds[&h].kick_seen(ls), Some(f.tick), "the kick felt is remembered with its kicker");
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    let (act, label) = leaves(&mut f, &w, &flora, h);
+    assert_eq!(act.feed, 0.0, "off the carcass: {act:?}");
+    assert!(act.forward > 0.0 && act.turn.abs() < 1e-9, "straight on, away from the kicker behind it: {act:?}");
+    let (held, subject) = label.expect("a label");
+    assert_eq!(held, "give_up");
+    assert!(matches!(subject, Subject::Body { id, .. } if id == ls), "on the kicker: {subject:?}");
+
+    // The kicker ahead of it: it turns away, standing (no step toward the hoof), not eating.
+    let (w, flora, mut f, h, ls) = kicker_scene((8.0 + inside, MID_Z + 0.1), WEST);
+    felt_kick(&mut f, h, ls);
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    let act = decide(&mut f, &w, &flora, h);
+    assert!(act.feed == 0.0 && act.forward == 0.0 && act.turn.abs() > 0.0, "turning from it: {act:?}");
+
+    // The switch off: it eats on (and the felt kick is not remembered).
+    let (w, flora, mut f, h, ls) = kicker_scene((8.0 - inside, MID_Z), EAST);
+    f.config.founders[CH.index()].pack.as_mut().unwrap().tactics.keep_clear = false;
+    felt_kick(&mut f, h, ls);
+    assert_eq!(f.hounds[&h].kick_seen(ls), None, "off: no felt kick");
+    f.hounds.entry(h).or_default().saw_kick(ls, f.tick);
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    assert_eq!(decide(&mut f, &w, &flora, h).feed, 1.0, "off: it eats on beside the kicker");
+
+    // Past the distance: it eats on.
+    let probe = kicker_scene((8.0 - 1.0, MID_Z), EAST);
+    let past = keep_of(&probe.2, probe.4) + 0.25;
+    let (w, flora, mut f, h, ls) = kicker_scene((8.0 - past, MID_Z), EAST);
+    felt_kick(&mut f, h, ls);
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    assert_eq!(decide(&mut f, &w, &flora, h).feed, 1.0, "past the distance it eats on");
+
+    // The kick older than the memory: it eats on.
+    let (w, flora, mut f, h, ls) = kicker_scene((8.0 - inside, MID_Z), EAST);
+    felt_kick(&mut f, h, ls);
+    f.tick += cubarium_voxel::ticks_at_least_one(tac(&f).kick_memory_s) + 1;
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    assert_eq!(decide(&mut f, &w, &flora, h).feed, 1.0, "a kick past the memory: it eats on");
+}
+
+/// **A kicker in guard stance near is kept clear of before it kicks** (VH-FEED-KICK): no kick seen
+/// or felt, the loftstrider shown in guard stance inside the distance, the hound leaves its
+/// carcass; the same body standing without the stance is no reason to leave.
+#[test]
+fn a_hound_leaves_its_carcass_beside_a_kicker_in_guard_stance_and_not_beside_one_without() {
+    let probe = kicker_scene((8.0 - 1.0, MID_Z), EAST);
+    let inside = 0.5 * keep_of(&probe.2, probe.4);
+    for guard in [false, true] {
+        let (w, flora, mut f, h, ls) = kicker_scene((8.0 - inside, MID_Z), EAST);
+        if guard {
+            shows_guard(&mut f, h, ls);
+        }
+        let act = decide(&mut f, &w, &flora, h);
+        if guard {
+            assert!(act.feed == 0.0 && act.forward > 0.0, "guard stance: away: {act:?}");
+        } else {
+            assert_eq!(act.feed, 1.0, "no stance, no kick: it eats: {act:?}");
+        }
+    }
+}
+
+/// **Off its hunt every kicker counts; on a hunt, not the hunted lineage's** (VH-FEED-KICK):
+/// [`keep_clear`] meets a guarding loftstrider near when the hound hunts nothing or another
+/// lineage, and leaves it to the chase's own `dc` rule when the hound hunts loftstriders.
+#[test]
+fn keep_clear_skips_kickers_of_the_hunted_lineage() {
+    let probe = kicker_scene((8.0 - 1.0, MID_Z), EAST);
+    let inside = 0.5 * keep_of(&probe.2, probe.4);
+    let (_w, _flora, mut f, h, ls) = kicker_scene((8.0 - inside, MID_Z), EAST);
+    shows_guard(&mut f, h, ls);
+    let i = index(&f, h);
+    let t = tac(&f);
+    let (_, k) = keep_clear(&f, i, &t, None, RING).expect("hunting nothing: kept clear of");
+    assert_eq!(k.id, ls);
+    assert!(keep_clear(&f, i, &t, Some(Founder::Browser.index() as u8), RING).is_some(), "hunting another lineage: kept clear of");
+    assert!(keep_clear(&f, i, &t, Some(LS.index() as u8), RING).is_none(), "hunting its lineage: the chase meets it");
+}
+
+/// **A landed kick is felt** (VH-FEED-KICK, the step's hook): a loftstrider's kick that lands on a
+/// hound (whose own controller reads nothing here) puts the kicker in the hound's kick memory at
+/// the contact; with the switch off it does not.
+#[test]
+fn a_kick_that_lands_on_a_hound_is_remembered_with_its_kicker() {
+    for on in [true, false] {
+        let w = arena(13);
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut c = config();
+        c.founders[CH.index()].agility = 0.0;
+        c.founders[CH.index()].pack.as_mut().unwrap().tactics.keep_clear = on;
+        let mut f = Fauna::new(c);
+        let hs = pack(&mut f, &w, 2);
+        let h = hs[0];
+        place(&mut f, hs[1], 28.0, MID_Z, WEST);
+        let ls = strider(&mut f, &w, false, 8.0, MID_Z, EAST);
+        let ahead = 8.0 + length(&f, ls) * 0.5 + 0.5;
+        place(&mut f, h, ahead, MID_Z, EAST);
+        drive(&mut f, h, 0.0, false);
+        let k = f.config.founder(LS).kick.expect("the loftstrider kicks");
+        let i = index(&f, ls);
+        crate::kick::request(&mut f, i, h, crate::kick::Source::Aimed).expect("a kick starts");
+        let w0 = animal(&f, h).wound;
+        let mut contact = None;
+        for _ in 0..cubarium_voxel::ticks_at_least_one(k.windup_s) + 1 {
+            f.step(&w, &mut flora);
+            if contact.is_none() && animal(&f, h).wound > w0 {
+                contact = Some(f.tick);
+            }
+        }
+        assert!(contact.is_some(), "the kick landed");
+        let seen = f.hounds.get(&h).and_then(|m| m.kick_seen(ls));
+        if on {
+            assert!(seen.is_some(), "on: the kicker remembered");
+        } else {
+            assert_eq!(seen, None, "off: nothing remembered");
+        }
+    }
+}

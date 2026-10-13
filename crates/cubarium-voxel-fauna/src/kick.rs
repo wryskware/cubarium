@@ -206,6 +206,8 @@ pub(crate) struct KickHit {
     pub target: u64,
     pub damage: f64,
     pub by: Founder,
+    /// The kicking body (the kicked body feels whose kick it was: VH-FEED-KICK).
+    pub kicker: u64,
 }
 
 /// **One tick of every kick** (after the act, before the strikes land): windups turn the body
@@ -262,7 +264,7 @@ pub(crate) fn advance(fauna: &mut Fauna, view: &VoxelView<'_>, seed: u64) -> Vec
                         let (sa, st) = (size(&a), size(&t));
                         let damage = if st > 0.0 { k.damage * sa / st } else { 0.0 };
                         if !dodged && damage.is_finite() && damage > 0.0 {
-                            out.push(KickHit { target: t.id, damage, by });
+                            out.push(KickHit { target: t.id, damage, by, kicker: a.id });
                         }
                     }
                     s = KickState { phase: Phase::Recovery, ticks_left: Kick::ticks(k.recovery_s), ..s };

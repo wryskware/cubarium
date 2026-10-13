@@ -1572,7 +1572,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.04 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4583 rows)
+**`fauna.*`** (4601 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -2033,6 +2033,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
 | `fauna.founders.littershredder.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
 | `fauna.founders.littershredder.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.littershredder.pack.tactics.keep_clear` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FEED-KICK: a grown hound walks straight away from a kicker it saw or felt kick within kick_memory_s, or sees in guard stance, nearer than clear_lengths, before eating, resting or walking home; on a hunt, from any kicker but the hunted lineage's (false: as before) |
+| `fauna.founders.littershredder.pack.tactics.clear_lengths` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-FEED-KICK: the distance keep_clear keeps from such a kicker, in its lengths as seen, centre to centre |
 | `fauna.founders.littershredder.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
 | `fauna.founders.littershredder.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
 | `fauna.founders.littershredder.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
@@ -2517,6 +2519,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
 | `fauna.founders.frondgrazer.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
 | `fauna.founders.frondgrazer.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.frondgrazer.pack.tactics.keep_clear` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FEED-KICK: a grown hound walks straight away from a kicker it saw or felt kick within kick_memory_s, or sees in guard stance, nearer than clear_lengths, before eating, resting or walking home; on a hunt, from any kicker but the hunted lineage's (false: as before) |
+| `fauna.founders.frondgrazer.pack.tactics.clear_lengths` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-FEED-KICK: the distance keep_clear keeps from such a kicker, in its lengths as seen, centre to centre |
 | `fauna.founders.frondgrazer.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
 | `fauna.founders.frondgrazer.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
 | `fauna.founders.frondgrazer.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
@@ -3001,6 +3005,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
 | `fauna.founders.lanternjaw.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
 | `fauna.founders.lanternjaw.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.lanternjaw.pack.tactics.keep_clear` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FEED-KICK: a grown hound walks straight away from a kicker it saw or felt kick within kick_memory_s, or sees in guard stance, nearer than clear_lengths, before eating, resting or walking home; on a hunt, from any kicker but the hunted lineage's (false: as before) |
+| `fauna.founders.lanternjaw.pack.tactics.clear_lengths` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-FEED-KICK: the distance keep_clear keeps from such a kicker, in its lengths as seen, centre to centre |
 | `fauna.founders.lanternjaw.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
 | `fauna.founders.lanternjaw.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
 | `fauna.founders.lanternjaw.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
@@ -3485,6 +3491,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
 | `fauna.founders.capgnawer.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
 | `fauna.founders.capgnawer.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.capgnawer.pack.tactics.keep_clear` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FEED-KICK: a grown hound walks straight away from a kicker it saw or felt kick within kick_memory_s, or sees in guard stance, nearer than clear_lengths, before eating, resting or walking home; on a hunt, from any kicker but the hunted lineage's (false: as before) |
+| `fauna.founders.capgnawer.pack.tactics.clear_lengths` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-FEED-KICK: the distance keep_clear keeps from such a kicker, in its lengths as seen, centre to centre |
 | `fauna.founders.capgnawer.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
 | `fauna.founders.capgnawer.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
 | `fauna.founders.capgnawer.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
@@ -3969,6 +3977,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
 | `fauna.founders.loftstrider.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
 | `fauna.founders.loftstrider.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.loftstrider.pack.tactics.keep_clear` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FEED-KICK: a grown hound walks straight away from a kicker it saw or felt kick within kick_memory_s, or sees in guard stance, nearer than clear_lengths, before eating, resting or walking home; on a hunt, from any kicker but the hunted lineage's (false: as before) |
+| `fauna.founders.loftstrider.pack.tactics.clear_lengths` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-FEED-KICK: the distance keep_clear keeps from such a kicker, in its lengths as seen, centre to centre |
 | `fauna.founders.loftstrider.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
 | `fauna.founders.loftstrider.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
 | `fauna.founders.loftstrider.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
@@ -4453,6 +4463,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
 | `fauna.founders.ripple-snail.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
 | `fauna.founders.ripple-snail.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.ripple-snail.pack.tactics.keep_clear` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FEED-KICK: a grown hound walks straight away from a kicker it saw or felt kick within kick_memory_s, or sees in guard stance, nearer than clear_lengths, before eating, resting or walking home; on a hunt, from any kicker but the hunted lineage's (false: as before) |
+| `fauna.founders.ripple-snail.pack.tactics.clear_lengths` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-FEED-KICK: the distance keep_clear keeps from such a kicker, in its lengths as seen, centre to centre |
 | `fauna.founders.ripple-snail.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
 | `fauna.founders.ripple-snail.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
 | `fauna.founders.ripple-snail.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
@@ -4937,6 +4949,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
 | `fauna.founders.bellwing.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
 | `fauna.founders.bellwing.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.bellwing.pack.tactics.keep_clear` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FEED-KICK: a grown hound walks straight away from a kicker it saw or felt kick within kick_memory_s, or sees in guard stance, nearer than clear_lengths, before eating, resting or walking home; on a hunt, from any kicker but the hunted lineage's (false: as before) |
+| `fauna.founders.bellwing.pack.tactics.clear_lengths` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-FEED-KICK: the distance keep_clear keeps from such a kicker, in its lengths as seen, centre to centre |
 | `fauna.founders.bellwing.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
 | `fauna.founders.bellwing.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
 | `fauna.founders.bellwing.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
@@ -5421,6 +5435,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
 | `fauna.founders.seedporter.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
 | `fauna.founders.seedporter.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.seedporter.pack.tactics.keep_clear` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FEED-KICK: a grown hound walks straight away from a kicker it saw or felt kick within kick_memory_s, or sees in guard stance, nearer than clear_lengths, before eating, resting or walking home; on a hunt, from any kicker but the hunted lineage's (false: as before) |
+| `fauna.founders.seedporter.pack.tactics.clear_lengths` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-FEED-KICK: the distance keep_clear keeps from such a kicker, in its lengths as seen, centre to centre |
 | `fauna.founders.seedporter.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
 | `fauna.founders.seedporter.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
 | `fauna.founders.seedporter.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
@@ -5905,6 +5921,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.tactics.kick_reach_fraction` | 0.6 | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
 | `fauna.founders.chorister.pack.tactics.kick_memory_s` | 30.0 | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
 | `fauna.founders.chorister.pack.tactics.kick_recovery_s` | 2.5 | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.chorister.pack.tactics.keep_clear` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FEED-KICK: a grown hound walks straight away from a kicker it saw or felt kick within kick_memory_s, or sees in guard stance, nearer than clear_lengths, before eating, resting or walking home; on a hunt, from any kicker but the hunted lineage's (false: as before) |
+| `fauna.founders.chorister.pack.tactics.clear_lengths` | 2.0 | x kicker length | [0, inf) |  | - | placeholder | VH-FEED-KICK: the distance keep_clear keeps from such a kicker, in its lengths as seen, centre to centre |
 | `fauna.founders.chorister.pack.tactics.commit_value` | 0.0 | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
 | `fauna.founders.chorister.pack.tactics.group_m` | 6.0 | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
 | `fauna.founders.chorister.pack.tactics.test_floor` | -1.0 | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
