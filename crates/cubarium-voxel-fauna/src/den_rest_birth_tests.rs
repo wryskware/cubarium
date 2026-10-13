@@ -896,3 +896,108 @@ fn seedporter_birth_spacing_includes_the_wait_hold_and_gestation() {
         rule.interval_ticks() + rule.hold_required() + rule.gestation_ticks()
     );
 }
+
+/// DEN-REACH fixture: a ring split by two full walls into a west range (x 31..=11, roofed
+/// over x 3..=9) and an east range (x 13..=29, roofed over x 16..=24), a pack of `size`
+/// grown members founded on a den in the east roof. Returns the world, the pack, its den,
+/// and the breeder's index.
+fn split_pack(size: usize) -> (World, Fauna, u64, Site, usize) {
+    let mut world = plain();
+    roof(&mut world, 16..=24, 2..=9);
+    roof(&mut world, 3..=9, 2..=9);
+    wall(&mut world, 12);
+    wall(&mut world, 30);
+    let den = site(20, 6);
+    let mut fauna = Fauna::new(pack_config());
+    fauna.set_births_enabled(false);
+    let pack = fauna
+        .found_pack_sized(&world, den, C, StartingStores::FULL, FRAC_PI_2, size)
+        .expect("a pack");
+    let breeder = fauna.pack(pack).unwrap().breeder.expect("a breeder");
+    let b = fauna.animals.iter().position(|a| a.id == breeder).unwrap();
+    (world, fauna, pack, den, b)
+}
+
+fn place_at(fauna: &mut Fauna, i: usize, s: Site) {
+    let a = &mut fauna.animals[i];
+    a.site = s;
+    (a.pose.x, a.pose.z) = crate::pack::centre(s, V);
+    a.pose.y_m = crate::surface_m(s.y, V);
+}
+
+fn component(fauna: &mut Fauna, world: &World, s: Site) -> usize {
+    let graph = fauna.pack_routes(&world.view(), C);
+    graph.components[graph.face(s).expect("on the graph")]
+}
+
+#[test]
+fn a_den_only_the_breeder_walks_to_moves_to_where_the_rest_of_the_pack_stands() {
+    let (world, mut fauna, pack, den, b) = split_pack(3);
+    let others: Vec<usize> = (0..fauna.animals.len()).filter(|&i| i != b).collect();
+    place_at(&mut fauna, b, site(20, 6));
+    for (k, &i) in others.iter().enumerate() {
+        place_at(&mut fauna, i, site(5 + 2 * k as u32, 6));
+    }
+    let flora = Flora::new(FloraConfig::default());
+    let glowcap = flora.config().species(Species::Glowcap);
+    // The rule before DEN-REACH (the breeder's reach alone) keeps the pocket den.
+    fauna.config.founders[C.index()].pack.as_mut().unwrap().den_reach_share = 0.0;
+    crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
+    assert_eq!(fauna.pack(pack).unwrap().den, den);
+    // Judged by every member on the graph, it moves to the range the others stand on.
+    fauna.config.founders[C.index()].pack.as_mut().unwrap().den_reach_share = 1.0;
+    crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
+    let new_den = fauna.pack(pack).unwrap().den;
+    assert_ne!(new_den, den);
+    let s0 = fauna.animals[others[0]].site;
+    let west = component(&mut fauna, &world, s0);
+    assert_eq!(component(&mut fauna, &world, new_den), west);
+    for &i in &others {
+        let s = fauna.animals[i].site;
+        assert_eq!(component(&mut fauna, &world, s), west);
+    }
+}
+
+#[test]
+fn a_den_every_member_walks_to_is_kept_and_an_even_split_keeps_its_den() {
+    let (world, mut fauna, pack, den, b) = split_pack(2);
+    let flora = Flora::new(FloraConfig::default());
+    let glowcap = flora.config().species(Species::Glowcap);
+    fauna.config.founders[C.index()].pack.as_mut().unwrap().den_reach_share = 1.0;
+    // Both on the den's range: kept, though the other range has a roof too.
+    place_at(&mut fauna, 0, site(18, 6));
+    place_at(&mut fauna, 1, site(22, 6));
+    crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
+    assert_eq!(fauna.pack(pack).unwrap().den, den);
+    // One on each range: no range holds more of the pack than the den's, so it stays.
+    let other = 1 - b;
+    place_at(&mut fauna, other, site(6, 6));
+    crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
+    assert_eq!(fauna.pack(pack).unwrap().den, den);
+}
+
+#[test]
+fn a_den_with_pups_in_it_is_kept_though_most_grown_members_cannot_walk_to_it() {
+    let (world, mut fauna, pack, den, b) = split_pack(4);
+    let others: Vec<usize> = (0..fauna.animals.len()).filter(|&i| i != b).collect();
+    place_at(&mut fauna, b, site(20, 6));
+    place_at(&mut fauna, others[0], site(5, 6));
+    place_at(&mut fauna, others[1], site(7, 6));
+    // The third is a pup at the den.
+    place_at(&mut fauna, others[2], site(20, 7));
+    let mut m = fauna.animals[others[2]].pack.unwrap();
+    m.pup = true;
+    fauna.animals[others[2]].pack = Some(m);
+    let flora = Flora::new(FloraConfig::default());
+    let glowcap = flora.config().species(Species::Glowcap);
+    fauna.config.founders[C.index()].pack.as_mut().unwrap().den_reach_share = 1.0;
+    crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
+    assert_eq!(fauna.pack(pack).unwrap().den, den);
+    // Grown, the same body leaves the den to move to where most of the pack stands.
+    let mut m = fauna.animals[others[2]].pack.unwrap();
+    m.pup = false;
+    fauna.animals[others[2]].pack = Some(m);
+    place_at(&mut fauna, others[2], site(9, 6));
+    crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
+    assert_ne!(fauna.pack(pack).unwrap().den, den);
+}

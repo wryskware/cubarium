@@ -1572,7 +1572,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.04 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4572 rows)
+**`fauna.*`** (4581 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1983,6 +1983,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.littershredder.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.littershredder.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
+| `fauna.founders.littershredder.pack.den_reach_share` | (absent) | fraction of grown members on the route graph | [0, 1] |  | - | placeholder | DEN-REACH: a den this share of the pack cannot walk to is re-chosen where most can (0: the breeder's reach alone) |
 | `fauna.founders.littershredder.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.littershredder.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
 | `fauna.founders.littershredder.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
@@ -2466,6 +2467,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.frondgrazer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.frondgrazer.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
+| `fauna.founders.frondgrazer.pack.den_reach_share` | (absent) | fraction of grown members on the route graph | [0, 1] |  | - | placeholder | DEN-REACH: a den this share of the pack cannot walk to is re-chosen where most can (0: the breeder's reach alone) |
 | `fauna.founders.frondgrazer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.frondgrazer.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
 | `fauna.founders.frondgrazer.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
@@ -2949,6 +2951,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.lanternjaw.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.lanternjaw.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
+| `fauna.founders.lanternjaw.pack.den_reach_share` | (absent) | fraction of grown members on the route graph | [0, 1] |  | - | placeholder | DEN-REACH: a den this share of the pack cannot walk to is re-chosen where most can (0: the breeder's reach alone) |
 | `fauna.founders.lanternjaw.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.lanternjaw.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
 | `fauna.founders.lanternjaw.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
@@ -3432,6 +3435,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.capgnawer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.capgnawer.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
+| `fauna.founders.capgnawer.pack.den_reach_share` | (absent) | fraction of grown members on the route graph | [0, 1] |  | - | placeholder | DEN-REACH: a den this share of the pack cannot walk to is re-chosen where most can (0: the breeder's reach alone) |
 | `fauna.founders.capgnawer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.capgnawer.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
 | `fauna.founders.capgnawer.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
@@ -3915,6 +3919,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.loftstrider.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.loftstrider.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
+| `fauna.founders.loftstrider.pack.den_reach_share` | (absent) | fraction of grown members on the route graph | [0, 1] |  | - | placeholder | DEN-REACH: a den this share of the pack cannot walk to is re-chosen where most can (0: the breeder's reach alone) |
 | `fauna.founders.loftstrider.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.loftstrider.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
 | `fauna.founders.loftstrider.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
@@ -4398,6 +4403,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.ripple-snail.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.ripple-snail.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
+| `fauna.founders.ripple-snail.pack.den_reach_share` | (absent) | fraction of grown members on the route graph | [0, 1] |  | - | placeholder | DEN-REACH: a den this share of the pack cannot walk to is re-chosen where most can (0: the breeder's reach alone) |
 | `fauna.founders.ripple-snail.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.ripple-snail.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
 | `fauna.founders.ripple-snail.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
@@ -4881,6 +4887,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.bellwing.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.bellwing.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
+| `fauna.founders.bellwing.pack.den_reach_share` | (absent) | fraction of grown members on the route graph | [0, 1] |  | - | placeholder | DEN-REACH: a den this share of the pack cannot walk to is re-chosen where most can (0: the breeder's reach alone) |
 | `fauna.founders.bellwing.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.bellwing.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
 | `fauna.founders.bellwing.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
@@ -5364,6 +5371,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.seedporter.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.seedporter.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
+| `fauna.founders.seedporter.pack.den_reach_share` | (absent) | fraction of grown members on the route graph | [0, 1] |  | - | placeholder | DEN-REACH: a den this share of the pack cannot walk to is re-chosen where most can (0: the breeder's reach alone) |
 | `fauna.founders.seedporter.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.seedporter.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
 | `fauna.founders.seedporter.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
@@ -5847,6 +5855,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.chase_reserve_floor` | 0.3 | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.chorister.pack.call_s` | 1.0 | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.chorister.pack.den_search_m` | 8.0 | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
+| `fauna.founders.chorister.pack.den_reach_share` | 1.0 | fraction of grown members on the route graph | [0, 1] |  | - | placeholder | DEN-REACH: a den this share of the pack cannot walk to is re-chosen where most can (0: the breeder's reach alone) |
 | `fauna.founders.chorister.pack.follow_radius_m` | 3.0 | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.chorister.pack.rest_radius_m` | 0.5 | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
 | `fauna.founders.chorister.pack.home_reserve_share` | 0.5 | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |

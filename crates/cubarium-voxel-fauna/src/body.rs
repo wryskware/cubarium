@@ -843,6 +843,14 @@ pub struct Pack {
     /// Search radius around the founding point or current range, metres. Dry, reachable
     /// roofed sites beat open ground; glowcap darkness then sky visibility break ties.
     pub den_search_m: f64,
+    /// **DEN-REACH**: the share of a pack's grown members standing on its route graph that
+    /// must be able to walk to its den on that graph (the den's walking component holds
+    /// them), fraction. A den fewer reach is re-chosen in the component that holds the most
+    /// of them (the breeder's first on a tie), when that component holds more than the
+    /// den's does. 1: every member on the graph. 0: the breeder's reach alone, the rule
+    /// before DEN-REACH.
+    #[serde(default = "pack_den_reach_share")]
+    pub den_reach_share: f64,
     /// An idle adult that is not the breeder walks back to within this of the breeder,
     /// metres: the pack keeps together between hunts. A placeholder.
     pub follow_radius_m: f64,
@@ -1020,6 +1028,10 @@ fn pack_rest_radius_m() -> f64 {
     Pack::CHORISTER.rest_radius_m
 }
 
+fn pack_den_reach_share() -> f64 {
+    Pack::CHORISTER.den_reach_share
+}
+
 fn pack_home_reserve_share() -> f64 {
     Pack::CHORISTER.home_reserve_share
 }
@@ -1105,6 +1117,7 @@ impl Pack {
         chase_reserve_floor: 0.3,
         call_s: 1.0,
         den_search_m: 8.0,
+        den_reach_share: 1.0,
         follow_radius_m: 3.0,
         rest_radius_m: 0.5,
         home_reserve_share: 0.5,

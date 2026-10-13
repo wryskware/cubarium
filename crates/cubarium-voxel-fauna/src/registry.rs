@@ -593,6 +593,7 @@ fn founder_rows() -> Vec<Row> {
         r("pack.chase_reserve_floor", "fraction of reserve cap", fraction, "a chase is dropped when a member's reserve falls under this").optional(),
         r("pack.call_s", "s", nonneg, "a member calls this long after the target changes or it strikes").optional().prov("decision"),
         r("pack.den_search_m", "m", nonneg, "den search radius around founding/current range; dry reachable roofs, darkest first").optional().prov("decision"),
+        r("pack.den_reach_share", "fraction of grown members on the route graph", fraction, "DEN-REACH: a den this share of the pack cannot walk to is re-chosen where most can (0: the breeder's reach alone)").optional(),
         r("pack.follow_radius_m", "m", nonneg, "an idle adult walks back to within this of the breeder").optional(),
         r("pack.rest_radius_m", "m", nonneg, "an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m)").optional(),
         r("pack.home_reserve_share", "fraction of reserve above emergency floor", fraction, "the route home may spend this share on awake upkeep and motor cost").optional(),
