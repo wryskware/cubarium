@@ -98,6 +98,7 @@ pub use step::forage::ForageTally;
 pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
+pub use pack::den_reach_census;
 pub use pack::tactics::{Assess, Hound, HoundTeach, Tactics, TestPhase};
 mod registry;
 pub use registry::registry;

@@ -512,6 +512,27 @@ fn anchor_node(fauna: &Fauna, graph: &crate::encounter::RouteGraph, a: &Animal, 
     graph.node_near(a.site, (a.pose.x, a.pose.z), cols)
 }
 
+/// **DEN-REACH, a diagnostic**: each pack's grown members as `(pack, member, on its
+/// lineage's route graph, in its den's walking component there, a known way home)` — the
+/// last [`den_way`]'s answer. Read only, from the route graph and den fields as last built
+/// (neither built yet reads off the graph and no way); it changes nothing a run does.
+pub fn den_reach_census(fauna: &Fauna, view: &VoxelView<'_>) -> Vec<(u64, u64, bool, bool, bool)> {
+    let v = view.config.voxel_m;
+    let mut out = Vec::new();
+    for a in fauna.animals.iter().filter(|a| a.pack.is_some_and(|m| !m.pup)) {
+        let m = a.pack.expect("a pack member");
+        let Some(rec) = fauna.pack(m.pack) else { continue };
+        let graph = fauna.pack_routes.get(&rec.lineage.index()).map(|(_, g)| g.clone());
+        let node = graph.as_ref().and_then(|g| anchor_node(fauna, g, a, v));
+        let with_den = match (&graph, node) {
+            (Some(g), Some(n)) => g.face(rec.den).is_some_and(|d| g.components[d] == g.components[n]),
+            _ => false,
+        };
+        out.push((m.pack, a.id, node.is_some(), with_den, den_way(fauna, a, view)));
+    }
+    out
+}
+
 /// An unusable den is replaced by a dry site on the pack's current walking range.
 ///
 /// **DEN-REACH**: a den is usable when it is dry and its walking component on the route graph
