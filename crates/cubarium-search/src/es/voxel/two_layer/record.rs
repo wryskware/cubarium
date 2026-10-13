@@ -312,6 +312,11 @@ pub struct PerMode {
     /// [`PerMode::intent_hits`].
     #[serde(default)]
     pub confusion: Vec<Vec<usize>>,
+    /// CLONE-AGREE: per named intent, the top labels with that intent that its own intent
+    /// mask ruled out at the sample (no candidate fits it): unusable, neither fitted nor
+    /// scored.
+    #[serde(default)]
+    pub masked_labels: Vec<usize>,
     /// Per held intent (the mode the bottom acts in): samples and summed squared action
     /// error per action value.
     pub mode_samples: Vec<usize>,
@@ -364,6 +369,7 @@ pub fn per_mode(
         switch_labels: vec![0; menu],
         switch_hits: vec![0; menu],
         confusion: vec![vec![0; menu]; menu],
+        masked_labels: vec![0; menu],
         mode_samples: vec![0; menu],
         mode_se: vec![0.0; menu],
     };
@@ -383,6 +389,9 @@ pub fn per_mode(
                 top_forward(shape, &to, theta, &hidden, before, time, &mut top);
                 let mut valid = vec![false; shape.intents()];
                 valid[..shape.menu].copy_from_slice(&s.intent_valid);
+                if p.intent < menu && !valid.get(p.intent).copied().unwrap_or(false) {
+                    m.masked_labels[p.intent] += 1;
+                }
                 if valid.get(p.intent).copied().unwrap_or(false) && p.intent < menu {
                     let pick = super::net::masked_argmax(&top.logits, &valid);
                     let hit = pick == Some(p.intent);

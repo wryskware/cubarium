@@ -215,19 +215,20 @@ fn label_counts(rs: &[TrajectoryRecord], names: &[&str]) -> serde_json::Value {
 }
 
 /// A confusion matrix as text: one row per label with any count, its picks by intent.
-fn confusion_text(title: &str, names: &[&str], m: &[Vec<usize>]) -> String {
-    let used: Vec<usize> = (0..names.len()).filter(|&k| m[k].iter().sum::<usize>() > 0 || m.iter().any(|r| r[k] > 0)).collect();
+/// `masked`: per label, the labels its intent mask ruled out (not in the matrix).
+fn confusion_text(title: &str, names: &[&str], m: &[Vec<usize>], masked: &[usize]) -> String {
+    let used: Vec<usize> = (0..names.len()).filter(|&k| m[k].iter().sum::<usize>() > 0 || m.iter().any(|r| r[k] > 0) || masked[k] > 0).collect();
     let short = |n: &str| n.chars().take(7).collect::<String>();
-    let mut out = format!("# {title}: label (row) -> two-layer pick (column)\n{:16} {:>7}", "label", "n");
+    let mut out = format!("# {title}: label (row) -> two-layer pick (column); masked: labels the mask ruled out\n{:16} {:>7} {:>7}", "label", "n", "masked");
     for &k in &used {
         out += &format!(" {:>7}", short(names[k]));
     }
     for &r in &used {
         let n: usize = m[r].iter().sum();
-        if n == 0 {
+        if n == 0 && masked[r] == 0 {
             continue;
         }
-        out += &format!("\n{:16} {:>7}", names[r], n);
+        out += &format!("\n{:16} {:>7} {:>7}", names[r], n, masked[r]);
         for &k in &used {
             out += &format!(" {:>7}", m[r][k]);
         }
@@ -445,11 +446,12 @@ fn main() {
     }
 
     let confusion = (num(&args, "confusion", 0u8) > 0).then(|| {
-        let live = per_mode(&two, &arb, &theta2, &teacher(&held_live), names.len()).confusion;
-        let fit_on = per_mode(&two, &arb, &theta2, &teacher(&train), names.len()).confusion;
-        println!("{}", confusion_text("held-out live teacher", &names, &live));
-        println!("{}", confusion_text("training teacher (in sample)", &names, &fit_on));
-        json!({"intents": names, "held_out_live": live, "training": fit_on})
+        let live = per_mode(&two, &arb, &theta2, &teacher(&held_live), names.len());
+        let fit_on = per_mode(&two, &arb, &theta2, &teacher(&train), names.len());
+        println!("{}", confusion_text("held-out live teacher", &names, &live.confusion, &live.masked_labels));
+        println!("{}", confusion_text("training teacher (in sample)", &names, &fit_on.confusion, &fit_on.masked_labels));
+        json!({"intents": names, "held_out_live": live.confusion, "held_out_live_masked": live.masked_labels,
+               "training": fit_on.confusion, "training_masked": fit_on.masked_labels})
     });
 
     let summary = json!({
