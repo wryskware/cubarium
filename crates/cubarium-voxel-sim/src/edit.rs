@@ -292,15 +292,21 @@ impl<'a> Edit<'a> {
 
     /// **Give every grown body of `founder` `n` calves `age_s` old beside it** (CALF-PLACE): the
     /// mothers are its bodies at or past `birth_body`, not riding, standing in `region` (anywhere
-    /// when `None`), taken before any calf is placed and in id order. Each calf goes on the
+    /// when `None`), taken before any calf is placed and in id order; with `share` `[k, n]`
+    /// (LS-TEACH), only the `k`-th of every `n` of them in that order (a scenario's entries
+    /// then spread ages over the mothers wherever they stand). Each calf goes on the
     /// nearest valid face to its mother (her own face first, as a birth puts it;
     /// [`SNAP_CELLS`]), by [`Fauna::place_calf`] (`fullness` as there); a mother with at least
     /// one calf then gets [`Fauna::mark_birth`]. A calf no face near her takes is refused
     /// with her id and the reason.
-    pub fn calve(&mut self, founder: Founder, n: usize, age_s: f64, fullness: Option<f64>, region: Option<Region>) -> Calved {
+    pub fn calve(&mut self, founder: Founder, n: usize, age_s: f64, fullness: Option<f64>, region: Option<Region>, share: Option<[usize; 2]>) -> Calved {
         let mut out = Calved::default();
         if !(age_s.is_finite() && age_s >= 0.0) {
             out.refused.push(format!("age_s {age_s} is not a finite age"));
+            return out;
+        }
+        if share.is_some_and(|[k, every]| every == 0 || k >= every) {
+            out.refused.push(format!("share {share:?}: want [k, n] with k < n"));
             return out;
         }
         let age_ticks = (age_s * f64::from(cubarium_voxel_fauna::TICK_HZ)).round() as u64;
@@ -314,6 +320,9 @@ impl<'a> Edit<'a> {
             .filter(|a| a.founder == Some(founder) && a.attached.is_none() && a.body >= birth)
             .filter(|a| region.is_none_or(|r| r.holds(width, a.site)))
             .map(|a| (a.id, a.pose.x, a.pose.y_m, a.pose.z))
+            .enumerate()
+            .filter(|(rank, _)| share.is_none_or(|[k, every]| rank % every == k))
+            .map(|(_, m)| m)
             .collect();
         for (mother, x, y, z) in mothers {
             out.mothers += 1;
@@ -719,6 +728,7 @@ impl crate::Sim {
 /// age_s = 3600                            # their age, seconds (default 0, a newborn)
 /// fullness = 0.8                          # optional, as on `[[place]]`
 /// region = { x = [0, 40], z = [0, 20] }   # optional: only mothers standing here
+/// share = [0, 4]                          # optional: only the 1st of every 4 of them, by id
 /// ```
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -817,6 +827,8 @@ pub struct CalveEntry {
     pub age_s: f64,
     pub fullness: Option<f64>,
     pub region: Option<Region>,
+    /// LS-TEACH: `[k, n]`, only the `k`-th of every `n` mothers in id order ([`Edit::calve`]).
+    pub share: Option<[usize; 2]>,
 }
 
 fn one() -> usize {
@@ -921,7 +933,7 @@ impl Scenario {
                 r.refused.push(format!("calve[{k}]: no lineage {:?}", x.lineage));
                 continue;
             };
-            let c = e.calve(f, x.count, x.age_s, x.fullness, x.region);
+            let c = e.calve(f, x.count, x.age_s, x.fullness, x.region, x.share);
             r.applied.push(format!(
                 "calve[{k}]: {} {} calves {} s old beside {} mothers",
                 c.calves.len(),

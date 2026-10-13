@@ -1,7 +1,8 @@
 # LS-TEACH (design/handoffs/ls-teach-2026-10-13.md): the loftstrider teacher worlds'
 # calves, for `two_layer_clone … scenario=THIS` (and `mask_trace`). One calf beside every
-# grown loftstrider, its mother's own, the ages spread over the straying range by where the
-# mother stands on the `small` training ring (160 columns, four quarters).
+# grown loftstrider, its mother's own, the ages spread over the straying range: each entry
+# takes a quarter of the mothers in id order (`share`), wherever they stand (the training
+# top-up places them in clusters, so a split by region gave one age to a whole world).
 #
 # Why these ages: a loftstrider calf strays from birth (it does not nurse); its leash grows
 # from `young.follow_m` 3 m to `roam_m` 10 m and its excursions from `excursion_per_h` 1/h to
@@ -10,19 +11,19 @@
 [[calve]]
 lineage = "loftstrider"
 age_s = 1000
-region = { x = [0, 39], z = [0, 23] }
+share = [0, 4]
 
 [[calve]]
 lineage = "loftstrider"
 age_s = 4500
-region = { x = [40, 79], z = [0, 23] }
+share = [1, 4]
 
 [[calve]]
 lineage = "loftstrider"
 age_s = 8000
-region = { x = [80, 119], z = [0, 23] }
+share = [2, 4]
 
 [[calve]]
 lineage = "loftstrider"
 age_s = 12000
-region = { x = [120, 159], z = [0, 23] }
+share = [3, 4]

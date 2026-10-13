@@ -320,7 +320,7 @@ mod tests {
         let lone = place(&mut sim, LS, 4.0, 4.0);
         let mother = place(&mut sim, LS, 16.0, 4.0);
         let region = cubarium_voxel_sim::edit::Region { x: [56, 72], z: [0, 31] };
-        let calved = sim.edit(|e| e.calve(LS, 1, 600.0, None, Some(region)));
+        let calved = sim.edit(|e| e.calve(LS, 1, 600.0, None, Some(region), None));
         assert_eq!(calved.calves.len(), 1, "{:?}", calved.refused);
         let hound = place(&mut sim, VH, 10.0, 7.0);
         let at_m = 3.0;
