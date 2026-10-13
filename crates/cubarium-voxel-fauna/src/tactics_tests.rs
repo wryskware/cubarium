@@ -1417,3 +1417,62 @@ fn the_warmed_den_field_is_the_one_the_walk_home_reads() {
     assert!(std::sync::Arc::ptr_eq(&warmed, &served), "den_path serves the warmed field");
     assert_eq!(*served, graph.distances(goal, u32::MAX), "the field a fresh computation gives");
 }
+
+/// A brain that stands where it is, holding its menu's first intent.
+struct Stander;
+
+impl crate::Controller for Stander {
+    fn drive(&mut self, _o: &[f64]) -> crate::Response {
+        crate::Response::Bounded(Actions { forward: 0.0, turn: 0.0, feed: 0.0 })
+    }
+    fn reset(&mut self) {}
+    fn decide(&mut self, o: &[f64], _input: &crate::DecisionInput<'_>) -> (crate::Response, Option<crate::Decision>) {
+        (self.drive(o), Some(crate::Decision { intent: 0, ..crate::Decision::default() }))
+    }
+}
+
+/// **VH-TEACH, the dry teacher remembers its hunt** (`crate::dry`): beside a brain-driven hound
+/// that stands, sensing a lone calf with its wound at `give_up_wound`, the dry tactic commits at
+/// one sample and gives up at the next — the hunt in hand is its memory of the sample before —
+/// and holds the give-up through the samples after it, as the real teacher would; a teacher
+/// that forgot its hunt between samples would commit afresh every sample and never give up.
+#[test]
+fn the_dry_teacher_keeps_a_brain_hounds_hunt_between_samples() {
+    let w = arena(7);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut c = config();
+    c.founders[CH.index()].senses = crate::SenseTable {
+        live: true,
+        sight_m: 12.0,
+        sight_night_m: 12.0,
+        sight_still_fraction: 1.0,
+        sight_half_angle_deg: 180.0,
+        hearing_m: 0.0,
+        hearing_min: 1e-12,
+        ..crate::SenseTable::default()
+    };
+    c.perception.remote_hz = f64::from(crate::TICK_HZ);
+    let mut f = Fauna::new(c);
+    let hs = pack(&mut f, &w, 2);
+    let h = hs[0];
+    place(&mut f, h, 10.0, MID_Z, EAST);
+    place(&mut f, hs[1], 28.0, MID_Z, WEST);
+    let _calf = strider(&mut f, &w, true, 16.0, MID_Z, EAST);
+    let t = tac(&f);
+    // Past the threshold by enough that the wound's healing over the samples keeps it there.
+    animal_mut(&mut f, h).wound = 0.5 * (t.give_up_wound + 1.0);
+    f.controllers.set(h, Box::new(Stander));
+    f.dry_teach(CH, Some(crate::DryScope::Brains));
+    f.start_tap();
+    let period = cubarium_voxel::ticks_at_least_one(f.config.manifest(CH).controller_period_s);
+    let rest = cubarium_voxel::ticks_at_least_one(t.rest_s);
+    let samples = 6u64.min(rest / period.max(1)).max(4);
+    for _ in 0..(samples + 1) * period {
+        f.step_with(&w, &mut flora, 1);
+    }
+    let tap = f.take_tap().expect("the tap");
+    let held: Vec<&str> = tap.teacher_labels(h).unwrap_or_default().iter().map(|l| VEILHOUND.name(usize::from(l.held))).collect();
+    let first = held.iter().position(|&n| n == "give_up").unwrap_or_else(|| panic!("the dry teacher gave up: {held:?}"));
+    assert!(first > 0 && matches!(held[first - 1], "stalk" | "drive" | "test"), "after a sample of the hunt: {held:?}");
+    assert!(held[first..].iter().all(|&n| n == "give_up"), "and holds the give-up: {held:?}");
+}

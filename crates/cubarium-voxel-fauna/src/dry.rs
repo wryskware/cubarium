@@ -12,7 +12,8 @@
 //!   is cheap: no controllers, no tap), with only the dry bodies due, and the copy is
 //!   dropped; the real stage runs first and exactly as it would without it;
 //! - the teacher's own memory — its controller, its intent record and hold, its vigil, its
-//!   patrol and yield latch, its search, patch and walk records — is kept here, per body,
+//!   patrol and yield latch, its search, patch and walk records, a Veilhound's tactical
+//!   memory — is kept here, per body,
 //!   and put into the copy before each sample and read back after, so the dry teacher
 //!   remembers as a heuristic body would while the real body's records stay the brain's;
 //! - what it decided (proposal and held intent with their subjects, steering source, own and
@@ -79,6 +80,10 @@ struct DryBody {
     walk_targets: Option<(u64, u64, u64)>,
     walk_pending: Option<(u64, Steer)>,
     walk_shun: Option<Vec<(u64, u64)>>,
+    /// VH-TEACH: a Veilhound's tactical memory (its hunt in hand, test, give-up rest, shuns,
+    /// known carcass, the howl it heard): without it the dry tactic forgot its hunt between
+    /// samples, committed afresh at every one and never gave up, tested on or shunned.
+    hound: Option<crate::pack::tactics::Hound>,
 }
 
 fn put<V>(map: &mut FxHashMap<u64, V>, id: u64, v: Option<V>) {
@@ -113,6 +118,7 @@ impl DryBody {
             walk_targets: fauna.walk_targets.get(&id).copied(),
             walk_pending: fauna.walk_pending.get(&id).copied(),
             walk_shun: fauna.walk_shun.get(&id).cloned(),
+            hound: fauna.hounds.get(&id).copied(),
         }
     }
 
@@ -135,6 +141,7 @@ impl DryBody {
         put(&mut copy.walk_targets, id, self.walk_targets);
         put(&mut copy.walk_pending, id, self.walk_pending);
         put(&mut copy.walk_shun, id, self.walk_shun.clone());
+        put(&mut copy.hounds, id, self.hound);
     }
 
     /// Its memory back from the copy's body `i` after the sample.
@@ -156,6 +163,7 @@ impl DryBody {
         self.walk_targets = copy.walk_targets.get(&id).copied();
         self.walk_pending = copy.walk_pending.get(&id).copied();
         self.walk_shun = copy.walk_shun.get(&id).cloned();
+        self.hound = copy.hounds.get(&id).copied();
     }
 }
 
