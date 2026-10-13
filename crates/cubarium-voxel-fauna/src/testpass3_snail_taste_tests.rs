@@ -418,19 +418,19 @@ fn graze_give_up_zero_disables_the_reflex_on_a_refuge_only_shore() {
         .as_mut()
         .unwrap()
         .graze_give_up = 0.0;
-    assert!(graze_reflex(&f, 0, &w.view(), &flora.view(), &sky()).is_none());
+    assert!(graze_reflex(&mut f, 0, &w.view(), &flora.view(), &sky()).is_none());
     f.config.founders[SN.index()]
         .amphibious
         .as_mut()
         .unwrap()
         .graze_give_up = 0.3;
-    assert!(graze_reflex(&f, 0, &w.view(), &flora.view(), &sky()).is_some());
+    assert!(graze_reflex(&mut f, 0, &w.view(), &flora.view(), &sky()).is_some());
 }
 
 #[test]
 fn edible_density_at_give_up_stays_and_just_below_leaves() {
     let w = shore();
-    let f = grazer(&w);
+    let mut f = grazer(&w);
     let mut flora = film(&w);
     let k = flora.config().film_capacity_per_m2 * V * V;
     let threshold = f.config.founder(SN).amphibious.unwrap().graze_give_up * k;
@@ -438,9 +438,9 @@ fn edible_density_at_give_up_stays_and_just_below_leaves() {
     assert!(now > threshold);
     flora.take_film(site(5), now - threshold).unwrap();
     close(flora.view().edible_film_at(site(5)), threshold);
-    assert!(graze_reflex(&f, 0, &w.view(), &flora.view(), &sky()).is_none());
+    assert!(graze_reflex(&mut f, 0, &w.view(), &flora.view(), &sky()).is_none());
     flora.take_film(site(5), threshold * 0.01).unwrap();
-    assert!(graze_reflex(&f, 0, &w.view(), &flora.view(), &sky()).is_some());
+    assert!(graze_reflex(&mut f, 0, &w.view(), &flora.view(), &sky()).is_some());
 }
 
 #[test]
