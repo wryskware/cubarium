@@ -256,7 +256,21 @@ fn the_brain_check_reads_both_arms_on_matched_starts() {
     for (h, b) in r.heuristic.iter().zip(&r.brain) {
         assert_eq!(h.seed, b.seed);
         assert_eq!((h.energy_start, h.bodies_start), (b.energy_start, b.bodies_start), "one start per seed");
+        // CHECK-DIET: every lineage's count at the start is the founded world's.
+        let founded = crate::es::voxel::two_layer::check::lineage_counts(&found(h.seed).unwrap());
+        for arm in [h, b] {
+            assert_eq!((arm.numbers_at_s.first(), arm.numbers_at_s.last()), (Some(&0), Some(&c.seconds)));
+            for g in Founder::ALL {
+                let start = arm.numbers.iter().find(|n| n.lineage == g.name()).map_or(0, |n| n.counts[0]);
+                assert_eq!(start, founded[g.index()], "{} at the start", g.name());
+            }
+            assert!(arm.numbers.iter().all(|n| n.counts.len() == arm.numbers_at_s.len()));
+        }
     }
+    for (x, y) in r.diet_brain.iter().chain(&r.diet_heuristic).map(|d| (d.kill_share, d.eaten_share)) {
+        assert!((0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y));
+    }
+    assert!(crate::es::voxel::two_layer::check::summary_line(&r).contains("diet brain"));
     assert!(r.holds_brain.decision_samples > 0 && r.holds_heuristic.decision_samples > 0);
     let names: Vec<_> = r.scenes.iter().map(|x| x.intent).collect();
     assert_eq!(names, ["feed", "give_way"]);

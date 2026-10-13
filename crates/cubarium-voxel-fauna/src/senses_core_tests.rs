@@ -485,6 +485,38 @@ fn the_funnel_counts_each_stage_in_order() {
     }
 }
 
+/// CHECK-DIET: carrion eaten is booked by the carcass's lineage. A hungry lanternjaw kills
+/// and eats a littershredder: its row holds that prey and no other, and stays within its
+/// raw carrion intake.
+#[test]
+fn carrion_eaten_is_booked_by_the_carcass_lineage() {
+    let world = clock_off(13);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut c = hunting_config();
+    for f in Founder::ALL {
+        c.founders[f.index()].active = Activity::Always;
+        c.founders[f.index()].agility = 0.0;
+    }
+    c.hunt.patrol = true;
+    c.hunt.patrol_explore = 0.0;
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, HUNTING);
+    place(&mut fauna, lj, 2.0, LANE_Z, EAST);
+    let teachers = fauna.config.teachers;
+    fauna.controllers.set(lj, crate::controller::heuristic(Founder::Lanternjaw, teachers));
+    animal_mut(&mut fauna, lj).eating = true;
+    let _prey = body(&mut fauna, &world, Founder::Blind, 3.2, LANE_Z, 0.0);
+    let (lji, bi) = (Founder::Lanternjaw.index(), Founder::Blind.index());
+    step_until(&mut fauna, &world, &mut flora, 600, |fa| fa.ledger.eaten_carrion_by_founder_prey[lji][bi] > 0.0).expect("it eats the carcass");
+    let row = fauna.ledger.eaten_carrion_by_founder_prey[lji];
+    for g in Founder::ALL.into_iter().filter(|&g| g != Founder::Blind) {
+        assert_eq!(row[g.index()], 0.0, "only its prey's lineage");
+    }
+    let raw = fauna.ledger.eaten_by_founder_food[lji][crate::Food::Carrion.index()];
+    assert!(row.iter().sum::<f64>() <= raw * (1.0 + 1e-12), "within its raw carrion: {row:?} vs {raw}");
+}
+
 /// The funnel counts episodes: an event is first once, not again while it recurs within the
 /// window, and first again after a gap longer than the window; stages and keys are apart.
 #[test]
