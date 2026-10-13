@@ -240,7 +240,8 @@ class Ec2TailTests(unittest.TestCase):
         self.pool.tick()
         self.assertEqual(self.row()["state"], "running")
         self.d.launchers["ec2"].stop.side_effect = None
-        self.d.fetch_task.side_effect = [None, OSError("fetch failed")]
+        # The tail check reads the background mirror; the only fetch is the one after the stop.
+        self.d.fetch_task.side_effect = OSError("fetch failed")
         self.pool.tick()
         self.assertEqual(self.row()["state"], "pending")
         self.assertEqual(json.loads(self.row()["spec"])["arch"], "aarch64")
