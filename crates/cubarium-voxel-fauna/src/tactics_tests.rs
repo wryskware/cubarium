@@ -1498,6 +1498,9 @@ fn kicker_scene(ls_at: (f64, f64), ls_heading: f64) -> (World, Flora, Fauna, u64
     assert!(flora.deposit(site, cubarium_voxel_flora::Deposit { kind: cubarium_voxel_flora::DepositKind::Carrion, organic: 5.0, mineral: 0.25, energy: 10.0 }));
     assert!(flora.lay_carcass(site, cubarium_voxel_flora::Carcass { lineage: Founder::Browser.index() as u8, heading_rad: 0.0, organic: 5.0 }));
     f.hounds.entry(h).or_default().carcass = Some(site);
+    // A kick costs more than any meal: the carcass is never worth the kicker's kicks (follow-up
+    // 2 weighs it, [`weigh_carcass`]; these cases are the keeping clear).
+    f.config.founders[CH.index()].pack.as_mut().expect("the pack table").tactics.wound_cost = 1e9;
     sees(&mut f, h, &[(ls, class::PREY)]);
     (w, flora, f, h, ls)
 }
@@ -1707,3 +1710,167 @@ fn a_kick_that_lands_on_a_hound_is_remembered_with_its_kicker() {
         }
     }
 }
+
+// ------------------------------------------------------------------ VH-FEED-KICK follow-up 2
+
+/// A hound at x 8 facing east, its reserve at `1 − hunger` of its cap, with the carcass it knows
+/// (a hound's body of carrion) ahead of it and a grown loftstrider in guard stance facing it
+/// past the carcass: the carcass inside the loftstrider's kept distance (`clear_lengths` of its
+/// lengths), the hound outside it. The hound sees the loftstrider. Returns the carcass's site and
+/// its centre's x.
+fn guarded_carcass_scene(hunger: f64) -> (World, Flora, Fauna, u64, u64, Site, f64) {
+    let w = arena(17);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut f = Fauna::new(config());
+    let hs = pack(&mut f, &w, 2);
+    let h = hs[0];
+    place(&mut f, h, 8.0, MID_Z, EAST);
+    place(&mut f, hs[1], 28.0, MID_Z, WEST);
+    let ls = strider(&mut f, &w, false, 20.0, MID_Z, WEST);
+    let keep = keep_of(&f, ls);
+    let ls_x = 8.0 + keep + 0.5;
+    place(&mut f, ls, ls_x, MID_Z, WEST);
+    let a = animal(&f, h);
+    let site = Site { x: ((ls_x - 0.5 * keep) / VOXEL_M) as u32, y: a.site.y, z: (MID_Z / VOXEL_M) as u32 };
+    let (cx, _) = centre(site, VOXEL_M);
+    assert!(ls_x - cx < keep && ls_x - 8.0 > keep, "the carcass inside the kept distance, the hound outside it");
+    assert!(flora.deposit(site, cubarium_voxel_flora::Deposit { kind: cubarium_voxel_flora::DepositKind::Carrion, organic: a.body, mineral: 0.25, energy: 10.0 }));
+    assert!(flora.lay_carcass(site, cubarium_voxel_flora::Carcass { lineage: Founder::Browser.index() as u8, heading_rad: 0.0, organic: a.body }));
+    f.hounds.entry(h).or_default().carcass = Some(site);
+    let cap = crate::body::effective_config(&f.config, &a).reserve_of(a.body);
+    animal_mut(&mut f, h).reserve = (1.0 - hunger) * cap;
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    shows_guard(&mut f, h, ls);
+    (w, flora, f, h, ls, site, cx)
+}
+
+fn tactics_mut(f: &mut Fauna) -> &mut Tactics {
+    &mut f.config.founders[CH.index()].pack.as_mut().expect("the pack table").tactics
+}
+
+fn held_of(f: &Fauna, h: u64) -> (&'static str, Subject) {
+    f.hound_teach.get(&h).map(|t| (t.held, t.subject)).expect("a label")
+}
+
+/// **A fed hound waits off a carcass a kicker guards; it eats once the kicker leaves**
+/// (VH-FEED-KICK follow-up 2, [`weigh_carcass`]): the hound sated (hunger 0), each expected
+/// kick costing far more than the carcass is worth to it, stands off outside the kept distance
+/// turned to the carcass (no step toward it, not feeding), labelled a give-up on the kicker,
+/// and keeps the carcass it knows. The kicker moved past its kept distance of the carcass (still
+/// guarding, still seen): the hound walks to the carcass. A carcass only sensed (the meal step's)
+/// is waited off the same. With `keep_clear` off it walks to it beside the kicker.
+#[test]
+fn a_fed_hound_waits_off_a_guarded_carcass_and_eats_once_the_kicker_leaves() {
+    let (w, flora, mut f, h, ls, site, cx) = guarded_carcass_scene(0.0);
+    assert!(tac(&f).kick_chance > 0.0, "the case needs a kick expected");
+    tactics_mut(&mut f).wound_cost = 1e9;
+    let act = decide(&mut f, &w, &flora, h);
+    assert!(act.forward == 0.0 && act.feed == 0.0, "it waits: {act:?}");
+    let (held, subject) = held_of(&f, h);
+    assert_eq!(held, "give_up");
+    assert!(matches!(subject, Subject::Body { id, .. } if id == ls), "on the kicker: {subject:?}");
+    assert_eq!(f.hounds[&h].carcass, Some(site), "it keeps the carcass it knows");
+
+    // The kicker leaves: past its kept distance of the carcass, it walks to the carcass.
+    let keep = keep_of(&f, ls);
+    place(&mut f, ls, cx + keep + 0.5, MID_Z, WEST);
+    f.tick += 1;
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    shows_guard(&mut f, h, ls);
+    let act = decide(&mut f, &w, &flora, h);
+    assert!(act.forward > 0.0, "the kicker gone from the carcass: it goes: {act:?}");
+    assert_eq!(held_of(&f, h).0, "feed");
+
+    // The carcass only sensed, not known (the meal step's): it waits the same.
+    let (w, flora, mut f, h, ls, _, cx) = guarded_carcass_scene(0.0);
+    tactics_mut(&mut f).wound_cost = 1e9;
+    f.hounds.entry(h).or_default().carcass = None;
+    assert!(cx - 8.0 < f.config.hunt.carcass_scan_m, "the case needs the carcass in the scan");
+    let act = decide(&mut f, &w, &flora, h);
+    assert!(act.forward == 0.0 && act.feed == 0.0, "sensed only: it waits: {act:?}");
+    assert_eq!(held_of(&f, h).0, "give_up");
+    assert!(matches!(held_of(&f, h).1, Subject::Body { id, .. } if id == ls));
+
+    // The switch off: it walks to the guarded carcass.
+    let (w, flora, mut f, h, _ls, _, _) = guarded_carcass_scene(0.0);
+    tactics_mut(&mut f).wound_cost = 1e9;
+    tactics_mut(&mut f).keep_clear = false;
+    let act = decide(&mut f, &w, &flora, h);
+    assert!(act.forward > 0.0, "off: it walks to the carcass: {act:?}");
+    assert_eq!(held_of(&f, h).0, "feed");
+}
+
+/// **A starving hound risks a guarded carcass; wounded, it waits** (VH-FEED-KICK follow-up 2):
+/// starving (hunger 1) with `hunger_relief` 1 the kicks cost it nothing, and the carcass is
+/// worth at least `commit_value` (set to 0, the walk free): it walks to the carcass, labelled
+/// feed; at the carcass, inside the kicker's kept distance, it is not walked clear of the
+/// kicker it dared. Wounded to `give_up_wound` (the hunt would give up), it is: off the
+/// carcass, labelled a give-up.
+#[test]
+fn a_starving_hound_risks_a_guarded_carcass_and_a_wounded_one_does_not() {
+    let (w, flora, mut f, h, ls, _site, cx) = guarded_carcass_scene(1.0);
+    {
+        let t = tactics_mut(&mut f);
+        t.hunger_relief = 1.0;
+        t.commit_value = 0.0;
+        t.give_up_value = 0.0;
+        t.chase_cost_per_m = 0.0;
+    }
+    let act = decide(&mut f, &w, &flora, h);
+    assert!(act.forward > 0.0 && act.feed == 0.0, "it walks to the carcass: {act:?}");
+    assert_eq!(held_of(&f, h).0, "feed");
+
+    // At the carcass, inside the kicker's kept distance: not kept clear of it.
+    let keep = keep_of(&f, ls);
+    let ls_x = animal(&f, ls).pose.x;
+    place(&mut f, h, cx - 0.3, MID_Z, EAST);
+    assert!(ls_x - (cx - 0.3) < keep, "the hound inside the kept distance");
+    f.tick += 1;
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    shows_guard(&mut f, h, ls);
+    let _ = decide(&mut f, &w, &flora, h);
+    assert_eq!(held_of(&f, h).0, "feed", "dared: it feeds on");
+
+    // Wounded as far as the hunt gives up: walked clear of the kicker.
+    let wound = tac(&f).give_up_wound;
+    animal_mut(&mut f, h).wound = wound;
+    f.tick += 1;
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    shows_guard(&mut f, h, ls);
+    let act = decide(&mut f, &w, &flora, h);
+    assert_eq!(act.feed, 0.0, "wounded: off the carcass: {act:?}");
+    let (held, subject) = held_of(&f, h);
+    assert_eq!(held, "give_up");
+    assert!(matches!(subject, Subject::Body { id, .. } if id == ls), "on the kicker: {subject:?}");
+}
+
+/// **A carcass is weighed as the hunt weighs a prey** ([`weigh_carcass`]): no kicker kept clear
+/// of over it, nothing to weigh; over it, a hungrier hound values it more, a wounded one less,
+/// and a carcass with less left on it less.
+#[test]
+fn a_guarded_carcass_is_weighed_by_hunger_and_wound() {
+    let weigh = |f: &Fauna, h: u64, site: Site| {
+        let i = index(f, h);
+        weigh_carcass(f, i, &tac(f), site, animal(f, h).body, VOXEL_M, RING)
+    };
+    let (_w, _flora, f, h, ls, site, _) = guarded_carcass_scene(0.5);
+    let base = weigh(&f, h, site).expect("guarded: weighed");
+    assert_eq!(base.over, vec![ls]);
+    assert_eq!(base.kicker.id, ls);
+    let i = index(&f, h);
+    let less = weigh_carcass(&f, i, &tac(&f), site, 0.01 * animal(&f, h).body, VOXEL_M, RING).expect("weighed");
+    assert!(less.value < base.value, "less left on it: worth less");
+
+    let (_w, _flora, f, h, _, site, _) = guarded_carcass_scene(0.9);
+    assert!(weigh(&f, h, site).expect("weighed").value > base.value, "hungrier: worth more");
+
+    let (_w, _flora, mut f, h, _, site, _) = guarded_carcass_scene(0.5);
+    animal_mut(&mut f, h).wound = 0.2;
+    assert!(weigh(&f, h, site).expect("weighed").value < base.value, "wounded: worth less");
+
+    // Not in guard stance and no kick: not kept clear of, nothing to weigh.
+    let (_w, _flora, mut f, h, ls, site, _) = guarded_carcass_scene(0.5);
+    sees(&mut f, h, &[(ls, class::PREY)]);
+    assert_eq!(weigh(&f, h, site), None);
+}
+
