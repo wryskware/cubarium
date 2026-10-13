@@ -512,7 +512,17 @@ fn anchor_node(fauna: &Fauna, graph: &crate::encounter::RouteGraph, a: &Animal, 
     graph.node_near(a.site, (a.pose.x, a.pose.z), cols)
 }
 
-/// An unusable den is replaced by a dry site on the breeder's current walking range.
+/// An unusable den is replaced by a dry site on the pack's current walking range.
+///
+/// **DEN-REACH**: a den is usable when it is dry and its walking component on the route graph
+/// holds at least [`Pack::den_reach_share`] of the pack's grown members on that graph (each
+/// by [`anchor_node`]); a den in a pocket only the breeder walks to leaves the rest without a
+/// way home ([`must_walk_home`]). An unusable den is re-chosen in the component that holds
+/// the most members — but only one that holds more than the den's own, so a pack split evenly
+/// keeps its den — on the range of its first member there (the breeder when it is there),
+/// the next such component when that one has no site. A share of 0 judges the breeder's
+/// reach alone, the rule before DEN-REACH. With every member in one component both rules
+/// choose alike.
 pub(crate) fn renew_dens(fauna: &mut Fauna, view: &VoxelView<'_>, glowcap: &cubarium_voxel_flora::SpeciesConfig) {
     let records = fauna.packs().to_vec();
     let v = view.config.voxel_m;
@@ -525,30 +535,57 @@ pub(crate) fn renew_dens(fauna: &mut Fauna, view: &VoxelView<'_>, glowcap: &cuba
         let phys = *fauna.config.founder(rec.lineage);
         let wet = flooded(view, &phys, &t, rec.den);
         let mut graph = fauna.pack_routes(view, rec.lineage);
-        let Some((mut anchor, mut from)) = adults.iter().find_map(|a| anchor_node(fauna, &graph, a, v).map(|i| (*a, i))) else { continue };
+        let on_graph = |fauna: &Fauna, graph: &crate::encounter::RouteGraph| -> Vec<(Animal, usize)> {
+            adults.iter().filter_map(|a| anchor_node(fauna, graph, a, v).map(|i| (*a, i))).collect()
+        };
+        let mut on = on_graph(fauna, &graph);
         // With no adult on the graph there is no replacement search to run. Keep the
         // normal route refresh cadence instead of rebuilding the whole world every
         // tick for a persistently wet den. Once anchored, a flood still gets a fresh
-        // graph immediately, and the anchor must also belong to that fresh graph.
+        // graph immediately, and the anchors must also belong to that fresh graph.
+        if on.is_empty() { continue; }
         if wet {
             fauna.pack_routes.remove(&rec.lineage.index());
             graph = fauna.pack_routes(view, rec.lineage);
-            let Some(current) = adults.iter().find_map(|a| anchor_node(fauna, &graph, a, v).map(|i| (*a, i))) else { continue };
-            (anchor, from) = current;
+            on = on_graph(fauna, &graph);
+            if on.is_empty() { continue; }
         }
-        if !wet && graph.face(rec.den).is_some_and(|i| graph.components[i] == graph.components[from]) { continue; }
-        let den = graph.faces.iter().enumerate()
-            .filter(|(i, s)| graph.components[*i] == graph.components[from]
-                && !flooded(view, &phys, &t, **s)
-                && distance(&anchor, centre(**s, v).0, centre(**s, v).1, ring) <= t.den_search_m
-                && !trespass(fauna, rec.id, centre(**s, v).0, centre(**s, v).1, &t, v, ring))
-            .min_by(|(_, a), (_, b)| crate::den_quality(view, glowcap, **a, &t).compare(crate::den_quality(view, glowcap, **b, &t))
-                .then(distance(&anchor, centre(**a, v).0, centre(**a, v).1, ring)
-                    .total_cmp(&distance(&anchor, centre(**b, v).0, centre(**b, v).1, ring)))
-                .then(a.cmp(b)))
-            .map(|(_, s)| *s);
-        if let Some(den) = den {
-            fauna.set_den(rec.id, den, crate::den_quality(view, glowcap, den, &t).choice);
+        let den_component = if wet { None } else { graph.face(rec.den).map(|i| graph.components[i]) };
+        let held_by = |k: usize| on.iter().filter(|(_, n)| graph.components[*n] == k).count();
+        let share = t.den_reach_share;
+        let ranked: Vec<usize> = if share > 0.0 {
+            let held = den_component.map_or(0, held_by);
+            let need = ((share.min(1.0) * on.len() as f64).ceil() as usize).max(1);
+            if den_component.is_some() && held >= need { continue; }
+            let mut ks: Vec<usize> = Vec::new();
+            for (_, n) in &on {
+                let k = graph.components[*n];
+                if !ks.contains(&k) && held_by(k) > held { ks.push(k); }
+            }
+            // Stable: on a tie the component met first (the breeder's) leads.
+            ks.sort_by_key(|&k| std::cmp::Reverse(held_by(k)));
+            ks
+        } else {
+            let k = graph.components[on[0].1];
+            if den_component == Some(k) { continue; }
+            vec![k]
+        };
+        for k in ranked {
+            let Some(&(anchor, _)) = on.iter().find(|(_, n)| graph.components[*n] == k) else { continue };
+            let den = graph.faces.iter().enumerate()
+                .filter(|(i, s)| graph.components[*i] == k
+                    && !flooded(view, &phys, &t, **s)
+                    && distance(&anchor, centre(**s, v).0, centre(**s, v).1, ring) <= t.den_search_m
+                    && !trespass(fauna, rec.id, centre(**s, v).0, centre(**s, v).1, &t, v, ring))
+                .min_by(|(_, a), (_, b)| crate::den_quality(view, glowcap, **a, &t).compare(crate::den_quality(view, glowcap, **b, &t))
+                    .then(distance(&anchor, centre(**a, v).0, centre(**a, v).1, ring)
+                        .total_cmp(&distance(&anchor, centre(**b, v).0, centre(**b, v).1, ring)))
+                    .then(a.cmp(b)))
+                .map(|(_, s)| *s);
+            if let Some(den) = den {
+                fauna.set_den(rec.id, den, crate::den_quality(view, glowcap, den, &t).choice);
+                break;
+            }
         }
     }
 }
