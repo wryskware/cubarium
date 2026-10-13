@@ -3632,7 +3632,8 @@ fn founder_act(
 ///    takes off when it is awake, the sky allows it and it can pay a takeoff (its reserve
 ///    and its body above `body_min`, as every motor cost is paid); else
 ///    it **drops** — straight down at the lift speed, paying nothing aloft — onto the
-///    first perch below.
+///    first perch below, or onto water too deep to stand in, where the drop ends and it
+///    hovers on the surface (BW-STUCK).
 /// 2. **Forced down**: in a downpour, grounded by rain ([`Mobility::rain_grounded`],
 ///    backlog §12), or sleepy (its lineage's rest hour and not hungry), a flyer aloft
 ///    descends (`lift` −1, steering as it likes) and a perched one cannot take off.
@@ -3820,6 +3821,7 @@ fn flyer_act(
         };
         let distance = forward * speed * cruise * slow * DT;
         let dy = lift * climb * cruise * DT;
+        flight::float_on_water(view, shape, &mut a.pose);
         let moved = flight::move_through_air(view, &fv, shape, flight.band_max_m, puddle, &mut a.pose, distance, dy);
         if let Some(site) = flight::support_below(view, a.pose.x, a.pose.z, a.pose.y_m) {
             a.site = site;
@@ -3827,6 +3829,10 @@ fn flyer_act(
         if let Some(p) = moved.landed {
             a.mobility.mode = MobilityMode::Perched;
             a.mobility.perch = Some(p);
+            a.mobility.falling = false;
+        } else if moved.on_water {
+            // BW-STUCK: a drop onto water too deep to stand in is over: it hovers on the
+            // surface, a flyer aloft with its own controls back (it never perches there).
             a.mobility.falling = false;
         }
         let fb = &mut a.founder_state.feedback;

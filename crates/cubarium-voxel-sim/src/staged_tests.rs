@@ -457,3 +457,117 @@ fn an_asleep_pack_is_still_by_choice_and_a_hungry_awake_one_is_frozen() {
     let why = window(&sim, 0, samples).verdict(&sim, &cfg).expect_err("undriven sleepers fail");
     assert!(why.contains("frozen"), "{why}");
 }
+
+/// A founder body copied out of `fauna` and made hungry (eating latch on), awake, resting
+/// and still for a minute, on the ground, outside any pack: [`super::hungry_held`] with no
+/// reason, until a test gives it one.
+fn hungry_rester(fauna: &Fauna, id: u64) -> cubarium_voxel_fauna::Animal {
+    let mut a = *fauna.view().animal(id).expect("alive");
+    a.state = cubarium_voxel_fauna::State::Resting;
+    a.rest = None;
+    a.hunkered = false;
+    a.attached = None;
+    a.mobility.mode = cubarium_voxel_fauna::MobilityMode::Ground;
+    a.mobility.retract_ticks = 0;
+    a.eating = true;
+    a.emergency = false;
+    a.pack = None;
+    a.still_ticks = 60 * u64::from(cubarium_voxel_fauna::TICK_HZ);
+    a
+}
+
+/// **BW-STUCK: a window opened right after a load counts only ticked samples.** A save's
+/// bodies come back with no steer source (`Fauna::steer` is not saved), so at the load
+/// instant a still hungry body has no chosen reason it will have once it ticks. Opening
+/// the window samples no body; the first tick's watch does. A body hungry but excused
+/// (perched) at every ticked sample is never counted hungry-held, is still by choice, and
+/// adds nothing to its lineage's hungry resting.
+#[test]
+fn a_window_opened_after_a_load_counts_only_ticked_samples() {
+    let (world, flora, fauna, _) = seeded(64, None, 0.0);
+    let dir = scratch("open-sample");
+    saved::save(&dir, &world, &flora, &fauna, 3).expect("saves");
+    let s = saved::load(&dir, &[]).expect("loads");
+    std::fs::remove_dir_all(&dir).ok();
+    let mut sim = Sim::ambient(s.world, s.flora, s.fauna, SimConfig::with_threads(1));
+    let bodies = founder_bodies(sim.fauna());
+    assert!(bodies.iter().all(|&(id, _)| sim.fauna().steer_of(id).is_none()), "fixture: a load restores no steer");
+    let mut w = Window::open(&sim);
+    assert!(w.held.is_empty(), "opening samples no body");
+    assert!(w.states.iter().all(|s| s.is_empty()), "opening counts no state");
+    assert!(w.resting_hungry.iter().all(|&n| n == 0), "opening counts no hungry rest");
+    sim.step();
+    w.watch(&sim);
+    assert!(bodies.iter().all(|(id, _)| w.held.get(id).is_some_and(|h| h.1 == 1)), "the first ticked watch samples every body once");
+
+    let (id, f) = bodies[0];
+    let mut a = hungry_rester(sim.fauna(), id);
+    a.mobility.mode = cubarium_voxel_fauna::MobilityMode::Perched;
+    let reason = cubarium_voxel_fauna::still_reason_of(&a, None, false);
+    assert!(reason.is_some(), "fixture: perched is an excuse");
+    let mut w = Window::open(&sim);
+    for _ in 0..30 {
+        w.sample(f, &a, reason);
+    }
+    assert_eq!(w.held.get(&id).copied(), Some((f, 30, 0, 30)), "excused at every sample: never hungry-held");
+    assert_eq!(w.resting_hungry[f.index()], 0, "an excused hungry rest is not counted hungry");
+    assert!(w.chosen_still(f, sim.fauna()) >= 1, "still by choice");
+}
+
+/// **BW-STUCK: a lineage grounded by rain and perched is idle by choice.** Every bellwing
+/// perched with its eating latch on and its rain latch set, resting at every sample, the
+/// other lineages resting fed: the bellwings pass as idle, not as hungry resters.
+#[test]
+fn a_rain_grounded_perched_lineage_is_idle_by_choice() {
+    let mut counts = [1usize; Founder::COUNT];
+    counts[Founder::Bellwing.index()] = 3;
+    let (world, flora, fauna, _) = seeded(64, Some(counts), 0.0);
+    let sim = Sim::ambient(world, flora, fauna, SimConfig::with_threads(1));
+    let dir = scratch("rain-perched");
+    let (cfg, _) = stage(&dir, &[]);
+    std::fs::remove_dir_all(&dir).ok();
+    let bodies = founder_bodies(sim.fauna());
+    assert!(bodies.iter().any(|&(_, f)| f == Founder::Bellwing), "fixture: bellwings");
+    let mut w = Window::open(&sim);
+    for f in Founder::ALL {
+        w.awake[f.index()] = true;
+    }
+    for _ in 0..20 {
+        for &(id, f) in &bodies {
+            let mut a = hungry_rester(sim.fauna(), id);
+            if f == Founder::Bellwing {
+                a.mobility.mode = cubarium_voxel_fauna::MobilityMode::Perched;
+                a.mobility.rain_grounded = true;
+            } else {
+                a.eating = false;
+            }
+            let reason = cubarium_voxel_fauna::still_reason_of(&a, None, false);
+            w.sample(f, &a, reason);
+        }
+    }
+    let ok = w.verdict(&sim, &cfg).expect("a rain-grounded perched lineage passes");
+    assert!(ok.contains("bellwing idle"), "{ok}");
+}
+
+/// **BW-STUCK: a pack-held hungry body still counts as a hungry rest.** The hold that
+/// keeps a Veilhound resting while it starves (pack steer, emergency latch on) is no
+/// excuse (`still_reason` gives none), so each of its resting samples counts against its
+/// lineage's fed rest, and it is hungry-held.
+#[test]
+fn a_pack_held_hungry_body_still_counts_in_fed_rest() {
+    let (world, flora, fauna, _) = seeded(64, None, 0.0);
+    let sim = Sim::ambient(world, flora, fauna, SimConfig::with_threads(1));
+    let (id, _) = founder_bodies(sim.fauna())[0];
+    let f = Founder::Chorister;
+    let mut a = hungry_rester(sim.fauna(), id);
+    a.emergency = true;
+    a.pack = Some(cubarium_voxel_fauna::PackMember { pack: 1, pup: false, calling_ticks: 0 });
+    let reason = cubarium_voxel_fauna::still_reason_of(&a, Some(cubarium_voxel_fauna::Steer::Pack), false);
+    assert_eq!(reason, None, "fixture: a starving pack-held body has no excuse");
+    let mut w = Window::open(&sim);
+    for _ in 0..12 {
+        w.sample(f, &a, reason);
+    }
+    assert_eq!(w.resting_hungry[f.index()], 12, "every pack-held hungry rest counts");
+    assert_eq!(w.held.get(&id).map(|h| h.2), Some(12), "and it is hungry-held");
+}
