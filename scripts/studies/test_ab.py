@@ -48,6 +48,9 @@ if [ -n "$params" ]; then
 fi
 mkdir -p "$run/ckpt/m000020"
 printf '20\\n' > "$run/ckpt/m000020/minute"
+for layer in world.bin flora.bin fauna.bin; do
+    printf 'fixture\\n' > "$run/ckpt/m000020/$layer"
+done
 printf 'minute=20 state=done\\n' > "$run/status"
 touch "$run/DONE"
 if [ -n "$load" ]; then

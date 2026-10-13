@@ -24,6 +24,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 
@@ -41,13 +42,14 @@ from .stops import evaluate, run_hook, validate_rules
 ACTIVE = ("submitted", "inputs", "preflight", "running", "aborting")
 QUICK_LIMIT = "exceeded the quick limit"
 QUICK_SLACK_S = 5    # an end this close to the cap counts as the cap (systemd RuntimeMaxSec vs our tick)
+UNCERTAIN_START = "start uncertain:"
 
 
 def quick_limit_reason(task, elapsed_s):
     return (f"{QUICK_LIMIT}: ran {elapsed_s / 60:.1f} min against a {task.timeout_h * 60:g} min cap "
             f"([lab] quick_timeout_min or the task's timeout_h); this was not a quick task, "
             f"resubmit it without quick")
-TOOLS = ("taskwrap.py", "snaprun.py", "census_resume.py")
+TOOLS = ("taskwrap.py", "snaprun.py", "census_resume.py", "transfer.py")
 
 
 def unit_name(job, task):
@@ -97,6 +99,10 @@ class Daemon:
         self.stage_seq = 0
         self.fetches = {}
         self.fetched = {}
+        self.fetch_waiting = {}
+        self.fetch_epoch = {}
+        self.fetch_seen = {}
+        self.fetch_seq = 0
         self.backoff = {}
         self.preflights = {}
         self.stop_hooks = {}
@@ -345,7 +351,7 @@ class Daemon:
         self.preflights.pop(job_id, None)
         self.drop_stages(job=job_id)
         for row in self.store.q("SELECT * FROM tasks WHERE job=? AND state IN ('pending', 'running')", job_id):
-            if row["state"] == "running":
+            if row["state"] == "running" or (row["reason"] or "").startswith(UNCERTAIN_START):
                 self.stop_task(row, "cancelled", reason)
             else:
                 self.store.update("tasks", dict(job=job_id, name=row["name"]), state="skipped", reason=reason)
@@ -511,7 +517,8 @@ class Daemon:
 
     # ------------------------------------------------------------------ tasks
     def poll_tasks(self, force=False):
-        rows = self.store.q("SELECT * FROM tasks WHERE state='running'")
+        rows = self.store.q("SELECT * FROM tasks WHERE state='running' OR "
+                            "(state='pending' AND reason LIKE 'start uncertain:%')")
         by_host = {}
         for row in rows:
             by_host.setdefault(row["host"], []).append(row)
@@ -529,6 +536,12 @@ class Daemon:
                 continue
             for row in items:
                 rc, alive = states.get(row["unit"], (None, True))
+                if (row["reason"] or "").startswith(UNCERTAIN_START):
+                    if row["unit"] not in states:
+                        continue  # A missing probe answer is not evidence that the start failed.
+                    if not self.reconcile_start(row, rc, alive):
+                        continue
+                    row = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", row["job"], row["name"])
                 if rc is not None:
                     self.task_ended(row, rc)
                 elif not alive:
@@ -580,6 +593,7 @@ class Daemon:
         moving, fetched = replacement is not None, True
         task = Task.from_dict(json.loads(row["spec"]))
         host = self.host(row["host"])
+        self.fence_fetch(row)
         if moving:
             try:
                 self.launchers[row["host"]].stop(row["unit"], self.lab_dir(row))
@@ -735,6 +749,17 @@ class Daemon:
         spec = view.task.liveness
         host = self.host(row["host"])
         out = view.out
+        live = json.loads(row["live"] or "{}")
+        now = self.clock()
+        if host and host.kind != "local" and spec.get("minute_file"):
+            seen = self.fetch_seen.get((job.id, view.name))
+            if seen is None or seen[0][:3] != (row["started"], False, row["host"]) \
+                    or seen[0][3] == live.get("fetch"):
+                # Time spent waiting for a mirror cannot be evidence of a stalled simulator.
+                live["since"] = now
+                self.store.update("tasks", dict(job=job.id, name=view.name), live=json.dumps(live))
+                return
+            live["fetch"] = seen[0][3]
         if host and host.kind != "local" and not spec.get("minute_file"):
             script = (f"find {shlex.quote(self.remote_out(host, job, view))} -type f -printf '%s %T@\\n' 2>/dev/null"
                       " | awk '{n++; s+=$1; if ($2>m) m=$2} END {print n+0, s+0, m+0}'\n")
@@ -748,12 +773,11 @@ class Daemon:
                 signature = None
         else:
             signature = Context.output_signature([str(out / p) for p in spec.get("paths", ["**/*"])])
-        live = json.loads(row["live"] or "{}")
-        now = self.clock()
         if signature is not None and signature != live.get("sig"):
-            live = dict(sig=signature, since=now)
+            live.update(sig=signature, since=now)
             self.store.update("tasks", dict(job=job.id, name=view.name), live=json.dumps(live))
             return
+        self.store.update("tasks", dict(job=job.id, name=view.name), live=json.dumps(live))
         since = live.get("since") or row["started"] or now
         if now - since >= float(spec.get("stall_min", 30)) * 60:
             reason = f"stalled: no output growth for {spec.get('stall_min', 30)} min"
@@ -788,37 +812,82 @@ class Daemon:
 
     def fetch_task(self, row, final=False):
         """Mirror outputs now (blocking): only a loss, a tail move and EC2 down use this."""
+        self.fence_fetch(row)
         host = self.host(row["host"])
         if not host or host.kind == "local":
             return
         self.mirror(self.mirror_args(row, final))
+
+    def fence_fetch(self, row):
+        """Invalidate earlier mirrors before another attempt takes ownership of the outputs."""
+        key = (row["job"], row["name"])
+        self.fetch_epoch[key] = self.fetch_epoch.get(key, 0) + 1
+        self.fetch_waiting.pop(key, None)
+        self.fetched.pop(key, None)
+        self.fetch_seen.pop(key, None)
 
     def fetch_async(self, row, final=False):
         """Mirror a remote task's outputs in a transfer worker; at most one per task and
         [lab] fetch_workers in all. On an S3-capable instance a progress mirror also copies
         each run's newest mirrored checkpoint to S3 (in-region). False when not started."""
         key = (row["job"], row["name"])
-        if key in self.fetches or len(self.fetches) >= self.fetch_limit:
+        if key in self.fetches and (not final or self.fetches[key][1]):
             return False
+        previous = self.fetch_waiting.get(key)
+        self.fetch_waiting[key] = (dict(row), final or bool(previous and previous[1]))
+        self.start_fetches()
+        return key in self.fetches
+
+    def start_fetches(self):
+        """FIFO service across polls/hosts, with final mirrors ahead of progress mirrors."""
+        for key, (row, final) in sorted(list(self.fetch_waiting.items()), key=lambda item: not item[1][1]):
+            if len(self.fetches) >= self.fetch_limit:
+                break
+            if key in self.fetches:
+                continue
+            del self.fetch_waiting[key]
+            current = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", *key)
+            if current is None or (current["started"], current["host"]) != (row["started"], row["host"]) \
+                    or (not final and current["state"] != "running"):
+                continue
+            self.start_fetch(row, final)
+
+    def start_fetch(self, row, final):
+        key = (row["job"], row["name"])
         args = self.mirror_args(row, final)
         s3 = None if final else self.ec2.s3(args["host"])
         if s3:
             args.update(s3=s3, job=row["job"], task=row["name"], timeout=float(self.inv.ec2.get("s3_timeout_s", 900)),
                         known=self.store.kv_get(f"s3ckpt:{row['job']}:{row['name']}", {}))
-        token = (row["started"], final)
+        self.fetch_seq += 1
+        token = (row["started"], final, row["host"], self.fetch_seq, self.fetch_epoch.get(key, 0))
         self.fetches[key] = token
         self.xfer.submit(self._fetch_worker, key, token, args)
-        return True
 
     def _fetch_worker(self, key, token, args):
         pushed, error = {}, None
+        stage = None
+        publish = []
         try:
-            self.mirror(args)
-            if args.get("s3"):
-                pushed = self.push_checkpoints(args)
+            # Separate inodes even when cp falls back from reflinks: no worker can mutate
+            # the live outputs. Seeding preserves rsync's incremental network transfers.
+            stage = Path(tempfile.mkdtemp(prefix=".lab-fetch-", dir=Path(args["local"]).parent))
+            staged = dict(args)
+            staged["local"] = stage / "out"
+            staged["local"].mkdir()
+            if Path(args["local"]).is_dir():
+                subprocess.run(["cp", "-a", "--reflink=auto", f"{args['local']}/.", str(staged["local"])],
+                               check=True, capture_output=True, timeout=270)
+            publish.append((staged["local"], Path(args["local"])))
+            if args["lab"]:
+                staged["lab"] = (args["lab"][0], stage / "lab")
+                publish.append((stage / "lab", Path(args["lab"][1])))
+            self.mirror(staged)
+            if staged.get("s3"):
+                pushed = self.push_checkpoints(staged)
         except Exception as failure:  # noqa: BLE001
             error = f"{type(failure).__name__}: {failure}"
-        self.done.put(("fetch", key, token, args["host"], error, pushed))
+        self.done.put(("fetch", key, token, args["host"], error, pushed, stage, publish))
 
     @staticmethod
     def push_checkpoints(args):
@@ -833,9 +902,32 @@ class Daemon:
                                                              args["remote"], items), timeout=args["timeout"])
         return transfer.parse_pushed(done.stdout)
 
-    def finish_fetch(self, key, token, host, error, pushed):
+    def finish_fetch(self, key, token, host, error, pushed, stage, publish):
+        valid = self.fetches.get(key) == token and self.fetch_epoch.get(key, 0) == token[4]
         if self.fetches.get(key) == token:
             del self.fetches[key]
+        row = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", *key)
+        valid = valid and row is not None and (row["started"], row["host"]) == (token[0], token[2])
+        try:
+            if not valid:
+                return
+            if error is None:
+                # The daemon owns publication as well as sqlite. Rename files only after
+                # accepting this attempt's token; a fenced worker leaves no live writes.
+                for source, target in publish:
+                    target.mkdir(parents=True, exist_ok=True)
+                    for path in sorted(source.rglob("*")):
+                        destination = target / path.relative_to(source)
+                        if path.is_dir():
+                            destination.mkdir(parents=True, exist_ok=True)
+                        else:
+                            os.replace(path, destination)
+                self.fetch_seen[key] = (token, self.clock())
+        except Exception as failure:  # noqa: BLE001
+            error = f"publish: {type(failure).__name__}: {failure}"
+        finally:
+            if stage is not None:
+                shutil.rmtree(stage)
         if token[1]:  # a final fetch: the next tick polls that host again and finishes the task there
             self.fetched[key] = (token, error)
             self.timers.pop(f"poll:{host}", None)
@@ -851,7 +943,7 @@ class Daemon:
         none finished yet."""
         key = (row["job"], row["name"])
         result = self.fetched.get(key)
-        if result is None or result[0] != (row["started"], final):
+        if result is None or result[0][:3] != (row["started"], final, row["host"]):
             return None
         del self.fetched[key]
         return (result[1] is None, result[1])
@@ -870,7 +962,8 @@ class Daemon:
 
     def usage(self):
         usage = {h.name: Usage() for h in self.hosts()}
-        for row in self.store.q("SELECT host, grp, spec FROM tasks WHERE state='running'"):
+        for row in self.store.q("SELECT host, grp, spec FROM tasks WHERE state='running' OR "
+                                "(state='pending' AND reason LIKE 'start uncertain:%')"):
             if row["host"] in usage:
                 usage[row["host"]].add(Task.from_dict(json.loads(row["spec"])), row["grp"])
         for stage in self.staging.values():  # a staging task holds its place
@@ -903,7 +996,7 @@ class Daemon:
         reservations = {}
         now = self.clock()
         for row, task in rows:
-            if (row["job"], row["name"]) in self.staging:
+            if (row["job"], row["name"]) in self.staging or (row["reason"] or "").startswith(UNCERTAIN_START):
                 continue
             priority = row["jp"] + task.priority
             key = dict(job=row["job"], name=row["name"])
@@ -989,6 +1082,8 @@ class Daemon:
         """Local hosts launch now. A remote launch is prepared here against a Recorder and
         staged: a transfer worker uploads, then `finish_stage` (daemon thread) starts it.
         True means the task holds its place (running or staging)."""
+        if (row["reason"] or "").startswith(UNCERTAIN_START):
+            return False  # Reconciliation must precede even writes to launch.json or outputs.
         job = self.job(row["job"])
         view = job.tasks[row["name"]]
         remote = host.kind != "local"
@@ -1032,6 +1127,7 @@ class Daemon:
             try:
                 item = self.done.get_nowait()
             except queue.Empty:
+                self.start_fetches()
                 return
             try:
                 if item[0] == "stage":
@@ -1042,14 +1138,14 @@ class Daemon:
                 self.log(traceback.format_exc())
 
     def finish_stage(self, stage, error, misses):
+        if self.staging.get(stage.key) is not stage:
+            return  # dropped: the job aborted or the host went down meanwhile
         if misses:
             mark = f"s3ckpt:{stage.key[0]}:{stage.key[1]}"
             records = self.store.kv_get(mark, {})
             for rel in misses:
                 records.pop(rel, None)
             self.store.kv_set(mark, records)
-        if self.staging.get(stage.key) is not stage:
-            return  # dropped: the job aborted or the host went down meanwhile
         del self.staging[stage.key]
         job_id, name = stage.key
         row = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", job_id, name)
@@ -1105,7 +1201,17 @@ class Daemon:
 
     def start_unit(self, attempts, job_id, task, host, group, spec, start):
         """Mark running, then start the unit (a crash between the two is a lost task, never a
-        duplicate). An ssh failure (255) on a remote host requeues without spending a retry."""
+        duplicate). An uncertain remote start must be reconciled before staging/relaunch."""
+        row = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", job_id, task.name)
+        if row is not None and (row["reason"] or "").startswith(UNCERTAIN_START):
+            try:
+                states = self.launchers[row["host"]].poll([(row["unit"], start["lab"])])
+                if row["unit"] in states:
+                    self.reconcile_start(row, *states[row["unit"]])
+            except Exception as error:  # noqa: BLE001
+                self.log(f"reconcile start {job_id}/{task.name}: {error}")
+            return False
+        self.fence_fetch(dict(job=job_id, name=task.name))
         launcher = self.launchers[host.name]
         unit = unit_name(job_id, task.name)
         key = dict(job=job_id, name=task.name)
@@ -1115,22 +1221,37 @@ class Daemon:
         try:
             launcher.start(unit, f"{start['lab']}/launch.json", start["lab"], spec["cwd"], mem_gb=host.max_mem_gb,
                            timeout_h=task.timeout_h, taskwrap=start["taskwrap"])
-        except subprocess.TimeoutExpired as error:
-            # It may have started: stay running and let the next poll decide.
-            self.log(f"start {job_id}/{task.name} on {host.name} timed out: {error}; the poll decides")
         except Exception as error:  # noqa: BLE001
-            if host.kind != "local" and getattr(error, "returncode", None) == 255:
+            if host.kind != "local" and (getattr(error, "returncode", None) == 255
+                                         or isinstance(error, subprocess.TimeoutExpired)):
                 delay = self.transport_failed(host.name)
-                self.store.update("tasks", key, state="pending", attempts=attempts, started=None, unit=None,
-                                  reason=f"requeued: start on {host.name} failed (ssh); host retry in {delay:.0f} s")
+                self.store.update("tasks", key, state="pending", attempts=attempts,
+                                  reason=f"{UNCERTAIN_START} {error}; reconcile on {host.name}")
                 self.events.emit("stage-failed", job=job_id, task=task.name, host=host.name,
                                  reason=f"start: {error}", attempts=attempts, retry_in_s=round(delay, 1))
                 return False
+            if isinstance(error, subprocess.TimeoutExpired):
+                self.log(f"start {job_id}/{task.name} on {host.name} timed out: {error}; the poll decides")
+                return True
             self.launch_failed(job_id, task.name, host.name, f"launch: {error}")
             return False
         self.events.emit("started", job=job_id, task=task.name, host=host.name,
                          group=group if group >= 0 else None, unit=unit, launcher=launcher.name)
         return True
+
+    def reconcile_start(self, row, rc, alive):
+        """Adopt an observed process/result; only an explicit absence permits a fresh stage."""
+        key = dict(job=row["job"], name=row["name"])
+        if rc is not None or alive:
+            self.store.update("tasks", key, state="running", attempts=row["attempts"] + 1, reason=None)
+            self.events.emit("started", job=row["job"], task=row["name"], host=row["host"],
+                             unit=row["unit"], launcher=row["launcher"], reconciled=True)
+            return True
+        self.store.update("tasks", key, state="pending", started=None, unit=None,
+                          reason="requeued: uncertain start absent on host")
+        self.events.emit("requeued", job=row["job"], task=row["name"], host=row["host"],
+                         reason="uncertain start absent on host")
+        return False
 
     def artifact_sha(self, key, source):
         row = self.store.one("SELECT sha256 FROM artifacts WHERE key=?", key)
@@ -1227,7 +1348,7 @@ class Daemon:
                 if not Path(remote).is_relative_to(Path(jobdir)):
                     raise ValueError(f"staged input escapes remote job root: {destination}")
                 replacements[str(source)] = remote
-                if resuming and own_checkpoints and transfer.is_checkpoint_dir(source):
+                if resuming and own_checkpoints and not task.meta.get("batch") and transfer.is_checkpoint_dir(source):
                     continue  # the run resumes from its own checkpoint; the one it started from stays home
                 if Path(source).is_dir():
                     transport.put_dir(source, remote)

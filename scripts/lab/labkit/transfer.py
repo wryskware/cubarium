@@ -15,7 +15,7 @@ S3 (optional, `[ec2] s3_bucket`): every S3 command runs on the instance through 
 cli and instance role; labd never holds AWS credentials.
 """
 
-import math
+import inspect
 import os
 from pathlib import Path
 import re
@@ -33,25 +33,33 @@ class StageError(RuntimeError):
 
 
 # ---------------------------------------------------------------- checkpoints and subsets
-def checkpoint_minute(path):
+def checkpoint_minute(path, name=None):
     """The minute of a complete checkpoint directory, else None.
 
-    Complete: an `mNNNNNN` name (a `.partial` is never one), a readable `minute`, and either
-    all three layer files or none (fixtures write only `minute`; an rsync cut short leaves
-    some layers, and rsync sends `minute` before `world.bin`)."""
+    Complete: an `mNNNNNN` name, its unsigned integer minute, and all three nonempty
+    layer files written by saved::save. `name` validates an S3 staging directory against
+    its eventual name; discovery never accepts `.partial` directories."""
     path = Path(path)
-    if not CKPT.fullmatch(path.name):
+    name = path.name if name is None else name
+    if not CKPT.fullmatch(name):
         return None
     try:
-        minute = float((path / "minute").read_text())
+        minute = int((path / "minute").read_text().strip())
+        if minute != int(name[1:]) or not 0 <= minute <= 2**64 - 1:
+            return None
+        if not all((path / layer).is_file() and (path / layer).stat().st_size > 0 for layer in LAYERS):
+            return None
     except (OSError, ValueError):
         return None
-    if not math.isfinite(minute) or minute < 0:
-        return None
-    present = [(path / layer).is_file() for layer in LAYERS]
-    if any(present) and not all(present):
-        return None
     return minute
+
+
+def checkpoint_check_script(path, name=None):
+    """Run the same completeness predicate on the host, before an S3 push or rename."""
+    code = (f"from pathlib import Path\nimport re, sys\nCKPT = re.compile({CKPT.pattern!r})\n"
+            f"LAYERS = {LAYERS!r}\n" + inspect.getsource(checkpoint_minute) +
+            "\nsys.exit(checkpoint_minute(sys.argv[1], sys.argv[2]) is None)\n")
+    return shlex.join(["python3", "-c", code, str(path), name or Path(path).name])
 
 
 def newest_checkpoint(ckpt_dir):
@@ -193,13 +201,18 @@ def replay(ops, transport, lab, s3_misses):
                 transport.put_files(op[1], op[2], op[3], timeout=upload_timeout(op[4], lab))
             elif kind == "s3_ckpt":
                 spec = op[1]
-                done = transport.run(s3_pull_script(**spec["pull"]), timeout=spec["timeout"])
-                if done.returncode == 0:
+                try:
+                    done = transport.run(s3_pull_script(**spec["pull"]), timeout=spec["timeout"])
+                    error = done.stderr.strip()[-200:]
+                    pulled = done.returncode == 0
+                except (OSError, subprocess.SubprocessError) as failure:
+                    pulled, error = False, str(failure)[-200:]
+                if pulled:
                     continue
                 s3_misses.append(spec["rel"])
                 if not spec["fallback"]:
                     raise StageError(f"S3 checkpoint {spec['pull']['uri']} missing and home has none: "
-                                     f"{done.stderr.strip()[-200:]}")
+                                     f"{error}")
                 files = spec["fallback"]
                 transport.put_files(spec["local"], spec["remote"], files,
                                     timeout=upload_timeout(size_of(spec["local"], files), lab))
@@ -246,7 +259,7 @@ def s3_push_script(bucket, region, job, task, remote_out, items):
     for rel, name in items:
         source = f"{remote_out}/{rel}/ckpt/{name}"
         prefix = ckpt_uri(bucket, job, task, rel)
-        lines.append(f"if [ -f {q(source + '/minute')} ] "
+        lines.append(f"if {checkpoint_check_script(source)} "
                      f"&& {aws} s3 cp --recursive --only-show-errors {q(source)} {q(prefix + name + '/')} "
                      f"&& {aws} s3 rm --recursive --only-show-errors {q(prefix)} --exclude {q(name + '/*')}; "
                      f"then echo S3CKPT {q(rel)} {q(name)}; fi")
@@ -257,9 +270,11 @@ def s3_pull_script(uri, region, dest):
     """Pull one checkpoint into DEST.partial, then rename: never a half checkpoint at DEST."""
     q = shlex.quote
     partial = dest + ".partial"
-    return (f"rm -rf {q(partial)} && mkdir -p {q(partial)} "
+    return (f"trap {q('rm -rf -- ' + q(partial))} EXIT\n"
+            f"rm -rf {q(partial)} && mkdir -p {q(partial)} "
             f"&& {_aws(region)} s3 cp --recursive --only-show-errors {q(uri)} {q(partial + '/')} "
-            f"&& test -f {q(partial + '/minute')} && rm -rf {q(dest)} && mv {q(partial)} {q(dest)}\n")
+            f"&& {checkpoint_check_script(partial, Path(dest).name)} "
+            f"&& rm -rf {q(dest)} && mv {q(partial)} {q(dest)}\n")
 
 
 def bin_uri(bucket, safe):

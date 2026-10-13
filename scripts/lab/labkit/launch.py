@@ -130,7 +130,7 @@ class Launcher:
                     result[unit] = (json.loads(payload), False)
                 except ValueError:
                     result[unit] = (None, True)
-            else:
+            elif word != "UNKNOWN":
                 result[unit] = (None, word == "ALIVE")
         return result
 
@@ -175,11 +175,12 @@ class SetsidLauncher(Launcher):
 
     def alive_check(self, unit, lab_dir):
         # The wrapper writes pid.json right after starting its child; before that a fresh
-        # launch is still alive, so count a missing pid file younger than 60 s as alive.
+        # launch may still be starting. An unknown answer keeps a normal task running and
+        # an uncertain start pending; neither adoption nor relaunch is justified yet.
         return (f'p=$(sed -n \'s/.*"wrapper": \\([0-9]*\\).*/\\1/p\' "{lab_dir}/pid.json" 2>/dev/null); '
                 f'if [ -n "$p" ] && grep -q taskwrap /proc/$p/cmdline 2>/dev/null; then echo "{unit} ALIVE"; '
                 f'elif [ -z "$p" ] && [ -n "$(find "{lab_dir}" -maxdepth 1 -name launch.json -newermt "-60 seconds" 2>/dev/null)" ]; '
-                f'then echo "{unit} ALIVE"; else echo "{unit} DEAD"; fi')
+                f'then echo "{unit} UNKNOWN"; else echo "{unit} DEAD"; fi')
 
     def stop(self, unit, lab_dir):
         q = shlex.quote(str(lab_dir))

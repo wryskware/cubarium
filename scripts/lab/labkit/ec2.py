@@ -279,7 +279,8 @@ class Ec2Pool:
         return result
 
     def on_ec2(self):
-        return self.d.store.q("SELECT * FROM tasks WHERE state='running' AND host='ec2'")
+        return self.d.store.q("SELECT * FROM tasks WHERE host='ec2' AND (state='running' OR "
+                              "(state='pending' AND reason LIKE 'start uncertain:%'))")
 
     def pending_builds(self, tasks):
         """Include required builds before the provider jobs have been planned, once per key."""

@@ -312,8 +312,14 @@ Launchers:
   (`loginctl enable-linger`) is Wrysk's call; after that `auto` picks systemd.
 - **Remote hosts:** scripts go through `ssh HOST 'bash -s'`, so fish login shells are fine.
   Tools and artifacts are copied under `root` (`~/cubarium-train/lab`), and outputs are
-  incrementally rsynced back at each remote task probe, before progress/liveness hooks read
-  local census, stderr, vitals and checkpoints. At task end a full fetch includes wrapper
+  incrementally rsynced back after remote task probes. Workers fetch into isolated staging
+  directories seeded from the previous mirror with independent inodes (reflinks where
+  available). The loop publishes a successful mirror only while its attempt/host/generation
+  token still owns the task's outputs. A loss or tail move fences older mirrors before its
+  synchronous fetch and before another attempt takes over; late results are discarded.
+  Progress hooks read the accepted local mirror, and mirror-based liveness only judges a
+  fresh successful fetch, excluding time spent waiting for the transfer slot or worker.
+  At task end a full fetch includes wrapper
   logs/status; a fetch failure leaves the task and remote copy available for retry.
   Only after a successful fetch and persisted task result are remote task outputs removed.
   Shared job inputs are removed when all tasks on that host have fetched their results.
@@ -328,7 +334,11 @@ each hit the 600 s upload timeout in turn and froze labd from 22:13 to 00:12):
   the queue, the loop marks the task running and starts the unit. Workers never write sqlite.
 - One stage at a time per remote host (the home line is the bottleneck); a task that fits a
   host whose slot is busy waits for it. Output mirrors (`rsync` home at each remote probe and at
-  task end) run in the same workers, one per task and `fetch_workers` in all. A tail move's
+  task end) run in the same workers, one per task and `fetch_workers` in all. Requests retain
+  FIFO order across polls and hosts; final fetches take priority over queued progress
+  fetches. Finishing a fetch serves queued requests before a just-served task can reclaim
+  its slot, so every task gets a mirror within a bounded number of completed transfers.
+  A tail move's
   progress check reads that mirror; only the fetch after its stop, a loss and EC2 `down` still
   fetch on the loop (downloads).
 - A stage in flight is in memory only: after a restart its task is `pending` and stages again
@@ -336,20 +346,31 @@ each hit the 600 s upload timeout in turn and froze labd from 22:13 to 00:12):
   the uploads landed and the row says `running`.
 - A staging failure (upload, timeout, ssh) puts the task back to `pending` without spending a
   retry and emits `stage-failed`; the host is skipped for `transport_backoff_s`, doubling per
-  failure in a row up to `transport_backoff_max_s`. An ssh failure (255) of the start command
-  does the same. Upload timeouts are `upload_base_s` plus the bytes at `upload_floor_mb_s`.
+  failure in a row up to `transport_backoff_max_s`. An ssh failure (255) or timeout of the
+  remote start command is **uncertain**, because the process may already have started.
+  Its pending row retains the host, unit and start time with `start uncertain:` in its reason;
+  it keeps its resource reservation and cannot stage or launch again, including after a
+  daemon restart. Polls reconcile `rc.json`, the unit or wrapper pid: a process or result
+  adopts the attempt as running; an explicit absence requeues without spending a retry.
+  A failed/missing probe, or a fresh setsid launch with no pid yet, leaves it uncertain.
+  Cancellation stops uncertain launches too; a confirmed EC2 loss requeues them.
+  Upload timeouts are `upload_base_s` plus the bytes at `upload_floor_mb_s`.
 - **A resume sends only what resuming needs:** everything outside `ckpt/` folders (args,
   `end_minute`, `status`, `census.csv`, vitals, logs, `batch.json`: what `resume=`,
   `census_resume.py` and `batch.py --resume` read, under 1 MB for a run) and, per run (each
   batch child), its newest complete checkpoint only. Complete: an `mNNNNNN` folder (never
-  `.partial`) with a readable `minute` and all three layer files. A resuming task whose runs all
-  have their own checkpoint does not upload the checkpoint it started from (an `ab`
-  continuation's early checkpoint).
+  `.partial`) with a readable unsigned 64-bit integer `minute` matching its name and all
+  three nonempty layer files (`world.bin`, `flora.bin`, `fauna.bin`), as written by the
+  simulator's atomic checkpoint writer. The same predicate in `transfer.checkpoint_minute`
+  is used by discovery, census stitching, S3 push and S3 pull validation. A resuming task
+  whose runs all have their own checkpoint does not upload the checkpoint it started from
+  (an `ab` continuation's early checkpoint). Batch resumes still stage their original
+  starts, because `batch.resume` validates those inputs before choosing child checkpoints.
 
 On start the daemon:
 - resets jobs that were mid-preflight back to `inputs` (preflights are seconds-long);
 - probes hosts;
-- polls every running task: `rc.json` means ended, a live unit or process means still
+- polls every running task and uncertain start: `rc.json` means ended, a live unit or process means still
   running, and neither means `lost` (requeued if retries remain).
 
 A host reboot today: its tasks are lost, then retried once from their latest fetched
@@ -502,9 +523,11 @@ approval over the remaining budget before launch; the budget never stops a runni
      home mirrored keeps S3 from getting ahead of home's census. labd records what landed (kv
      `s3ckpt:<job>:<task>`, event `s3-checkpoint`).
    - **Resume:** on a capable instance, a run whose S3 checkpoint is at least as new as home's
-     newest is pulled from S3 (into `mNNNNNN.partial`, then renamed); otherwise home's newest,
-     and only that, is uploaded. A failed pull falls back to home's copy and forgets the S3
-     record.
+     newest is pulled from S3 (into `mNNNNNN.partial`, validated by the shared completeness
+     predicate, then renamed); otherwise home's newest, and only that, is uploaded. A failed
+     pull, including a timeout or transport exception, falls back to home's copy and forgets
+     the S3 record even if the fallback subsequently fails. Normal failures remove the
+     staging directory; any `.partial` left by an interrupted process is ignored by readers.
    - **Binaries:** a build task on a capable instance first takes `bin/<key>/` (the binary and
      its `sha256`) when the checksum matches, with no build; otherwise it builds and pushes the
      result with its checksum. A binary input that home already has is fetched from

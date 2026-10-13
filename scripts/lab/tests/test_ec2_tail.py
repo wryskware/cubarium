@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from labkit import cli
+from labkit import cli, transfer
 from labkit.core import Task
 from labkit.daemon import Daemon
 from labkit.ec2 import fill_profile, tail_progress
@@ -79,6 +79,8 @@ class Ec2TailTests(unittest.TestCase):
         root = out / name
         (root / "run/ckpt" / f"m{checkpoint:06d}").mkdir(parents=True)
         (root / "run/ckpt" / f"m{checkpoint:06d}" / "minute").write_text(str(checkpoint))
+        for layer in transfer.LAYERS:
+            (root / "run/ckpt" / f"m{checkpoint:06d}" / layer).write_bytes(b"fixture")
         (root / "run/status").write_text(f"minute={current} end={start + total} speed=2")
         (root / "run/args").write_text("original\nvitals=/remote/vitals\n")
         task = Task(name, ["{input:" + self.arm_key + "}", "2", "run={out}/run"],
@@ -229,6 +231,8 @@ class Ec2TailTests(unittest.TestCase):
                 checkpoint = Path(task.outputs) / "run/ckpt/m000049"
                 checkpoint.mkdir(exist_ok=True)
                 (checkpoint / "minute").write_text("49")
+                for layer in transfer.LAYERS:
+                    (checkpoint / layer).write_bytes(b"fixture")
         self.d.fetch_task.side_effect = fetch
         self.pool.tick()
         self.assertEqual(self.moves()[0]["from_minute"], 49)
@@ -266,6 +270,8 @@ class Ec2TailTests(unittest.TestCase):
         run = batch / "a/s1/run"
         (run / "ckpt/m000090").mkdir(parents=True)
         (run / "ckpt/m000090/minute").write_text("90")
+        for layer in transfer.LAYERS:
+            (run / "ckpt/m000090" / layer).write_bytes(b"fixture")
         (run / "status").write_text("minute=100 end=180")
         (run / "args").write_text("original")
         task = Task("batch", ["true"], outputs=str(root), meta=dict(batch=True))
@@ -281,6 +287,8 @@ class Ec2TailTests(unittest.TestCase):
         run = root / "a/s1/run"
         (run / "ckpt/m000045").mkdir(parents=True)
         (run / "ckpt/m000045/minute").write_text("45")
+        for layer in transfer.LAYERS:
+            (run / "ckpt/m000045" / layer).write_bytes(b"fixture")
         (run / "args").write_text("old\nvitals=/remote/vitals\n")
         (run / "status").write_text("minute=50 end=120")
         binary = self.d.ctx.artifact(self.arm_key)
@@ -318,6 +326,8 @@ class Ec2TailTests(unittest.TestCase):
         run = child / "run"
         (run / "ckpt/m000025").mkdir(parents=True)
         (run / "ckpt/m000025/minute").write_text("25")
+        for layer in transfer.LAYERS:
+            (run / "ckpt/m000025" / layer).write_bytes(b"fixture")
         (run / "args").write_text("original")
         path = child / "census.csv"
         path.write_text("sim_min,count\n" + "".join(f"{m},1\n" for m in range(29)))
