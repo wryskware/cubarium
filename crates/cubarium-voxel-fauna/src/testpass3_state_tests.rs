@@ -142,6 +142,7 @@ fn configured() -> FaunaConfig {
             after_s: 0.7,
             max_m: 1.25,
             wound_per_m: 0.2,
+            water_max_m: 0.0,
         };
         p.active_window = ActiveWindow {
             before_rise_h: 0.3,

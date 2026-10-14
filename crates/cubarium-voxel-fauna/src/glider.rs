@@ -1938,6 +1938,12 @@ fn travel_forward(a: &Animal) -> (f64, f64) {
 /// unchanged).
 ///
 /// **S2**: a glider whose table is live finds fruit by sight instead ([`fruit_by_sight`]).
+///
+/// **SP-CRAVE** ([`crate::crave`]): a body craving nitrogen or energy walks to the food in
+/// sight worth most to that need per second of walking and eating, not the nearest; one
+/// craving nitrogen whose walk would end at plain food (funding less tissue per organic than a
+/// check could find) checks a tree first when one is on offer. With no craving, the nearest,
+/// as before.
 pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, day: bool) -> Option<(Actions, crate::Steer)> {
     let a = fauna.animals[i];
     let founder = a.founder?;
@@ -1985,6 +1991,9 @@ pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     let fruit = if phys.senses.live {
         fruit_by_sight(fauna, i, view, fv, day)
     } else {
+        // SP-CRAVE: craving, by worth ([`crate::crave::worth`]) of each stand's fruit and the
+        // larvae it would see there; craving nitrogen, a check before plain fruit.
+        let need = crate::crave::cravings(fauna, i).need();
         // NUTS: hidden fruit counts only within its sight of the body's eye.
         let v = view.config.voxel_m;
         let ring = f64::from(view.config.width) * v;
@@ -1999,11 +2008,33 @@ pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
             (s.fruit > 0.0 && fruit_in_sight(fv, s, d3))
                 || (larvae && d3 <= phys.larva_sight_m && crate::larva::visible(fauna, crate::larva::LarvaHost::Stand(s.id)).is_some())
         };
-        let cands = stands_within(view, fv, &a, glider.fruit_search_m, |s| climbable(fv, s, &glider) && seen(s));
-        walk_to_stand(fauna, i, view, fv, &cands, glider.fruit_search_m, 1.0, crate::Steer::Fruit).map(|(go, _)| go)
+        let fare = |s: &cubarium_voxel_flora::Stand| {
+            let mut fare = crate::crave::Fare::default();
+            fare.stand_fruit(fv, &phys, s, s.fruit);
+            if larvae && let Some(h) = fauna.larvae.host(crate::larva::LarvaHost::Stand(s.id)) && let Some((_, t)) = crate::larva::visible(fauna, crate::larva::LarvaHost::Stand(s.id)) {
+                fare.larvae(fauna, &phys, h.lineage, t);
+            }
+            fare
+        };
+        let mut cands: Vec<((f64, u64, Site), crate::crave::Fare)> = stands_within(view, fv, &a, glider.fruit_search_m, |s| climbable(fv, s, &glider) && seen(s))
+            .into_iter()
+            .map(|c| (c, fv.stand_in(c.2, cubarium_voxel_flora::FaceLayer::Plant).map(fare).unwrap_or_default()))
+            .collect();
+        by_worth(fauna, &a, &phys, need, &mut cands, |c| (c.0.0, &c.1));
+        let walk: Vec<(f64, u64, Site)> = cands.iter().map(|c| c.0).collect();
+        match walk_target(fauna, i, view, fv, &walk, glider.fruit_search_m, 1.0) {
+            Some((go, k)) => match crave_check(fauna, i, view, fv, need, cands[k].1.tissue_per_organic()) {
+                Some(check) => Some((check, crate::Steer::Check)),
+                None => {
+                    fauna.walking_to(a.id, walk[k].1, crate::Steer::Fruit);
+                    Some((go, crate::Steer::Fruit))
+                }
+            },
+            None => None,
+        }
     };
     if let Some(go) = fruit {
-        return Some((go, crate::Steer::Fruit));
+        return Some(go);
     }
     check_tree(fauna, i, view, fv).map(|go| (go, crate::Steer::Check))
 }
@@ -2077,6 +2108,20 @@ fn wall_approach(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraVi
 /// `None` (its heuristic wanders) when it knows of none.
 /// Still fruit sources selected by the fruit reflex's own sight and climb tests.
 pub(crate) fn fruit_candidates(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, range: f64) -> Option<Vec<(f64, u64, Site, (f64, f64, f64))>> {
+    fruit_offers(fauna, i, view, fv, range, false).map(|v| v.into_iter().map(|(d, id, site, at, _)| (d, id, site, at)).collect())
+}
+
+/// A still food source the fruit reflex sees: `(distance from the eye, walk key, the walk's
+/// site, the point seen, what it offers there)`.
+type Offer = (f64, u64, Site, (f64, f64, f64), crate::crave::Fare);
+
+/// [`fruit_candidates`], each with what it offers this body ([`crate::crave::Fare`], SP-CRAVE):
+/// a stand's hanging fruit it sees, a vine face's beads, and the larvae it sees on a host
+/// (added to the same source's fruit when both are seen there). A vine face offers the beads
+/// of the patch a mouth there reaches (VINE-C: one bite draws on all of them) when `patches`
+/// asks for it (a craving body weighs its offers), else its own.
+fn fruit_offers(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, range: f64, patches: bool) -> Option<Vec<Offer>> {
+    use crate::crave::Fare;
     let a = fauna.animals[i];
     let founder = a.founder?;
     let phys = *fauna.config.founder(founder);
@@ -2089,7 +2134,7 @@ pub(crate) fn fruit_candidates(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv
     let origin = crate::senses::cone_origin(view, &a.pose, a.sense_layer(v), &geometry);
     let cos_half = table.sight_half_angle_deg.to_radians().cos() - 1e-12;
     let (fx, fz) = a.pose.forward();
-    let mut seen: Vec<(f64, u64, Site, (f64, f64, f64))> = Vec::new();
+    let mut seen: Vec<Offer> = Vec::new();
     if range > 0.0 {
         for stand in fv.stands.iter().filter(|s| s.fruit > 0.0 && climbable(fv, s, &glider)) {
             let sx = (f64::from(stand.site.x) + 0.5) * v;
@@ -2105,7 +2150,9 @@ pub(crate) fn fruit_candidates(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv
             if !fruit_in_sight(fv, stand, d3) {
                 continue;
             }
-            seen.push((d3, stand.id, stand.site, (sx, my, sz)));
+            let mut fare = Fare::default();
+            fare.stand_fruit(fv, &phys, stand, stand.fruit);
+            seen.push((d3, stand.id, stand.site, (sx, my, sz), fare));
         }
     }
     // REACH-HEIGHTS: fruit on a vine is food too. Sight is at the bead face, while
@@ -2122,20 +2169,28 @@ pub(crate) fn fruit_candidates(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv
             let Some(foot) = flight::support_below(view, sx, sz, my) else { continue };
             let (low, high) = body_rows(crate::surface_m(foot.y, v), shape(&phys, a.body), v);
             if !(low..=high).any(|row| row >= 0 && fv.cover.face(VineFace::new(face.x, row as u32, face.z, face.dir)).is_some()) { continue; }
-            seen.push((d3, vine_fruit_key(view, face), foot, (sx, my, sz)));
+            let mut fare = Fare::default();
+            let stock = if patches {
+                let reach = shape(&phys, a.body).r + phys.body_at(a.body).mouth_reach_m;
+                flight::vine_patch(view, fv, (sx, my, sz), reach, cubarium_voxel_flora::SpurPhase::Fruit).iter().map(|r| r.stock).sum::<f64>().max(fruit.fruit)
+            } else {
+                fruit.fruit
+            };
+            fare.vine_fruit(fv, &phys, stock);
+            seen.push((d3, vine_fruit_key(view, face), foot, (sx, my, sz), fare));
         }
     }
     // LARVA §4: a host's larvae are seen by close search, within its larva sight.
     let near = range.min(phys.larva_sight_m);
     if near > 0.0 && phys.eating_diet().eats(Food::Larva) {
         for (host, h) in fauna.larvae.hosts() {
-            if crate::larva::visible(fauna, *host).is_none() {
+            let Some((_, tissue)) = crate::larva::visible(fauna, *host) else {
                 continue;
-            }
+            };
             match *host {
                 crate::larva::LarvaHost::Stand(id) => {
                     let Some(stand) = fv.stand_in(h.site, cubarium_voxel_flora::FaceLayer::Plant).filter(|s| s.id == id) else { continue };
-                    if !climbable(fv, stand, &glider) || seen.iter().any(|s| s.1 == id) {
+                    if !climbable(fv, stand, &glider) {
                         continue;
                     }
                     let Some((low, high)) = crate::larva::crown_band(fv, stand) else { continue };
@@ -2148,7 +2203,14 @@ pub(crate) fn fruit_candidates(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv
                     if d3 > near || (dh > 0.0 && (dx * fx + dz * fz) / dh < cos_half) {
                         continue;
                     }
-                    seen.push((d3, id, stand.site, (sx, my, sz)));
+                    // Seen with its fruit: the larvae join that source's offer.
+                    if let Some(s) = seen.iter_mut().find(|s| s.1 == id) {
+                        s.4.larvae(fauna, &phys, h.lineage, tissue);
+                        continue;
+                    }
+                    let mut fare = Fare::default();
+                    fare.larvae(fauna, &phys, h.lineage, tissue);
+                    seen.push((d3, id, stand.site, (sx, my, sz), fare));
                 }
                 crate::larva::LarvaHost::Vine(_) => {
                     let Some(face) = h.anchor else { continue };
@@ -2162,17 +2224,20 @@ pub(crate) fn fruit_candidates(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv
                     }
                     let Some(foot) = flight::support_below(view, sx, sz, my) else { continue };
                     let key = vine_fruit_key(view, face);
-                    if seen.iter().any(|s| s.1 == key) {
+                    if let Some(s) = seen.iter_mut().find(|s| s.1 == key) {
+                        s.4.larvae(fauna, &phys, h.lineage, tissue);
                         continue;
                     }
-                    seen.push((d3, key, foot, (sx, my, sz)));
+                    let mut fare = Fare::default();
+                    fare.larvae(fauna, &phys, h.lineage, tissue);
+                    seen.push((d3, key, foot, (sx, my, sz), fare));
                 }
             }
         }
     }
     seen.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
     // EDGE: of those it sees, the nearest it can walk to on its route graph.
-    let clear: Vec<(f64, u64, Site, (f64, f64, f64))> = seen.into_iter().filter(|s| crate::perception::line_clear(view, a.id, origin, s.3)).collect();
+    let clear: Vec<Offer> = seen.into_iter().filter(|s| crate::perception::line_clear(view, a.id, origin, s.3)).collect();
     Some(clear)
 }
 
@@ -2314,17 +2379,53 @@ fn vine_hosts_within(
         .collect()
 }
 
-fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, day: bool) -> Option<Actions> {
+/// **SP-CRAVE: the sources in order of worth** to body `a` for `need` ([`crate::crave::worth`]),
+/// most first, today's order (nearest first) among equals; with no need, today's order.
+fn by_worth<T: Copy>(fauna: &Fauna, a: &Animal, phys: &crate::FounderPhysiology, need: crate::crave::Need, offers: &mut [T], of: impl Fn(&T) -> (f64, &crate::crave::Fare)) {
+    if need == crate::crave::Need::None {
+        return;
+    }
+    let mut keyed: Vec<(f64, usize, T)> = offers.iter().enumerate().map(|(k, o)| {
+        let (d, fare) = of(o);
+        (crate::crave::worth(fauna, a, phys, need, fare, d), k, *o)
+    }).collect();
+    keyed.sort_by(|p, q| q.0.total_cmp(&p.0).then(p.1.cmp(&q.1)));
+    for (slot, (_, _, o)) in offers.iter_mut().zip(keyed) {
+        *slot = o;
+    }
+}
+
+/// **SP-CRAVE: the check before plain food**: a body craving nitrogen whose walk would take it
+/// to food funding less tissue per organic than a check could find
+/// ([`crate::crave::hidden_tissue_per_organic`]) checks a tree instead, when one is on offer.
+fn crave_check(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, need: crate::crave::Need, tissue_per_organic: f64) -> Option<Actions> {
+    if need != crate::crave::Need::Nitrogen {
+        return None;
+    }
+    let phys = *fauna.config.founder(fauna.animals[i].founder?);
+    if tissue_per_organic >= crate::crave::hidden_tissue_per_organic(fauna, fv, &phys) {
+        return None;
+    }
+    check_tree(fauna, i, view, fv)
+}
+
+fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, day: bool) -> Option<(Actions, crate::Steer)> {
     let a = fauna.animals[i];
     let phys = *fauna.config.founder(a.founder?);
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
     let now = fauna.tick;
     let range = phys.senses.sight_range_m(day) * phys.senses.sight_still_fraction.max(0.0);
-    let clear = fruit_candidates(fauna, i, view, fv, range)?;
+    let need = crate::crave::cravings(fauna, i).need();
+    let mut clear = fruit_offers(fauna, i, view, fv, range, need != crate::crave::Need::None)?;
+    by_worth(fauna, &a, &phys, need, &mut clear, |o| (o.0, &o.4));
     let cands: Vec<(f64, u64, Site)> = clear.iter().map(|s| (s.0, s.1, s.2)).collect();
-    if let Some((go, k)) = walk_to_stand(fauna, i, view, fv, &cands, range, 1.0, crate::Steer::Fruit) {
-        let (d, id, site, (sx, _, sz)) = clear[k];
+    if let Some((go, k)) = walk_target(fauna, i, view, fv, &cands, range, 1.0) {
+        if let Some(go) = crave_check(fauna, i, view, fv, need, clear[k].4.tissue_per_organic()) {
+            return Some((go, crate::Steer::Check));
+        }
+        fauna.walking_to(a.id, cands[k].1, crate::Steer::Fruit);
+        let (d, id, site, (sx, _, sz), _) = clear[k];
         let p = fauna.percepts.entry(a.id).or_default();
         let food = crate::perception::class::FOOD as usize;
         p.best[food] = crate::Track {
@@ -2340,11 +2441,11 @@ fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraV
             tick: now,
             ..crate::Track::default()
         };
-        if let Some(into) = fruit_wall_approach(fauna, i, view, fv, id) { return Some(into); }
-        return Some(go);
+        if let Some(into) = fruit_wall_approach(fauna, i, view, fv, id) { return Some((into, crate::Steer::Fruit)); }
+        return Some((go, crate::Steer::Fruit));
     }
     // None it sees and can reach: the one it last saw, for the pursuit's memory while that
-    // stand or vine face still fruits.
+    // stand or vine face still fruits. SP-CRAVE: craving nitrogen, a check first.
     let food = crate::perception::class::FOOD as usize;
     let m = fauna.percepts.get(&a.id).map(|p| p.best[food]).unwrap_or_default();
     let memory = cubarium_voxel::ticks_at_least_one(fauna.config.perception.give_up_s);
@@ -2353,10 +2454,13 @@ fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraV
     if !(m.known && now.saturating_sub(m.tick) <= memory && fruits(m.id)) {
         return None;
     }
-    if let Some(into) = fruit_wall_approach(fauna, i, view, fv, m.id) { return Some(into); }
+    if let Some(go) = crave_check(fauna, i, view, fv, need, 0.0) {
+        return Some((go, crate::Steer::Check));
+    }
+    if let Some(into) = fruit_wall_approach(fauna, i, view, fv, m.id) { return Some((into, crate::Steer::Fruit)); }
     let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, m.x, m.z, ring);
     let site = Site { x: m.site.0, y: m.site.1, z: m.site.2 };
-    walk_to_stand(fauna, i, view, fv, &[((dx * dx + dz * dz).sqrt(), m.id, site)], range, 1.0, crate::Steer::Fruit).map(|(go, _)| go)
+    walk_to_stand(fauna, i, view, fv, &[((dx * dx + dz * dz).sqrt(), m.id, site)], range, 1.0, crate::Steer::Fruit).map(|(go, _)| (go, crate::Steer::Fruit))
 }
 
 /// **SP-FOLLOW: the walk to its mother** ([`crate::nurse::MotherGoal::Go`]) for the glider at

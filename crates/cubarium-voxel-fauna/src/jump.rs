@@ -56,20 +56,37 @@ pub struct DropRule {
     /// The wound a landing adds per metre dropped beyond its `step_down_m` (a wound of 1
     /// kills).
     pub wound_per_m: f64,
+    /// **SP-CRAVE: the deepest jump into water** an adult takes, metres from its ledge to the
+    /// water's surface; a smaller body's is this × its height over the adult's. Only into
+    /// water deeper than it wades from which it swims or wades out to its graph
+    /// ([`crate::RouteGraph::wade_way`], the wade-out's own way), and only with no dry jump
+    /// on offer. Water softens the landing: the wound is `wound_per_m` per metre over the
+    /// surface beyond its step. 0: never into water.
+    pub water_max_m: f64,
 }
 
 impl Default for DropRule {
     /// No jump.
     fn default() -> DropRule {
-        DropRule { after_s: 30.0, max_m: 0.0, wound_per_m: 0.0 }
+        DropRule { after_s: 30.0, max_m: 0.0, wound_per_m: 0.0, water_max_m: 0.0 }
     }
 }
 
 impl DropRule {
     /// The deepest jump down the body `body` of lineage `phys` takes, metres.
     pub fn reach_m(&self, phys: &FounderPhysiology, body: &crate::Body) -> f64 {
+        Self::scaled(self.max_m, phys, body)
+    }
+
+    /// SP-CRAVE: the deepest jump into water the body `body` of lineage `phys` takes, metres
+    /// to the surface.
+    pub fn water_reach_m(&self, phys: &FounderPhysiology, body: &crate::Body) -> f64 {
+        Self::scaled(self.water_max_m, phys, body)
+    }
+
+    fn scaled(adult_m: f64, phys: &FounderPhysiology, body: &crate::Body) -> f64 {
         let ratio = if phys.adult_height_m > 0.0 { body.height_m / phys.adult_height_m } else { 1.0 };
-        let reach = self.max_m * ratio;
+        let reach = adult_m * ratio;
         if reach.is_finite() { reach.max(0.0) } else { 0.0 }
     }
 
@@ -91,8 +108,13 @@ pub fn drop_of(founder: Founder) -> DropRule {
         Founder::Chorister => DropRule { max_m: 3.0, wound_per_m: 0.08, ..none },
         // 0.45 m tall: four heights.
         Founder::Lanternjaw => DropRule { max_m: 1.8, wound_per_m: 0.1, ..none },
-        // 0.2 m tall, an arboreal climber that lands on its hands: eight heights.
-        Founder::Seedporter => DropRule { max_m: 1.6, wound_per_m: 0.1, ..none },
+        // 0.2 m tall, an arboreal climber that lands on its hands: eight heights. SP-CRAVE:
+        // into water it swims out of from 4 m (twenty heights; a 4 m drop to the surface
+        // wounds 0.375): small arboreal mammals survive falls from any height (Haldane), and
+        // monkeys leap from branches into rivers to cross or escape (proboscis monkeys, from
+        // 10 m and more). A hollow on s5 whose only edge fell 2.75 m into deep water held one
+        // for hours (SP-PROTEIN).
+        Founder::Seedporter => DropRule { max_m: 1.6, wound_per_m: 0.1, water_max_m: 4.0, ..none },
         // The armoured frondgrazer, 0.375 m tall: three heights.
         Founder::Browser => DropRule { max_m: 1.1, wound_per_m: 0.15, ..none },
         // 3.4 m tall on long legs that step 1.15 m: heavy, so a drop hurts it most.
@@ -157,7 +179,10 @@ pub(crate) fn reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flo
     let step = phys.step_limits(v);
     let reach = crate::body::step_voxels(rule.reach_m(&phys, &body), v);
     let grounded = a.mobility.mode == crate::MobilityMode::Ground && a.mobility.climb.is_none() && phys.flight.is_none();
-    if reach <= step.down {
+    // SP-CRAVE: into water it swims out of, past its step.
+    let water_reach = rule.water_reach_m(&phys, &body);
+    let wet = phys.wade.swim_out && !phys.aquatic && water_reach > f64::from(step.down) * v;
+    if reach <= step.down && !wet {
         fauna.trapped.remove(&a.id);
         fauna.drop_plans.remove(&a.id);
         return None;
@@ -208,7 +233,16 @@ pub(crate) fn reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flo
     let r = body.footprint_radius();
     let own = (r / v).ceil().max(0.0) as u32;
     let cols = if tc.way_on_m.is_finite() && tc.way_on_m > 0.0 { (tc.way_on_m / v).ceil() as u32 } else { 0 };
-    let Some(way) = graph.drop_way(view, a.site, (a.pose.x, a.pose.z), r, body.headroom_voxels(v), step, reach, phys.wade_depth_m(&body), own, cols) else {
+    let headroom = body.headroom_voxels(v);
+    let wade = phys.wade_depth_m(&body);
+    let way = if wet {
+        let shallows = fauna.config.life.shallows_search_m;
+        let out = |land: Site| water_way_out(&graph, view, &phys, &body, land, cols, shallows);
+        graph.drop_way_into(view, a.site, (a.pose.x, a.pose.z), r, headroom, step, reach, wade, own, cols, &crate::encounter::WaterDrop { reach_m: water_reach, out: &out })
+    } else {
+        graph.drop_way(view, a.site, (a.pose.x, a.pose.z), r, headroom, step, reach, wade, own, cols)
+    };
+    let Some(way) = way else {
         fauna.drop_plans.remove(&a.id);
         return None;
     };
@@ -263,7 +297,14 @@ pub(crate) fn take_off(fauna: &mut Fauna, i: usize, founder: Founder, view: &Vox
         return;
     }
     let layers = plan.from.y - plan.land.y;
-    let drop_m = f64::from(layers) * v;
+    // SP-CRAVE: into water deeper than it wades, the water softens the landing: the drop is
+    // counted to the surface.
+    let depth = view.water_depth_m(i64::from(plan.land.x), plan.land.y, plan.land.z);
+    let drop_m = if depth > phys.wade_depth_m(&phys.body_at(a.body)) {
+        (crate::surface_m(plan.from.y, v) - (crate::surface_m(plan.land.y, v) + depth)).max(0.0)
+    } else {
+        f64::from(layers) * v
+    };
     let w = phys.drop.wound(&phys, drop_m);
     let b = &mut fauna.animals[i];
     b.pose.x = lx.rem_euclid(ring);
@@ -328,8 +369,8 @@ pub(crate) struct WadeWay {
 
 /// The way's time, in multiples of walking it at cruise, and the margin added: a bound
 /// against a way the motor cannot finish, not a knob.
-const WADE_TIME_FACTOR: f64 = 4.0;
-const WADE_TIME_MARGIN_S: f64 = 10.0;
+pub(crate) const WADE_TIME_FACTOR: f64 = 4.0;
+pub(crate) const WADE_TIME_MARGIN_S: f64 = 10.0;
 
 /// **The wade-out reflex** for the due body at `i` ([`Wade`]): `None` unless it is held, has
 /// been for its lineage's `drop.after_s`, and has (or now finds) a way out; then the walk to
@@ -484,6 +525,36 @@ pub(crate) fn wade_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> 
         w.way = Some(WadeWay { faces, wade_m: wade_m.max(wade), until });
     }
     Some(aim(&a, next))
+}
+
+/// **SP-CRAVE: whether a body landing on `land`** (under water deeper than it wades) **gets
+/// out**: the wade-out's own way ([`wade_reflex`]) from there, with its whole drown clock to
+/// cross water it is under, out to `life.shallows_search_m` (`shallows_m`), to a face it wades
+/// on an open part of its graph (for a body smaller than the graph's adult, outside its own
+/// wading pockets).
+#[allow(clippy::too_many_arguments)]
+fn water_way_out(
+    graph: &crate::RouteGraph,
+    view: &VoxelView<'_>,
+    phys: &FounderPhysiology,
+    body: &crate::Body,
+    land: Site,
+    cols: u32,
+    shallows_m: f64,
+) -> bool {
+    let v = view.config.voxel_m;
+    let wade = phys.wade_depth_m(body);
+    let r = body.footprint_radius();
+    let own = (r / v).ceil().max(0.0) as u32;
+    let headroom = body.headroom_voxels(v);
+    let step = phys.step_limits(v);
+    let side = 2 * cols as usize + 1;
+    let reach_cols = if shallows_m.is_finite() && shallows_m > 0.0 { (shallows_m / v).ceil() as u32 } else { 0 };
+    let max_under = (phys.drown_ticks() as f64 * cubarium_voxel::DT * a_cruise(phys) / (WADE_TIME_FACTOR * v)).floor().clamp(0.0, f64::from(u32::MAX)) as u32;
+    let goal_wade = if wade > crate::body::LEVEL_TOLERANCE_M { wade - crate::body::LEVEL_TOLERANCE_M } else { wade };
+    let small = wade < phys.wade_depth_m(&phys.adult_body());
+    let mut accept = |f: Site| !small || !graph.wade_pocket(view, f, r, headroom, step, goal_wade, cols).0;
+    graph.wade_way(view, land, r, headroom, step, (goal_wade, phys.drown_depth_m(body), max_under), own, side * side, reach_cols, &mut accept).is_some()
 }
 
 /// The lineage's walking cruise, m/s (never zero).
