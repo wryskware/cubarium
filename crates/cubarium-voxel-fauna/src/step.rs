@@ -7628,6 +7628,9 @@ mod hunt_escape_tests;
 #[cfg(test)]
 #[path = "traps_tests.rs"]
 mod traps_tests;
+#[cfg(test)]
+#[path = "sp_protein_tests.rs"]
+mod sp_protein_tests;
 
 /// Begin the common windup, used by walking and perched catchers.
 pub(crate) fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {

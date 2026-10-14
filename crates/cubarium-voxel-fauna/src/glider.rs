@@ -1193,11 +1193,37 @@ fn glider_feed(
     if !fauna.animals[i].eating {
         return false;
     }
-    let founder = fauna.animals[i].founder.expect("a founder body");
     let Some((source, stock)) = glider_fruit_in_reach(view, &flora.view(), &fauna.animals[i], phys) else {
         // LARVA: no fruit at the mouth, so the larvae of a host it holds or touches.
         return glider_larva_feed(fauna, i, view, flora, manifest, phys, effort);
     };
+    // SP-PROTEIN: larvae at the same mouth share the bite with the fruit, each in proportion
+    // to what it holds there, as a vine bite draws on every fruiting face in reach (VINE-C).
+    // It was fruit first: on a fruiting vine, its own larvae were never eaten.
+    let larvae = glider_larva_in_reach(fauna, view, &flora.view(), &fauna.animals[i], phys).map_or(0.0, |(_, s)| s);
+    if larvae > 0.0 && stock > 0.0 {
+        let share = larvae / (larvae + stock);
+        let ate_larvae = glider_larva_feed(fauna, i, view, flora, manifest, phys, effort * share);
+        let ate_fruit = glider_fruit_bite(fauna, i, view, flora, manifest, phys, effort * (1.0 - share), source, stock);
+        return ate_larvae || ate_fruit;
+    }
+    glider_fruit_bite(fauna, i, view, flora, manifest, phys, effort, source, stock)
+}
+
+/// The fruit share of a bite at `effort` from `source` holding `stock` ([`glider_feed`]).
+#[allow(clippy::too_many_arguments)]
+fn glider_fruit_bite(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    manifest: &crate::Manifest,
+    phys: &crate::FounderPhysiology,
+    effort: f64,
+    source: Bloom,
+    stock: f64,
+) -> bool {
+    let founder = fauna.animals[i].founder.expect("a founder body");
     // FORAGE-LEAVE: what this crown or vine offers the mouth; a crown is the stand the
     // fruit search would walk back to.
     let key = match source {
@@ -2189,6 +2215,10 @@ fn check_tree(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<
         near.extend(vine_hosts_within(fauna, view, fv, &a, &phys, search));
         near.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
     }
+    // SP-PROTEIN: a walk overdue on its aim is given up (the host then reads as remembered
+    // empty, so `order` drops it), and the walk's clock runs only while it walks.
+    let bound = crate::treecheck::walk_bound(fauna, &a)?;
+    crate::treecheck::give_up_if_overdue(fauna, a.id, bound);
     let aim = crate::treecheck::aim_of(fauna, a.id);
     let cands = crate::treecheck::order(&near, aim, |host| crate::treecheck::recall(fauna, a.id, host, now, memory));
     let walk: Vec<(f64, u64, Site)> = cands.iter().map(|c| (c.0, c.2.0, c.2.1)).collect();
@@ -2219,7 +2249,7 @@ fn check_tree(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<
         },
         None => walk_to_stand(fauna, i, view, fv, &walk, search, 1.0, crate::Steer::Check)?,
     };
-    crate::treecheck::aim(fauna, a.id, cands[k].1);
+    crate::treecheck::aim(fauna, a.id, cands[k].1, bound);
     if let Some(face) = cands[k].2.2
         && let Some(into) = wall_approach(fauna, i, view, fv, face, walk[k].1, crate::Steer::Check)
     {

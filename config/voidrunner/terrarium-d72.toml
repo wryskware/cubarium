@@ -271,6 +271,8 @@ gut.digestion_s.foliage = 385.71318367661803
 gut.digestion_s.film = 385.71318367661803
 gut.digestion_s.nectar = 385.71318367661803
 gut.digestion_s.fruit = 385.71318367661803
+# SP-PROTEIN: insect flesh digests as the other foods here (GUT-MASS rescaled every class but larva, added later; it ran at the code default 60 s, 6x faster than carrion).
+gut.digestion_s.larva = 385.71318367661803
 mass_scale = 60.0
 
 # R3: the chorister, a diurnal pack hunter (frondgrazer, loftstrider, lanternjaw,

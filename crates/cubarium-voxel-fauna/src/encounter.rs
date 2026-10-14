@@ -1181,6 +1181,15 @@ impl RouteGraph {
                         (from.0, fz + (0.5 - 1e-3) * dz as f64 * v)
                     };
                     let to = self.toward(from, to);
+                    // SP-PROTEIN: a centre already at or past that point along the edge's axis
+                    // is at the edge (its disc reaches over it, as the jump's own test reads).
+                    // A body pressed back into the corner of a one-column perch stands there,
+                    // and its walk "to the edge" went back into the wall behind it, so it found
+                    // no jump and stayed (a seedporter on one column for hours, 2026-10-13).
+                    let ahead = if dx != 0 { (to.0 - from.0) * dx as f64 } else { (to.1 - from.1) * dz as f64 };
+                    if ahead <= 0.0 {
+                        return true;
+                    }
                     crate::body::motor_walk(view, from, to, f.y, r, wade_m.max(water(f)), headroom, step) == Some(f.y)
                 };
                 let reached = if f == site {

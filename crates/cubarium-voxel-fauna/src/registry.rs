@@ -563,6 +563,7 @@ fn founder_rows() -> Vec<Row> {
         r("glider.roost_ledge_min_m", "m", nonneg, "a roost ledge stands at least this over the foot of its vine wall").optional(),
         r("glider.check_search_m", "m", nonneg, "NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees)").optional().search(0.0, 32.0),
         r("glider.check_memory_s", "s", nonneg, "NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets)").optional().search(0.0, 14400.0),
+        r("glider.check_walk_factor", "ratio", Range::positive(), "SP-PROTEIN: a check walk is given up after walking this many times its longest route (route_detour x check_search_m) at its own cruise without arriving, and lapses when not walked that long (a giving-up time growing with patch distance, Charnov 1976)").optional().search(0.5, 8.0),
         // Gut seeds (`GutSeeds`, F3): the seedporter's only, optional on the others.
         r("gut_seeds.seeds_per_fruit_organic", "org-units per org-unit of fruit", fraction, "share of a fruit meal that is the source's seeds, carried in the gut").optional(),
         r("gut_seeds.gut_transit_s", "s", nonneg, "a meal's seeds are voided at the body's face this long after it").optional(),

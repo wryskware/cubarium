@@ -1275,6 +1275,17 @@ pub struct Glider {
     /// half a world day; a nut crop rests 2 h).
     #[serde(default = "check_memory_s")]
     pub check_memory_s: f64,
+    /// **SP-PROTEIN: how long a check walk may take**, a ratio: a walk to a host is given up
+    /// once it has spent this many times the longest route a reflex walk takes to the edge of
+    /// its search (`teachers.route_detour` × `check_search_m`) at its own cruise walking
+    /// toward it without arriving, and the host is not checked again within the memory; a walk
+    /// not walked for that long has lapsed and starts afresh ([`crate::treecheck::walk_bound`]).
+    /// A giving-up time that grows with the distance to the patch, as foragers' do (Charnov
+    /// 1976, *Theor. Pop. Biol.* 9, the marginal value theorem; coarse). It was unbounded: a
+    /// walk ended only on arrival, so a body cornered by its host walked at it for hours.
+    /// 2.0 (room for the turns, a press and a climb back down on the way).
+    #[serde(default = "check_walk_factor")]
+    pub check_walk_factor: f64,
 }
 
 fn roost_search_m() -> f64 {
@@ -1305,6 +1316,10 @@ fn check_memory_s() -> f64 {
     Glider::SEEDPORTER.check_memory_s
 }
 
+fn check_walk_factor() -> f64 {
+    Glider::SEEDPORTER.check_walk_factor
+}
+
 impl Glider {
     /// The seedporter's table (predation-and-flight §3.5, §3.9; Brief F3; placeholders):
     /// climbs stands from 1 m, glides from 1 m at 2.5 : 1 and 2 × its cruise for 1.2 × basal.
@@ -1321,6 +1336,7 @@ impl Glider {
         roost_ledge_min_m: 1.0,
         check_search_m: 16.0,
         check_memory_s: 3600.0,
+        check_walk_factor: 2.0,
     };
 }
 

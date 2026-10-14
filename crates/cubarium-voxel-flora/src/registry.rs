@@ -220,7 +220,7 @@ fn species_rows() -> Vec<Row> {
         r("pollination_visits", "visits", nonneg, "FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit")
             .search(0.0, 10.0).prov("decision"),
         r("fruit_mineral_fraction", "fraction of organic", fraction, "mineral a unit of fruit carries (small, not zero)").grade("N").prov("decision"),
-        r("fruit_handling", "fraction of a plain fruit's bite", Range::closed(0.0, 1.0).open_lo(), "NUTS: scales a frugivore's bite of this fruit (vaulttree nuts 0.33: ~3x a fruit's feeding time, as a squirrel opening a kernel against pulp)")
+        r("fruit_handling", "fraction of a plain fruit's bite", Range::closed(0.0, 1.0).open_lo(), "NUTS: scales a frugivore's bite of this fruit (vaulttree nuts 1.0, SP-PROTEIN: per dry organic a squirrel's ~1 g kernel in 0.5-2 min matches pulp at several wet g/min, 75-85 % water)")
             .search(0.1, 1.0).grade("N").prov("decision"),
         r("fruit_seeds_in_gut", "switch (true / false)", finite, "NUTS: an eaten fruit's seeds ride in the gut and are voided alive (false: a nut, the seed itself, destroyed)")
             .optional().grade("N").prov("decision"),

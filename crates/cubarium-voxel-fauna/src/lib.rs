@@ -4428,6 +4428,10 @@ pub struct Fauna {
     /// NUTS: the tree checks' readout ([`treecheck::CheckTally`]). Session state.
     #[serde(skip)]
     pub(crate) check_tally: treecheck::CheckTally,
+    /// SP-PROTEIN: each glider's check walk under way ([`treecheck::CheckWalk`]): when it last
+    /// walked toward its aim and how long it has. Session state: not saved.
+    #[serde(skip)]
+    pub(crate) check_walks: FxHashMap<u64, treecheck::CheckWalk>,
     /// NUTS: the tick the dead's tree-check memories were last pruned. Session state.
     #[serde(skip)]
     pub(crate) check_pruned: Option<u64>,
@@ -5071,6 +5075,7 @@ impl Fauna {
             hounds: FxHashMap::default(),
             tree_checks: FxHashMap::default(),
             check_tally: Default::default(),
+            check_walks: FxHashMap::default(),
             check_pruned: None,
             hound_teach: FxHashMap::default(),
             ls_teach: FxHashMap::default(),

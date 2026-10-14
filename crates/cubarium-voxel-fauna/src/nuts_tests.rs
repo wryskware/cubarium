@@ -264,8 +264,9 @@ fn a_nut_bite_moves_the_mineral_share_and_its_energy_from_the_stand_into_the_eat
 /// **At equal stock and time, a handled fruit's bite is `fruit_handling` × an unhandled one.**
 #[test]
 fn a_handled_fruits_bite_is_its_handling_times_a_plain_one() {
-    let h = FloraConfig::default().vaulttree.fruit_handling;
-    assert!(h > 0.0 && h < 1.0, "fixture: the vaulttree's nuts are handled");
+    // A fixture handling: the law is the knob's scaling, whatever the vaulttree ships with
+    // (SP-PROTEIN set it to 1, a nut eaten as fast as pulp per dry organic).
+    let h = 0.5;
     let bite = |handling: f64| {
         let mut c = nut_flora();
         c.vaulttree.fruit_handling = handling;
