@@ -3354,6 +3354,13 @@ pub struct FaunaLedger {
     /// `assimilated_intake` channel reports.
     pub bites_by_founder: [u64; Founder::COUNT],
     pub assimilated_by_founder: [f64; Founder::COUNT],
+    /// N-POOL, by lineage, mineral units: digested protein N into the absorbed-N pool, and N
+    /// the pool built into reserve tissue (with a bite's carbon or the fuel's). A diagnostic:
+    /// no rule reads either.
+    #[serde(default)]
+    pub n_absorbed_by_founder: [f64; Founder::COUNT],
+    #[serde(default)]
+    pub n_built_by_founder: [f64; Founder::COUNT],
     /// Bites and the **gross** organic matter they took, by the [`Food`] class the
     /// mouth took them from.
     ///

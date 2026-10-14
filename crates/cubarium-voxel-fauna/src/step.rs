@@ -5277,6 +5277,7 @@ fn assimilate_food(
     digestibility: f64,
 ) -> f64 {
     let a = &mut fauna.animals[i];
+    let tissue_n = a.mineral;
     // Protein N: the digestible share joins the pool, the rest leaves with the dung.
     let n_in = (digestibility.clamp(0.0, 1.0) * t.mineral).max(0.0);
     a.n_pool += n_in;
@@ -5321,7 +5322,9 @@ fn assimilate_food(
     a.gut.energy += egested_energy;
     // N the bite's carbon could not match builds with the stored fuel's.
     let from_fuel = pair_pool_with_fuel(a, sc);
+    let built = a.mineral - tissue_n;
 
+    book_pool(fauna, i, n_in, built);
     book_respired(fauna, respired, Respiration::Digestion);
     fauna.ledger.heat_out += heat;
     placed + from_fuel
@@ -5339,6 +5342,14 @@ fn take_pool_n(a: &mut Animal, sc: &SpeciesConfig, placed: f64) {
     let n = (sc.n_tissue * placed).clamp(0.0, a.n_pool.max(0.0));
     a.n_pool -= n;
     a.mineral += n;
+}
+
+/// The N-POOL diagnostics: N into the pool and N it built, by lineage.
+fn book_pool(fauna: &mut Fauna, i: usize, absorbed: f64, built: f64) {
+    if let Some(f) = fauna.animals[i].founder {
+        fauna.ledger.n_absorbed_by_founder[f.index()] += absorbed;
+        fauna.ledger.n_built_by_founder[f.index()] += built;
+    }
 }
 
 /// The brood (D1b): a mature body earmarks its share of the income for its next clutch,
@@ -5386,7 +5397,9 @@ fn n_pool_step(fauna: &mut Fauna) {
         }
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
         let a = &mut fauna.animals[i];
+        let tissue_n = a.mineral;
         pair_pool_with_fuel(a, &sc);
+        let built = a.mineral - tissue_n;
         let kept = if sc.n_pool_half_life_s > 0.0 {
             0.5f64.powf(DT / sc.n_pool_half_life_s)
         } else {
@@ -5397,6 +5410,7 @@ fn n_pool_step(fauna: &mut Fauna) {
         let lost = a.n_pool - after;
         a.n_pool = after;
         a.gut.mineral += lost;
+        book_pool(fauna, i, 0.0, built);
     }
 }
 
