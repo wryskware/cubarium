@@ -125,6 +125,9 @@ pub struct LineageUpdate {
     /// their records are written as before.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub twins: Option<crate::es::voxel::kin::twins::TwinsReadout>,
+    /// The `policy_gradient` comparison's readout (PG-PILOT); absent for every other lineage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pg: Option<crate::es::voxel::pg::PgReadout>,
 }
 
 /// One world replaced after a generation.
@@ -165,6 +168,8 @@ struct Lineage {
     theta: Vec<f64>,
     adam: Adam,
     template: BrainFile,
+    /// The policy-gradient learner's state (PG-PILOT); `None` for every other comparison.
+    pg: Option<crate::es::voxel::pg::PgState>,
 }
 
 impl Lineage {
@@ -202,7 +207,30 @@ impl Lineage {
         };
         let mut adam = Adam::new(theta.len());
         adam.learning_rate = spec.learning_rate;
-        let l = Lineage { founder, theta, adam, template };
+        let kin = spec.kin.of(founder);
+        let pg = if kin.comparison == crate::es::voxel::kin::Comparison::PolicyGradient {
+            let BrainFile::TwoLayer(f) = &template else {
+                return Err(format!(
+                    "{}: the policy_gradient comparison trains a two-layer brain's top; {} is a plain centre",
+                    founder.name(),
+                    path.display()
+                ));
+            };
+            if !f.shape.has_top() {
+                return Err(format!("{}: the policy_gradient comparison needs a brain with a top", founder.name()));
+            }
+            if spec.stomach_aware_reward {
+                return Err(format!(
+                    "{}: the policy_gradient comparison reads body energy; the stomach-aware reward is not wired for it",
+                    founder.name()
+                ));
+            }
+            adam.learning_rate = kin.pg.policy_lr;
+            Some(crate::es::voxel::pg::PgState::new(&f.shape, &kin.pg, spec.train_seed ^ founder.index() as u64))
+        } else {
+            None
+        };
+        let l = Lineage { founder, theta, adam, template, pg };
         // Validates length, finiteness and this build's digest, and the world's mass.
         super::search::check_mass(&[(founder, l.driver(spec)?)], &spec.ecology)?;
         Ok(l)
@@ -245,13 +273,29 @@ impl Lineage {
         spec.kin.of(self.founder).comparison == crate::es::voxel::kin::Comparison::Twins
     }
 
+    /// Whether the lineage is on the `policy_gradient` comparison (PG-PILOT).
+    fn policy_gradient(&self) -> bool {
+        self.pg.is_some()
+    }
+
     /// Its pairs per generation: the run's, or its twins layout's.
     fn pairs(&self, spec: &LiveSpec) -> usize {
         if self.twins(spec) { spec.kin.of(self.founder).twins.pairs } else { spec.pairs }
     }
 
-    /// This generation's `2·pairs` variants.
+    /// This generation's `2·pairs` variants (a `policy_gradient` lineage: the centre,
+    /// exploring).
     fn table(&self, spec: &LiveSpec, generation: u32) -> Result<VariantTable, String> {
+        if let (true, BrainFile::TwoLayer(f)) = (self.policy_gradient(), &self.template) {
+            return Ok(VariantTable::explore(
+                self.founder,
+                crate::es::voxel::pg::ExplorePlan {
+                    net: self.two_layer_at(f).net()?,
+                    arbitration: self.arbitration(spec),
+                    seed: crate::es::voxel::kin::twins::job_seed(spec.train_seed ^ 0x7067_2d70_696c_6f74, generation, self.founder),
+                },
+            ));
+        }
         let pairs = self.pairs(spec);
         match &self.template {
             BrainFile::Plain(_) => VariantTable::antithetic(
@@ -458,6 +502,63 @@ fn update(spec: &LiveSpec, l: &mut Lineage, results: &[WindowResult], generation
         mean_relatives: mean(|b| b.kin.relatives),
         mean_combined: mean(|b| b.kin.combined),
         twins: None,
+        pg: None,
+    }
+}
+
+/// A `policy_gradient` lineage's update from its live windows' decision logs (PG-PILOT):
+/// every world's trajectories under the reward interface (own net energy plus the kin
+/// shares), then the learner's clipped step on the top's intent head.
+fn update_pg(spec: &LiveSpec, l: &mut Lineage, results: &[WindowResult], generation: u32) -> LineageUpdate {
+    use crate::es::voxel::pg::{self, RewardTerm};
+    let kin = spec.kin.of(l.founder);
+    let mut trajs = Vec::new();
+    let mut terms: Vec<(String, f64)> = Vec::new();
+    for r in results {
+        for w in r.pg.iter().filter(|w| w.founder == l.founder) {
+            let own = pg::OwnEnergy;
+            let relatives = pg::KinEnergy::new(w, &r.roster, &kin.shares);
+            let list: [&dyn RewardTerm; 2] = [&own, &relatives];
+            let (t, totals) = pg::reward::trajectories(w, r.world, &list, cubarium_voxel::DT);
+            trajs.extend(t);
+            for (name, v) in totals.0 {
+                match terms.iter_mut().find(|x| x.0 == name) {
+                    Some(x) => x.1 += v,
+                    None => terms.push((name, v)),
+                }
+            }
+        }
+    }
+    let BrainFile::TwoLayer(file) = &l.template else { unreachable!("a policy_gradient lineage is two-layer") };
+    let shape = file.shape.clone();
+    let layout = file.layout();
+    let policy = pg::Policy { shape: &shape, layout: &layout, temperature: l.arbitration(spec).temperature };
+    let state = l.pg.as_mut().expect("a policy_gradient lineage has its learner");
+    let seed = crate::es::voxel::kin::twins::job_seed(spec.train_seed ^ 0x7067_2d75_7064_6174, generation, l.founder);
+    let mut readout = pg::learner::update(&policy, &mut l.theta, &mut l.adam, state, &trajs, &kin.pg, seed, spec.threads);
+    let bodies = readout.bodies.max(1) as f64;
+    readout.mean_terms = terms.into_iter().map(|(n, v)| (n, v / bodies)).collect();
+    let mine: Vec<&window::MeteredBody> =
+        results.iter().flat_map(|r| r.metered.iter().filter(|m| m.founder == l.founder)).collect();
+    let mean = |f: &dyn Fn(&window::MeteredBody) -> f64| mine.iter().map(|m| f(m)).sum::<f64>() / mine.len().max(1) as f64;
+    let own = mean(&|m| m.score.score);
+    let relatives = readout.mean_terms.iter().find(|x| x.0 == "kin").map_or(0.0, |x| x.1);
+    LineageUpdate {
+        lineage: l.founder.name().into(),
+        bodies: mine.len(),
+        newborn_bodies: mine.iter().filter(|m| m.newborn).count(),
+        candidates_placed: 0,
+        mean_raw_score: own,
+        gradient_norm: readout.gradient_norm,
+        update_rms: readout.update_rms,
+        candidate_scores: Vec::new(),
+        comparison: crate::es::voxel::kin::Comparison::PolicyGradient,
+        pairs_missing: 0,
+        mean_own: own,
+        mean_relatives: relatives,
+        mean_combined: own + relatives,
+        twins: None,
+        pg: Some(readout),
     }
 }
 
@@ -490,6 +591,7 @@ fn update_twins(spec: &LiveSpec, l: &mut Lineage, r: &crate::es::voxel::kin::twi
         mean_relatives: r.mean_relatives,
         mean_combined: r.mean_combined,
         twins: Some(r.readout.clone()),
+        pg: None,
     }
 }
 
@@ -569,7 +671,18 @@ fn run_generation(
         check()?;
     }
 
-    // 3. Every world runs its window.
+    // 3. Every world runs its window. A `policy_gradient` lineage's newborns are born on
+    // its current centre (its recorder then makes them explore).
+    let pg_drivers: Vec<(Founder, crate::es::voxel::EpisodeDriver)> = lineages
+        .iter()
+        .filter(|l| l.policy_gradient())
+        .map(|l| Ok((l.founder, l.driver(spec)?)))
+        .collect::<Result<_, String>>()?;
+    if !pg_drivers.is_empty() {
+        for w in worlds.iter_mut() {
+            super::install_factories(w.sim.fauna_mut(), &pg_drivers);
+        }
+    }
     let jobs: Vec<(&mut LiveWorld, Vec<usize>)> = worlds.iter_mut().zip(first).collect();
     let tables_ref = main_tables.as_ref().unwrap_or(&tables);
     let results: Vec<Result<WindowResult, String>> =
@@ -583,6 +696,7 @@ fn run_generation(
         .iter_mut()
         .map(|l| match twins.iter().find(|r| r.lineage == l.founder) {
             Some(r) => update_twins(spec, l, r, generation),
+            None if l.policy_gradient() => update_pg(spec, l, &results, generation),
             None => update(spec, l, &results, generation),
         })
         .collect();
@@ -712,6 +826,10 @@ struct TrainingCheckpoint {
     kin: crate::es::voxel::kin::KinConfig,
     lineages: Vec<(Founder, Vec<f64>, Adam, SavedTemplate)>,
     worlds: Vec<WorldState>,
+    /// The policy-gradient learners' state (PG-PILOT); left out without one, so every other
+    /// run's checkpoint is written as before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pg: Vec<(Founder, crate::es::voxel::pg::PgState)>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -738,6 +856,7 @@ fn save_checkpoint(spec: &LiveSpec, lineages: &[Lineage], worlds: &[LiveWorld], 
         stomach_aware_reward: spec.stomach_aware_reward, kin: spec.kin.clone(),
         lineages: lineages.iter().map(|l| (l.founder, l.theta.clone(), l.adam.clone(), SavedTemplate::from(&l.template))).collect(),
         worlds: worlds.iter().map(|w| WorldState { id: w.id, windows: w.windows, info: w.info.clone(), familiarity: w.memory.state() }).collect(),
+        pg: lineages.iter().filter_map(|l| l.pg.clone().map(|p| (l.founder, p))).collect(),
     };
     super::staging::atomic_text(&dir.join("state.json"), &serde_json::to_string(&state).map_err(|e| e.to_string())?)?;
     // Commit only after every world and the matching optimizer/familiarity state exists.
@@ -765,7 +884,18 @@ fn load_checkpoint(spec: &LiveSpec, dir: &Path, lineages: &mut Vec<Lineage>) -> 
     }
     let policy: Vec<_> = lineages.iter().map(|l| l.founder).collect();
     if state.lineages.iter().map(|l| l.0).collect::<Vec<_>>() != policy { return Err("checkpoint trained lineages differ".into()); }
-    *lineages = state.lineages.into_iter().map(|(founder, theta, adam, template)| Lineage { founder, theta, adam, template: template.into() }).collect();
+    let mut pg = state.pg;
+    *lineages = state
+        .lineages
+        .into_iter()
+        .map(|(founder, theta, adam, template)| {
+            let p = pg.iter().position(|x| x.0 == founder).map(|i| pg.swap_remove(i).1);
+            Lineage { founder, theta, adam, template: template.into(), pg: p }
+        })
+        .collect();
+    if let Some(l) = lineages.iter().find(|l| (spec.kin.of(l.founder).comparison == crate::es::voxel::kin::Comparison::PolicyGradient) != l.pg.is_some()) {
+        return Err(format!("checkpoint policy-gradient state differs for {}", l.founder.name()));
+    }
     let mut worlds = Vec::new();
     for state in state.worlds {
         let saved = cubarium_voxel_sim::saved::load(&dir.join(format!("world-{}", state.id)), &policy)?;
@@ -1055,6 +1185,14 @@ pub fn summary_line(r: &GenerationRecord) -> String {
         r.replaced.len()
     ));
     for l in &r.lineages {
+        if let Some(p) = &l.pg {
+            s.push_str(&format!(
+                " | pg {}: {} dec {} bodies ret={:+.4} split w={:.3}/{:.3} b={:.3}/{:.3} next={:.3} ev={:.2} H={:.3} kl={:.4} clip={:.2} off={:.2} g={:.3e} rms={:.2e}",
+                l.lineage, p.decisions, p.bodies, p.mean_return, p.split_worlds, p.split_worlds_null,
+                p.split_bodies, p.split_bodies_null, p.next, p.explained_variance, p.entropy, p.approx_kl,
+                p.clip_fraction, p.off_argmax, p.gradient_norm, p.update_rms,
+            ));
+        }
         if let Some(t) = &l.twins {
             s.push_str(&format!(
                 " | twins {}: {} pairs d={:+.4} |d|={:.4} sd={:.4} zero={:.2} div={:.2} null={}/{} g={:.3e} {:.0}s",
@@ -1082,7 +1220,7 @@ mod recovery_tests {
         std::fs::create_dir_all(&out).unwrap();
         let path = crate::es::voxel::store::test_centre_path(Founder::Blind, name);
         let template = VoxelPolicyFile::load_or_transfer(&path).unwrap();
-        let mut lineages = vec![Lineage { founder: Founder::Blind, theta: template.theta.clone(), adam: Adam::new(template.theta.len()), template: BrainFile::Plain(template) }];
+        let mut lineages = vec![Lineage { founder: Founder::Blind, theta: template.theta.clone(), adam: Adam::new(template.theta.len()), template: BrainFile::Plain(template), pg: None }];
         let cfg = cubarium_voxel::Config { width: 64, height: 24, depth: 6, ..Default::default() };
         let mut world = cubarium_voxel_sim::scene::authored(cfg.clone());
         let mut flora = cubarium_voxel_flora::Flora::new(Default::default());
@@ -1175,3 +1313,7 @@ mod brain_tests;
 #[cfg(test)]
 #[path = "trainer_twins_tests.rs"]
 mod twins_tests;
+
+#[cfg(test)]
+#[path = "trainer_pg_tests.rs"]
+mod pg_tests;

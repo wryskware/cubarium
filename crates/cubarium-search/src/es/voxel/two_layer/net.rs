@@ -164,6 +164,60 @@ pub fn top_forward(
     }
 }
 
+/// **The intent head's backward pass** (shared by cloning and the policy gradient): given
+/// `dlogits` (the loss's derivative by each of the top's `M'` raw logits; a zero entry is
+/// skipped), add the head's weight and bias gradients into `grad` and its derivative by the
+/// top's hidden layer into `dz`.
+pub fn intent_head_backward(
+    t: &TopOffsets,
+    theta: &[f64],
+    top: &TopForward,
+    dlogits: &[f64],
+    grad: &mut [f64],
+    dz: &mut [f64],
+) {
+    let th = top.z.len();
+    for (kk, &dl) in dlogits.iter().enumerate() {
+        if dl == 0.0 {
+            continue;
+        }
+        grad[t.b2 + kk] += dl;
+        for j in 0..th {
+            grad[t.w2 + kk * th + j] += dl * top.z[j];
+            dz[j] += dl * theta[t.w2 + kk * th + j];
+        }
+    }
+}
+
+/// **The top's hidden layer backward**: from `dz` (the loss's derivative by `z`), add the
+/// first layer's weight and bias gradients into `grad` and, with `dh`, the derivative by
+/// the GRU state the top read (the first `hidden` entries of `u`).
+pub fn top_hidden_backward(
+    t: &TopOffsets,
+    theta: &[f64],
+    top: &TopForward,
+    dz: &[f64],
+    grad: &mut [f64],
+    mut dh: Option<&mut [f64]>,
+) {
+    let uw = top.u.len();
+    for (j, &dzj) in dz.iter().enumerate() {
+        let da = dzj * (1.0 - top.z[j] * top.z[j]);
+        if da == 0.0 {
+            continue;
+        }
+        grad[t.b1 + j] += da;
+        for c in 0..uw {
+            grad[t.w1 + j * uw + c] += da * top.u[c];
+        }
+        if let Some(dh) = dh.as_deref_mut() {
+            for (c, d) in dh.iter_mut().enumerate() {
+                *d += da * theta[t.w1 + j * uw + c];
+            }
+        }
+    }
+}
+
 /// One candidate row as the pointer reads it: features and type tag.
 pub fn pointer_row(shape: &TwoLayerShape, features: &[f64], kind: SubjectKind, x: &mut [f64]) {
     assert_eq!(features.len(), shape.row_width, "candidate row width");

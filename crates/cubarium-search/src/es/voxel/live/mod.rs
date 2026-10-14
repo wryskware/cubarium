@@ -85,6 +85,21 @@ mod start_tests;
 
 /// Install one centre per lineage on a whole layer, as the ambient host does: the birth
 /// factory and every standing body of that lineage.
+/// Only the birth factories of [`install_centres`]: newborns of each lineage get `driver`'s
+/// brain, the bodies already living keep their controllers (PG-PILOT: the exploring
+/// lineage's recorder carries their memory on).
+pub fn install_factories(fauna: &mut Fauna, drivers: &[(Founder, EpisodeDriver)]) {
+    let teachers = fauna.config().teachers;
+    for (founder, driver) in drivers {
+        let driver = driver.clone().with_brain_table(fauna.config().founder(*founder).brain);
+        fauna.set_founder_factory(
+            *founder,
+            std::sync::Arc::new(move || -> Box<dyn Controller> { driver.fresh(teachers) }),
+        );
+        fauna.set_policy_driven(*founder, true);
+    }
+}
+
 pub fn install_centres(fauna: &mut Fauna, drivers: &[(Founder, EpisodeDriver)]) {
     // The reflexes a centre falls back on run on the layer's own numbers.
     let teachers = fauna.config().teachers;

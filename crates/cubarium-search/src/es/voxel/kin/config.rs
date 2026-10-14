@@ -89,6 +89,18 @@ pub enum Comparison {
     /// relatives, and [`TwinKnobs::stranger_weight`] times its effect on the rest); the
     /// all-sign twin above is `carrier_share = 1, stranger_weight = 1`.
     Twins,
+    /// **Per-decision policy gradient on the top's intent choice** (PG-PILOT,
+    /// `design/handoffs/pg-pilot-2026-10-14.md`; the training review's option D). No
+    /// variants and no twin copies: in the live windows every body of the lineage runs the
+    /// centre with its top **sampling** its intent proposal at the arbitration temperature
+    /// (hold and margin stay the environment's rules), each decision is logged with what
+    /// the top saw, and each body's reward stream is its own net energy (the loss at death
+    /// included) plus the kin shares of its relatives' ([`crate::es::voxel::pg::reward`]).
+    /// The update is a clipped (PPO-style) advantage-weighted log-prob step on the top's
+    /// intent head with a learned value baseline and GAE ([`crate::es::voxel::pg::learner`]),
+    /// its knobs in [`LineageKin::pg`]. Stage 1 only (the bottom frozen). Checks and the
+    /// deployed brain stay at argmax.
+    PolicyGradient,
 }
 
 /// **The twins comparison's layout** (LIVE-TWINS): how many twin measurements a
@@ -177,6 +189,10 @@ pub struct LineageKin {
     /// config at its default, so a run that never names it writes what it wrote before.
     #[serde(skip_serializing_if = "TwinKnobs::is_default")]
     pub twins: TwinKnobs,
+    /// The `policy_gradient` comparison's learner (`[<lineage>.pg]`, PG-PILOT); left out of
+    /// a written config at its default, as `twins` is.
+    #[serde(skip_serializing_if = "crate::es::voxel::pg::PgKnobs::is_default")]
+    pub pg: crate::es::voxel::pg::PgKnobs,
 }
 
 impl LineageKin {
@@ -220,6 +236,12 @@ impl KinConfig {
         registry().check(&c)?;
         for f in Founder::ALL {
             c.of(f).twins.check().map_err(|why| format!("[{}]: {why}", f.name()))?;
+            if c.of(f).comparison == Comparison::PolicyGradient && c.of(f).stage != BrainStage::Top {
+                return Err(format!(
+                    "[{}]: the policy_gradient comparison is stage 1 (stage = \"top\"): the bottom stays frozen so the top's inputs are fixed",
+                    f.name()
+                ));
+            }
         }
         Ok(c)
     }
@@ -260,6 +282,9 @@ pub fn kin_rows() -> Vec<Row> {
         Row::new("kin.lineages.*.twins.stranger_weight", "fraction", Range::fraction(),
             "TWIN-MIX: weight on the carriers' social effect on the lineage's other bodies; 0 = direct + kin-weighted relatives (topic 2), 1 = every body in full (all-sign)"),
     ]
+    .into_iter()
+    .chain(crate::es::voxel::pg::knobs::rows("kin.lineages.*.pg"))
+    .collect()
 }
 
 /// The standalone table, root `kin`.

@@ -39,8 +39,8 @@ mod tests;
 pub use adapter::{BRAIN_MEMORY_TAG, MenuHeads};
 pub use arbitration::{EarlyEnd, HoldChange, IntentArbitration};
 pub use brain::{
-    BrainAnswer, BrainState, CandidateRow, DecisionSample, HeldChoice, ProposalRecord,
-    SubjectRef, TwoLayerBrain, TwoLayerNet,
+    BrainAnswer, BrainState, CandidateRow, DecisionSample, Explore, HeldChoice, ProposalRecord,
+    SubjectRef, TopDecision, TwoLayerBrain, TwoLayerNet,
 };
 pub use file::{BrainFile, TWO_LAYER_POLICY_SCHEMA, TwoLayerPolicyFile, plain_net};
 pub use net::SubjectKind;
