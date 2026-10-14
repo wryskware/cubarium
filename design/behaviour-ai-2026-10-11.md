@@ -906,6 +906,18 @@ an already isolated prey). The heuristics add local memory:
   and a trained brain would currently have no reward for that since it doesnt actually count or
   save 'experiences'". First the family must move: "loftstriders still parked at the same spot
   forever. like they need to graze and move on" (LS-ROAM).
+- **Training method (Wrysk, 2026-10-14).** The review (`design/7_Research/training-review-
+  2026-10-14.md`) found an ES step ~1% signal at 1024 pairs (a mostly-signal step = hours of
+  desktop). His call on a per-decision policy-gradient pilot: "sure pilot it." On the score:
+  "i dont think 'how much food it ate' is the right optimization function, not in itself
+  anyway. like there are decisions about survival and even about happiness
+  (curiosity/exploration). so if we want richer brains we need richer scores to account for
+  that, particularly if these are per-decision rewards." He asked for research "about game
+  ais, beyond your proposal or our architecture … since this crosses ml and game design".
+  The pilot starts on today's score (energy, loss at death, kin shares) with the score
+  pluggable; the reward design comes back from the research, one topic at a time. Tension to
+  bring him: §9 "shape situations, never reward behaviour" and topic 7's "no curiosity
+  reward" against drives such as curiosity (the 2026-10-02 novelty term exists, off).
 - **Checks.** An algebraic check that a perturbation improving only a relative's energy
   survives the whole scorer. Readouts of raw own, relative and combined scores. Missing signs
   are never scored as zero returns.
