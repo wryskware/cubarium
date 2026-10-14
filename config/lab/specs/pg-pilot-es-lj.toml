@@ -1,0 +1,27 @@
+# PG-PILOT's comparison arm: the lanternjaw's top by ES on all-sign twins (as
+# live-twins-lj-stage1.toml), with the PG arm's 24 check seeds and threads.
+#   scripts/lab/lab submit config/lab/specs/pg-pilot-es-lj.toml
+# Binary: runs/bin/cubarium-search-44e64ff4 (branch pg-pilot; its ES and twins paths are
+# main's, unchanged). Kin file: config/training/kin-twins-2026-10-13.toml (copied beside the
+# PG arm's). ~215 s a generation on 14 threads (188 s on 16 in 1013-024442), ~45 generations
+# in the 3-hour wall, a 24-seed check every 10.
+# Split-half cosine: target/release/examples/step_noise run=<out>/run start=<the centre below>
+name = "pg-pilot-es-lj"
+kind = "command"
+argv = ["/home/wrysk/wryskware/cubarium/runs/bin/cubarium-search-44e64ff4", "voxel-live-train",
+  "--centre", "lanternjaw=/home/wrysk/wryskware/cubarium/runs/lab/1012-154001-brest-lj-clone-then-smok-fb68/run/clone/lanternjaw-two-layer.json",
+  "--worlds", "16", "--threads", "14", "--pairs", "16", "--window-min", "10",
+  "--generations", "1000", "--wall", "10800", "--first-generation-seconds", "1800",
+  "--sigma", "0.05", "--top-up", "lanternjaw=8:0.3",
+  "--kin", "/home/wrysk/wryskware/cubarium/runs/pg-pilot-2026-10-14/inputs/kin-twins-2026-10-13.toml",
+  "--check-every", "10", "--check-seeds", "21,22,23,24,25,26,27,28,29,30,31,32,41,42,43,44,45,46,47,48,49,50,51,52", "--check-seconds", "600",
+  "--check-scene-seeds", "101,102,103,104",
+  "--save-every", "5", "--out", "{out}/run"]
+cwd = "/home/wrysk/wryskware/cubarium"
+threads = 14
+mem_gb = 24
+hosts = ["desktop"]
+est_h = 3.2
+timeout_h = 4.5
+done_marker = "run/centres/final-lanternjaw.json"
+priority = 1
