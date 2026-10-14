@@ -5253,11 +5253,21 @@ fn observation_v2(
     // A fruit taste (F3, the seedporter): the fruit in the mouth's reach — the stand it
     // climbs or perches on, else the nearest fruiting crown cell or vine face in fruit —
     // against the lineage's reference; nothing in reach is a valid zero.
+    // SP-MEAL: and the larvae its mouth reaches, which its bite takes with the fruit or alone
+    // ([`crate::step::glider_larva_in_reach`]): the taste is what the bite eats. It was the
+    // fruit alone, so with larvae and no fruit at its mouth its forager tasted nothing and
+    // walked or glided off them after a bite or two.
     let taste = if manifest.taste_cue == "fruit" {
         let reference = phys.taste_reference_on(fauna.config.cue.emit_reference, view.config.voxel_m, fv.config);
         let sat = manifest.tunings.chem_saturation;
-        match crate::step::glider_fruit_in_reach(view, fv, a, phys) {
-            Some((_, stock)) => {
+        let fruit = crate::step::glider_fruit_in_reach(view, fv, a, phys).map(|(_, s)| s);
+        let larvae = crate::step::glider_larva_in_reach(fauna, view, fv, a, phys).map(|(_, s)| s);
+        let at_mouth = match (fruit, larvae) {
+            (None, None) => None,
+            (f, l) => Some(f.unwrap_or(0.0) + l.unwrap_or(0.0)),
+        };
+        match at_mouth {
+            Some(stock) => {
                 let c = (stock / reference).min(1.0);
                 TasteReading {
                     cue: c / (c + sat),
