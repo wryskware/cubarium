@@ -921,6 +921,12 @@ an already isolated prey). The heuristics add local memory:
   Then: "at the very least, switching to RL from ES sounds like a better move for now." RL
   (per-decision learning) is the direction; ES stays only as the pilot's yardstick, and
   twin-copy speedups are not built.
+- **Score topic 1, judge and teacher (Wrysk, 2026-10-14: "yeah split score").** From
+  `design/7_Research/game-ai-research-2026-10-14.md` §6: the **judge** counts outcomes only
+  (condition, survival, offspring, kin) and every comparison and "beats its heuristic" check uses
+  it; the **teacher** (the per-decision reward the brain learns from) is the judge per step plus
+  extras that must earn their place by raising the judge's score. Hand-set weights now; an outer
+  loop tuning the teacher's few weights on the judge once the PG pilot shows it learns.
 - **Checks.** An algebraic check that a perturbation improving only a relative's energy
   survives the whole scorer. Readouts of raw own, relative and combined scores. Missing signs
   are never scored as zero returns.
