@@ -316,6 +316,13 @@ pub struct FounderPhysiology {
     /// `None` uses `teachers.give_up_fraction`; `Some(0)` disables giving up.
     #[serde(default)]
     pub give_up_fraction: Option<f64>,
+    /// **LS-ROAM, the patch against elsewhere** (`crate::forage`): a heuristic body
+    /// still-feeding also gives the patch up when its bites' trailing offer falls under this
+    /// times its own remembered intake while foraging (`teachers.give_up_memory_s`), a
+    /// factor; 1 is the marginal value theorem's rule (leave when the patch falls to the
+    /// habitat's average), 0 off (the gut-only threshold, as before).
+    #[serde(default)]
+    pub give_up_vs_memory: f64,
     /// The named configurable motor respiration coefficient: organic matter respired
     /// per unit of body per second at **full cruise** (equivalent displacement equal to
     /// `cruise`). Below full cruise the cost scales with the requested equivalent
@@ -2199,6 +2206,7 @@ impl FounderPhysiology {
                 larva_bite_half_stock: None,
                 larva_sight_m: 0.0,
                 give_up_fraction: None,
+                give_up_vs_memory: 0.0,
                 // Full cruise at its basal rate (the motor's tie to upkeep).
                 motor_respiration_per_s: DAILY_SHREDDER / DAY_S,
                 cruise_body_lengths_per_s: 1.0,
@@ -2314,6 +2322,7 @@ impl FounderPhysiology {
                 larva_bite_half_stock: None,
                 larva_sight_m: 0.0,
                 give_up_fraction: None,
+                give_up_vs_memory: 0.0,
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
                 // stand, including their deliberately mineral-hungry tissue against
                 // foliage. Only the cost settings are new.
@@ -2424,6 +2433,7 @@ impl FounderPhysiology {
                 larva_bite_half_stock: None,
                 larva_sight_m: 0.0,
                 give_up_fraction: None,
+                give_up_vs_memory: 0.0,
                 core: SpeciesConfig {
                     maintenance_per_s: DAILY_LANTERNJAW / DAY_S,
                     // The browser's K scaled by body (0.005 × 0.035 / 0.05).
@@ -2696,6 +2706,11 @@ impl FounderPhysiology {
                     motor_respiration_per_s: DAILY_LOFTSTRIDER / DAY_S,
                     // Foliage: k 0.05, τ 120 s (one or two long browses a day).
                     gut: Gut::of(0.05, 120.0),
+                    // LS-ROAM (Wrysk 2026-10-14: "they need to graze and move on"): it leaves a
+                    // stand once its offer falls to its own average intake while foraging,
+                    // the marginal value theorem's rule; its stands offered twice the filling
+                    // rate, so the gut-only threshold never moved it.
+                    give_up_vs_memory: 1.0,
                     ..grazer
                 }
             }

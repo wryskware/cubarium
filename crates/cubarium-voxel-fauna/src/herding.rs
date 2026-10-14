@@ -24,6 +24,15 @@
 //!   `comfort_m` of where that kin was: it remembers where it last saw the herd.
 //! - `young_only` (a switch) pulls only a body under its lineage's adult body: a calf to its
 //!   family.
+//! - **Going with them** (LS-ROAM, `follow_moving`, a switch). A body that stands sated
+//!   (its eating latch off, holding still: its forager stands a sated body on the stand it
+//!   finished at, mouth asking, taking nothing) is not feeding, so "feeding wins" does not
+//!   hold it: when it senses kin walking (their tracks' `moving`) beyond `comfort_m`, it
+//!   walks toward the mean point of those (turning on the spot first when they lie more than
+//!   60° off), not feeding, until none it senses is walking beyond comfort. Without it the
+//!   sated adults stood where their last meal ended and the young cropped round them on the
+//!   leash: loftstrider families held one spot for hours (LS-ROAM). Kin standing beyond
+//!   comfort do not draw it: two sated mothers side by side are a family at rest.
 //!
 //! Each lineage's numbers are [`herding_of`] (`fauna.founders.<lineage>.herding.*`). The
 //! frondgrazer's herd, the seedporter's troop and the loftstrider calf's family use it. The
@@ -62,12 +71,15 @@ pub struct Herding {
     /// Only a body under its lineage's adult body is pulled (a calf to its family). A
     /// switch, no registry row.
     pub young_only: bool,
+    /// LS-ROAM: a body standing sated goes with kin it senses walking beyond `comfort_m`
+    /// (module note). A switch, no registry row.
+    pub follow_moving: bool,
 }
 
 impl Default for Herding {
     /// No pull.
     fn default() -> Herding {
-        Herding { comfort_m: 0.0, pull: 0.0, herd_max: 0, memory_s: 0.0, young_only: false }
+        Herding { comfort_m: 0.0, pull: 0.0, herd_max: 0, memory_s: 0.0, young_only: false, follow_moving: false }
     }
 }
 
@@ -82,10 +94,11 @@ impl Default for Herding {
 ///   sight), on the ground, the same half turn and minute.
 pub fn herding_of(founder: Founder) -> Herding {
     match founder {
-        Founder::Browser => Herding { comfort_m: 3.0, pull: 0.5, herd_max: 4, memory_s: 60.0, young_only: false },
-        // LS-DEFEND (§3.1, "stay with family: all, today calves only"): every age.
-        Founder::Loftstrider => Herding { comfort_m: 6.0, pull: 0.5, herd_max: 0, memory_s: 60.0, young_only: false },
-        Founder::Seedporter => Herding { comfort_m: 4.0, pull: 0.5, herd_max: 0, memory_s: 60.0, young_only: false },
+        Founder::Browser => Herding { comfort_m: 3.0, pull: 0.5, herd_max: 4, memory_s: 60.0, young_only: false, follow_moving: false },
+        // LS-DEFEND (§3.1, "stay with family: all, today calves only"): every age. LS-ROAM:
+        // a sated one goes with the family when it walks on.
+        Founder::Loftstrider => Herding { comfort_m: 6.0, pull: 0.5, herd_max: 0, memory_s: 60.0, young_only: false, follow_moving: true },
+        Founder::Seedporter => Herding { comfort_m: 4.0, pull: 0.5, herd_max: 0, memory_s: 60.0, young_only: false, follow_moving: false },
         _ => Herding::default(),
     }
 }
@@ -181,6 +194,33 @@ pub fn stay_with_group(fauna: &Fauna, i: usize, ring: f64) -> Option<Actions> {
     Some(Actions { forward: if off { 0.0 } else { 1.0 }, turn: turn_to(a.pose.heading_rad, want), feed: 0.0 })
 }
 
+/// **Going with them** (LS-ROAM, module note) for the body at `i`: toward the mean point of
+/// the kin it senses walking beyond `comfort_m` (fresh tracks of its record only), at full
+/// forward, turning on the spot when they lie more than 60° off, not feeding. `None` when
+/// none is.
+pub fn go_with_moving(fauna: &Fauna, i: usize, ring: f64, comfort_m: f64) -> Option<Actions> {
+    let a = fauna.animals.get(i)?;
+    let p = fauna.percept(a.id)?;
+    let now = fauna.tick;
+    let fresh = 2 * fauna.config.perception.stagger_ticks();
+    let comfort = comfort_m.max(0.0);
+    let (mut sx, mut sz, mut n) = (0.0, 0.0, 0usize);
+    for t in p.tracks().iter().filter(|t| t.class == class::KIN && t.id != a.id && t.moving && now.saturating_sub(t.tick) <= fresh) {
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, t.x, t.z, ring);
+        if dx.hypot(dz) > comfort {
+            sx += dx;
+            sz += dz;
+            n += 1;
+        }
+    }
+    if n == 0 {
+        return None;
+    }
+    let want = sx.atan2(sz);
+    let off = angle_to(a.pose.heading_rad, want).abs() > std::f64::consts::FRAC_PI_3;
+    Some(Actions { forward: if off { 0.0 } else { 1.0 }, turn: turn_to(a.pose.heading_rad, want), feed: 0.0 })
+}
+
 /// **The heuristic's drift back** (module note) at the body at `i`'s controller sample:
 /// `actions` is what its heuristic and the layers before this one asked, `seek` what its
 /// heuristic's answer was for. `Some` replaces them: its pace and feeding, its turn leaning
@@ -200,7 +240,15 @@ pub(crate) fn steer(fauna: &mut Fauna, i: usize, actions: Actions, seek: Seek, r
     if !follows && h.young_only && a.body >= phys.core.birth_body {
         return None;
     }
-    let cropping = actions.feed > 0.5 && actions.forward <= fauna.config.teachers.forage_stay_forward;
+    let still = actions.forward <= fauna.config.teachers.forage_stay_forward;
+    // LS-ROAM: a body standing sated is not feeding; it goes with kin walking off.
+    if h.follow_moving && !a.eating && still && seek != Seek::Obstacle && a.mobility.mode == MobilityMode::Ground {
+        if let Some(go) = go_with_moving(fauna, i, ring, h.comfort_m) {
+            fauna.herd_tally[founder.index()].followed_samples += 1;
+            return Some(go);
+        }
+    }
+    let cropping = actions.feed > 0.5 && still;
     if cropping || seek == Seek::Obstacle || a.mobility.mode != MobilityMode::Ground || !(actions.forward > 0.0) {
         return None;
     }
@@ -220,6 +268,8 @@ pub(crate) fn steer(fauna: &mut Fauna, i: usize, actions: Actions, seek: Seek, r
 pub struct HerdTally {
     /// Controller samples the drift back leaned a heuristic's turn.
     pub pulled_samples: u64,
+    /// LS-ROAM: controller samples a body standing sated went with kin walking off.
+    pub followed_samples: u64,
     /// Herd-response samples a body asked to crop (scanning or not), and of them the samples
     /// it stood in a scan pause.
     pub crop_samples: u64,

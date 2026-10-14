@@ -32,6 +32,26 @@
 //!   ([`ForageTally`]).
 //! - An interval that a later layer (a flight, a reflex walk) spent elsewhere bit nothing
 //!   on the patch and is not counted against it.
+//!
+//! **LS-ROAM: the patch is weighed against what the body gets elsewhere** (the marginal value
+//! theorem itself, Charnov 1976: leave a patch when its intake falls to the forager's average
+//! intake over the habitat, travel included). `give_up_fraction` weighs a patch against the
+//! gut alone, so a patch offering twice the filling rate is never left however much richer
+//! the stands round it are: loftstrider families cropped one spot for hours (meals on the
+//! same stand at offers near 2, falling a few percent in a minute and back by the next meal;
+//! `design/handoffs/ls-roam-2026-10-14.md`). For a lineage with `give_up_vs_memory` above 0:
+//!
+//! - **What it remembers.** While its eating latch is on, each controller sample folds the
+//!   interval's mean offer — zero when it bit nothing: walking between patches, searching,
+//!   fleeing — into a trailing mean of time constant `give_up_memory_s`: its own intake
+//!   rate while foraging, travel included. It starts at the first interval it bites in and
+//!   holds while it is sated. Session state, as the rest of the record.
+//! - **Giving up.** Past `give_up_min_s` on the patch, a trailing offer under
+//!   `give_up_vs_memory` × that memory gives the patch up as above (the larger of the two
+//!   thresholds rules). In a rich habitat with short walks between stands the memory sits
+//!   near what a fresh stand offers, so a stand is left once the body has cropped it
+//!   below that; where stands are far apart the walks pull the memory down and it stays
+//!   longer. 0 turns it off (the gut-only rule, as before).
 
 use crate::controller::Actions;
 use crate::{Fauna, Food, Founder, FounderPhysiology};
@@ -52,6 +72,9 @@ pub(crate) struct Patch {
     offer: f64,
     bites: u32,
     key: Option<u64>,
+    /// LS-ROAM: its trailing mean offer while foraging, travel included (`None` until its
+    /// first bitten interval; kept only for a lineage with `give_up_vs_memory` on).
+    memory: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -125,7 +148,9 @@ pub(crate) fn leave(fauna: &mut Fauna, i: usize, actions: Actions, ring: f64) ->
     let id = a.id;
     let now = fauna.tick;
     let fraction = fauna.config.founder(founder).give_up_fraction.unwrap_or(tc.give_up_fraction);
-    let on = fraction > 0.0;
+    let vs_memory = fauna.config.founder(founder).give_up_vs_memory.max(0.0);
+    let remembers = vs_memory > 0.0 && tc.give_up_memory_s > 0.0;
+    let on = fraction > 0.0 || remembers;
     // A stop to feed: still, not turning (an escape's stop turns away from what refused it,
     // and is never walked on), feeding.
     let stopping = actions.feed > 0.5 && actions.forward <= tc.forage_stay_forward && actions.turn == 0.0;
@@ -149,6 +174,17 @@ pub(crate) fn leave(fauna: &mut Fauna, i: usize, actions: Actions, ring: f64) ->
     let p = fauna.forage.entry(id).or_default();
     // The interval just ended: the mean offer of its bites, zero when it bit nothing.
     let sample = if p.bites > 0 { p.offer / f64::from(p.bites) } else { 0.0 };
+    // LS-ROAM: its intake while hungry, the interval just ended folded in (zero when it bit
+    // nothing); it starts at the first interval it bites in.
+    if remembers && a.eating {
+        let alpha = (period_s / tc.give_up_memory_s).min(1.0);
+        p.memory = match p.memory {
+            Some(m) => Some(m + alpha * (sample - m)),
+            None if p.bites > 0 => Some(sample),
+            None => None,
+        };
+    }
+    let floor = if remembers { fraction.max(vs_memory * p.memory.unwrap_or(0.0)) } else { fraction };
     let key = p.key.take();
     p.offer = 0.0;
     p.bites = 0;
@@ -209,7 +245,7 @@ pub(crate) fn leave(fauna: &mut Fauna, i: usize, actions: Actions, ring: f64) ->
             tally.stay_samples += 1;
             tally.stay_s += period_s;
             let on_patch_s = now.saturating_sub(stay.since) as f64 * DT;
-            if on && on_patch_s >= tc.give_up_min_s && stay.rate.is_some_and(|r| r < fraction) {
+            if on && on_patch_s >= tc.give_up_min_s && stay.rate.is_some_and(|r| r < floor) {
                 end(stay, &mut tally);
                 p.stay = None;
                 p.shun = Some((stay.at, now.saturating_add(ticks(tc.give_up_shun_s))));
@@ -222,7 +258,7 @@ pub(crate) fn leave(fauna: &mut Fauna, i: usize, actions: Actions, ring: f64) ->
             }
         }
     }
-    if p.stay.is_none() && p.shun.is_none() {
+    if p.stay.is_none() && p.shun.is_none() && p.memory.is_none() {
         fauna.forage.remove(&id);
     }
     if let Some((k, until)) = shun_key {
@@ -247,6 +283,12 @@ impl Fauna {
         self.forage_tally
     }
 
+    /// LS-ROAM: body `id`'s remembered intake while foraging (fractions of its fill rate),
+    /// if it keeps one ([`crate::FounderPhysiology::give_up_vs_memory`]).
+    pub fn forage_memory(&self, id: u64) -> Option<f64> {
+        self.forage.get(&id).and_then(|p| p.memory)
+    }
+
     /// FORAGE-LEAVE: the stays under way, `(id, seconds on the patch so far, trailing offer)`.
     pub fn forage_stays(&self) -> Vec<(u64, f64, Option<f64>)> {
         let mut v: Vec<_> = self
@@ -262,3 +304,7 @@ impl Fauna {
 #[cfg(test)]
 #[path = "forage_tests.rs"]
 mod forage_tests;
+
+#[cfg(test)]
+#[path = "ls_roam_tests.rs"]
+mod ls_roam_tests;
