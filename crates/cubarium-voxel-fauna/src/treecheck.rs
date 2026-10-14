@@ -305,7 +305,7 @@ pub(crate) fn remember(fauna: &mut Fauna, id: u64, host: LarvaHost, food: bool) 
 }
 
 /// The dead's memories go, at most once a tick and every 256 ticks.
-fn prune(fauna: &mut Fauna) {
+pub(crate) fn prune(fauna: &mut Fauna) {
     let now = fauna.tick;
     if now % 256 != 0 || fauna.check_pruned == Some(now) || fauna.tree_checks.is_empty() {
         return;

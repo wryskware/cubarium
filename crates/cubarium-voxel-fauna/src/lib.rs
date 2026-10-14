@@ -86,6 +86,8 @@ mod sp_meal_tests;
 #[cfg(test)]
 mod sp_osc_tests;
 #[cfg(test)]
+mod sp_churn_tests;
+#[cfg(test)]
 mod nuts_tests;
 #[cfg(test)]
 mod intent_tests;
