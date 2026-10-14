@@ -1984,8 +1984,9 @@ pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     if a.mobility.mode != MobilityMode::Ground { return None; }
     // ECO-INT: a walk to food is for a hungry body with none; one eating a carcass (its
     // catch's meal, which holds it still by day and wins over this walk) has food, so
-    // neither the fruit walk nor the tree check runs or touches its aim.
-    if day && crate::hunt::eating_carrion_here(fauna, i, view, fv) {
+    // neither the fruit walk nor the tree check runs or touches its aim. SP-OSC: nor for one
+    // its catch holds in the wait for a prey in reach (`hunt::catch_waits`).
+    if day && (crate::hunt::eating_carrion_here(fauna, i, view, fv) || crate::hunt::catch_waits(fauna, i, view, fv)) {
         return None;
     }
     let fruit = if phys.senses.live {
