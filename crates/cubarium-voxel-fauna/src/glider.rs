@@ -1984,8 +1984,9 @@ pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     if a.mobility.mode != MobilityMode::Ground { return None; }
     // ECO-INT: a walk to food is for a hungry body with none; one eating a carcass (its
     // catch's meal, which holds it still by day and wins over this walk) has food, so
-    // neither the fruit walk nor the tree check runs or touches its aim.
-    if day && crate::hunt::eating_carrion_here(fauna, i, view, fv) {
+    // neither the fruit walk nor the tree check runs or touches its aim. SP-OSC: nor for one
+    // its catch holds in the wait for a prey in reach (`hunt::catch_waits`).
+    if day && (crate::hunt::eating_carrion_here(fauna, i, view, fv) || crate::hunt::catch_waits(fauna, i, view, fv)) {
         return None;
     }
     let fruit = if phys.senses.live {
@@ -2039,12 +2040,11 @@ pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     check_tree(fauna, i, view, fv).map(|go| (go, crate::Steer::Check))
 }
 
-/// A vine face that is food to a glider: in fruit, or the anchor face of a vine whose larvae
-/// it would see (LARVA).
+/// A vine face that is food to a glider: in fruit, or a leafy face of a vine whose larvae it
+/// would see (LARVA; SP-MEAL: any leafy face, where its mouth reaches them,
+/// [`glider_larva_in_reach`]; it was the vine's anchor face alone).
 fn face_has_food(fauna: &Fauna, f: &cubarium_voxel_flora::CoveredFace) -> bool {
-    f.fruit > 0.0
-        || fauna.larvae.host(crate::larva::LarvaHost::Vine(f.owner)).is_some_and(|h| h.anchor == Some(f.face))
-            && crate::larva::visible(fauna, crate::larva::LarvaHost::Vine(f.owner)).is_some()
+    f.fruit > 0.0 || f.leafiness > 0.0 && crate::larva::visible(fauna, crate::larva::LarvaHost::Vine(f.owner)).is_some()
 }
 
 // Face food keys use a separate namespace from stand IDs and vine ledge walks.
@@ -2183,6 +2183,12 @@ fn fruit_offers(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
     // LARVA §4: a host's larvae are seen by close search, within its larva sight.
     let near = range.min(phys.larva_sight_m);
     if near > 0.0 && phys.eating_diet().eats(Food::Larva) {
+        // SP-MEAL: a vine's larvae are seen on the nearest leafy face of the vine within that
+        // sight and its field that it can reach from the ground below (a covered face of that
+        // column in its body rows at the foot, as for vine fruit), where its mouth reaches
+        // them ([`glider_larva_in_reach`]). It was the vine's anchor face alone, so a body
+        // beside a vine's low faces did not see larvae its mouth would reach there.
+        let vine_faces = larva_vine_faces(fauna, view, fv, &a, &phys, origin, near, (fx, fz), cos_half);
         for (host, h) in fauna.larvae.hosts() {
             let Some((_, tissue)) = crate::larva::visible(fauna, *host) else {
                 continue;
@@ -2212,17 +2218,8 @@ fn fruit_offers(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
                     fare.larvae(fauna, &phys, h.lineage, tissue);
                     seen.push((d3, id, stand.site, (sx, my, sz), fare));
                 }
-                crate::larva::LarvaHost::Vine(_) => {
-                    let Some(face) = h.anchor else { continue };
-                    let Some((x, y, z)) = face.front(view) else { continue };
-                    let (sx, sz, my) = ((f64::from(x) + 0.5) * v, (f64::from(z) + 0.5) * v, (f64::from(y) + 0.5) * v);
-                    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
-                    let dh = dx.hypot(dz);
-                    let d3 = dh.hypot(my - origin.1);
-                    if d3 > near || (dh > 0.0 && (dx * fx + dz * fz) / dh < cos_half) {
-                        continue;
-                    }
-                    let Some(foot) = flight::support_below(view, sx, sz, my) else { continue };
+                crate::larva::LarvaHost::Vine(owner) => {
+                    let Some(&(d3, face, foot, (sx, my, sz))) = vine_faces.get(&owner) else { continue };
                     let key = vine_fruit_key(view, face);
                     if let Some(s) = seen.iter_mut().find(|s| s.1 == key) {
                         s.4.larvae(fauna, &phys, h.lineage, tissue);
@@ -2239,6 +2236,60 @@ fn fruit_offers(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
     // EDGE: of those it sees, the nearest it can walk to on its route graph.
     let clear: Vec<Offer> = seen.into_iter().filter(|s| crate::perception::line_clear(view, a.id, origin, s.3)).collect();
     Some(clear)
+}
+
+/// **SP-MEAL: the vine faces a glider sees larvae on** ([`fruit_offers`]): for each vine
+/// holding larvae it would see, its leafy wall face nearest the eye at `origin` within `near`
+/// metres and inside its field (`forward`, `cos_half`) that the body can reach from the ground
+/// below it: `owner → (distance from the eye, face, foot, the point seen)`.
+#[allow(clippy::too_many_arguments)]
+fn larva_vine_faces(
+    fauna: &Fauna,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    a: &Animal,
+    phys: &crate::FounderPhysiology,
+    origin: (f64, f64, f64),
+    near: f64,
+    forward: (f64, f64),
+    cos_half: f64,
+) -> rustc_hash::FxHashMap<cubarium_voxel_flora::VineId, (f64, VineFace, Site, (f64, f64, f64))> {
+    let mut best: rustc_hash::FxHashMap<cubarium_voxel_flora::VineId, (f64, VineFace, Site, (f64, f64, f64))> = rustc_hash::FxHashMap::default();
+    if !fauna.larvae.hosts().any(|(k, _)| matches!(k, crate::larva::LarvaHost::Vine(_))) {
+        return best;
+    }
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let s = shape(phys, a.body);
+    let col_m = |x: u32| crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(x) + 0.5) * v, a.pose.z, ring).0.abs();
+    let mut seen: rustc_hash::FxHashMap<cubarium_voxel_flora::VineId, bool> = rustc_hash::FxHashMap::default();
+    for face in fv.cover.wall_faces_in_columns(|x| col_m(x) <= near + v) {
+        let Some(cf) = fv.cover.face(face) else { continue };
+        if !(cf.leafiness > 0.0) || face.dir.is_underside() {
+            continue;
+        }
+        if !*seen.entry(cf.owner).or_insert_with(|| crate::larva::visible(fauna, crate::larva::LarvaHost::Vine(cf.owner)).is_some()) {
+            continue;
+        }
+        let Some((x, y, z)) = face.front(view) else { continue };
+        let (sx, sz, my) = ((f64::from(x) + 0.5) * v, (f64::from(z) + 0.5) * v, (f64::from(y) + 0.5) * v);
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+        let dh = dx.hypot(dz);
+        let d3 = dh.hypot(my - origin.1);
+        if d3 > near || (dh > 0.0 && (dx * forward.0 + dz * forward.1) / dh < cos_half) {
+            continue;
+        }
+        if best.get(&cf.owner).is_some_and(|b| (b.0, b.1) <= (d3, face)) {
+            continue;
+        }
+        let Some(foot) = flight::support_below(view, sx, sz, my) else { continue };
+        let (low, high) = body_rows(crate::surface_m(foot.y, v), s, v);
+        if !(low..=high).any(|row| row >= 0 && fv.cover.face(VineFace::new(face.x, row as u32, face.z, face.dir)).is_some()) {
+            continue;
+        }
+        best.insert(cf.owner, (d3, face, foot, (sx, my, sz)));
+    }
+    best
 }
 
 /// NUTS: whether a stand's hanging fruit is seen at `d3` metres from the eye to its crown's

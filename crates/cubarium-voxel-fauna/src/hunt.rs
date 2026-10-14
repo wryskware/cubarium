@@ -1184,26 +1184,7 @@ pub(crate) fn catch_step(
         crate::perception::approach(fauna, a.id, prey);
         return Some(Actions { forward: 0.0, turn: 0.0, feed: 1.0 });
     }
-    let ring = f64::from(view.config.width) * view.config.voxel_m;
-    let target = fauna
-        .animals
-        .iter()
-        // Any prey of its catch's list: bellwings, shredders and small lanternjaws.
-        .filter(|o| crate::is_prey_of(&fauna.config, &a, o))
-        .filter_map(|o| {
-            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
-            let d = dx.hypot(dz);
-            let pg = crate::body_of(&fauna.config, o)?;
-            let reach = (h.jaw_forward_length_fraction + h.strike_reach_length_fraction)
-                * geometry.length_m
-                + geometry.footprint_radius()
-                + pg.footprint_radius();
-            // SP-FREEZE2: only a prey its strike can meet in height. A bellwing sipping in
-            // the crown overhead is within reach on the map and never strikable: the wait
-            // for it held a hungry body turning in place under the stand for minutes.
-            (d <= reach && crate::step::in_strike_band(view, &a, &geometry, &h, o, &pg)).then_some((d, dx, dz, o.id))
-        })
-        .min_by(|x, y| x.0.total_cmp(&y.0).then(x.3.cmp(&y.3)));
+    let target = catch_wait_target(fauna, i, view, &geometry, &h);
     let Some((_, dx, dz, id)) = target else {
         return catch_foray(fauna, i, view, fv);
     };
@@ -1211,6 +1192,63 @@ pub(crate) fn catch_step(
     fauna.animals[i].hunt.samples = 0;
     crate::perception::approach(fauna, a.id, id);
     Some(head(a.pose.heading_rad, dx.atan2(dz), 0.0, 1.0))
+}
+
+/// **The prey the catch waits for** (its nearest, `(distance, dx, dz, id)`): a prey of its
+/// catch's list whose cylinder a turn in place brings into its strike capsule, in the strike
+/// band in height (SP-FREEZE2) and, along its heading once it faces the prey, between the
+/// capsule's back end (its jaw, less the two bodies' radii) and its tip (plus them).
+/// **SP-OSC**: the back bound. It was the reach alone, from the body's centre, so a bellwing
+/// perched over its back (in the band, 4 cm from its centre, the jaw 25 cm ahead) held a
+/// hungry seedporter still in the wait for ten minutes: no turn ever met it.
+fn catch_wait_target(fauna: &Fauna, i: usize, view: &VoxelView<'_>, geometry: &crate::Body, h: &crate::Hunter) -> Option<(f64, f64, f64, u64)> {
+    let a = &fauna.animals[i];
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    fauna
+        .animals
+        .iter()
+        // Any prey of its catch's list: bellwings, shredders and small lanternjaws.
+        .filter(|o| crate::is_prey_of(&fauna.config, a, o))
+        .filter_map(|o| {
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
+            let d = dx.hypot(dz);
+            let pg = crate::body_of(&fauna.config, o)?;
+            let radii = geometry.footprint_radius() + pg.footprint_radius();
+            let back = h.jaw_forward_length_fraction * geometry.length_m - radii;
+            let reach = (h.jaw_forward_length_fraction + h.strike_reach_length_fraction) * geometry.length_m + radii;
+            // SP-FREEZE2: only a prey its strike can meet in height. A bellwing sipping in
+            // the crown overhead is within reach on the map and never strikable: the wait
+            // for it held a hungry body turning in place under the stand for minutes.
+            (back <= d && d <= reach && crate::step::in_strike_band(view, a, geometry, h, o, &pg)).then_some((d, dx, dz, o.id))
+        })
+        .min_by(|x, y| x.0.total_cmp(&y.0).then(x.3.cmp(&y.3)))
+}
+
+/// **SP-OSC: body `i`'s catch holds it in the wait** ([`catch_step`]'s waiting case, without
+/// its bookkeeping): a catching body on the ground that wants food, no fruit at its mouth and
+/// no carcass meal at its mouth, with a prey it waits for ([`catch_wait_target`]). Such a body
+/// has food in reach, so its fruit walk and tree check do not run for it, as for a carcass
+/// meal ([`eating_carrion_here`]): the wait held it still under the check's label, the
+/// stillness read as a pressed walk, and the check traded its aim for the next host every
+/// `teachers.press_replan_s`.
+pub(crate) fn catch_waits(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> bool {
+    let a = &fauna.animals[i];
+    let Some(founder) = a.founder else { return false };
+    let phys = fauna.config.founder(founder);
+    if !phys.catch_bellwings
+        || !a.eating
+        || a.attached.is_some()
+        || a.strike.is_some()
+        || a.mobility.climb.is_some()
+        || a.mobility.mode != crate::MobilityMode::Ground
+        || eating_carrion_here(fauna, i, view, fv)
+        || crate::step::glider_fruit_in_reach(view, fv, a, phys).is_some()
+    {
+        return false;
+    }
+    let Some(h) = phys.active_hunter() else { return false };
+    let geometry = phys.body_at(a.body);
+    catch_wait_target(fauna, i, view, &geometry, &h).is_some()
 }
 
 /// Fruit stays the staple. A hungry ground forager without fruit at its mouth
