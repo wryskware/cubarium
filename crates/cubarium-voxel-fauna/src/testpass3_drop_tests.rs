@@ -50,6 +50,7 @@ fn fixture() -> (World, Flora, Fauna) {
         after_s: 4.0 * DT,
         max_m: 3.0,
         wound_per_m: 0.4,
+        water_max_m: 0.0,
     };
     c.predation.wound_heal_per_s = 0.0;
     c.teachers.route_refresh_s = 20.0 * DT;
@@ -143,6 +144,7 @@ fn reach_scales_with_the_configured_body_height_and_rejects_nonfinite_reach() {
         after_s: 0.0,
         max_m: 2.5,
         wound_per_m: 0.0,
+        water_max_m: 0.0,
     };
     close(
         rule.reach_m(p, &body),
@@ -205,6 +207,7 @@ fn drop_wound_has_no_cost_at_or_below_the_configured_step() {
         after_s: 0.0,
         max_m: 4.0,
         wound_per_m: 0.7,
+        water_max_m: 0.0,
     };
     for h in [0.0, p.step_down_m * 0.5, p.step_down_m] {
         assert_eq!(r.wound(p, h), 0.0);

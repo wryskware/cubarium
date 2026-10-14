@@ -189,7 +189,7 @@ fn a_trapped_body_jumps_down_and_lands_where_its_graph_is_reachable() {
     let (h, w) = (down + 2, down + 1);
     the_glide_is_out_of_reach(&c, h);
     let top = ledge(&mut world, h, w);
-    c.founders[SP.index()].drop = DropRule { after_s: 1.0, max_m: 1e3, wound_per_m: 0.0 };
+    c.founders[SP.index()].drop = DropRule { after_s: 1.0, max_m: 1e3, wound_per_m: 0.0, water_max_m: 0.0 };
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(c.clone());
     fauna.set_births_enabled(false);
@@ -220,7 +220,7 @@ fn a_drop_deeper_than_its_reach_is_not_taken() {
     // Reach one layer short of the shallower drop, in its own size.
     let reach_m = (f64::from(w) - 0.5) * V;
     let ratio = size_ratio(&fauna, sp);
-    c.founders[SP.index()].drop = DropRule { after_s: 1.0, max_m: reach_m / ratio, wound_per_m: 0.0 };
+    c.founders[SP.index()].drop = DropRule { after_s: 1.0, max_m: reach_m / ratio, wound_per_m: 0.0, water_max_m: 0.0 };
     let mut fauna = Fauna::new(c.clone());
     fauna.set_births_enabled(false);
     let sp = on_ledge(&mut fauna, &world, top);
@@ -245,7 +245,7 @@ fn the_wound_grows_with_the_height_past_the_step() {
         the_glide_is_out_of_reach(&c, h);
         let top = ledge(&mut world, h, w);
         let per_m = 0.4;
-        c.founders[SP.index()].drop = DropRule { after_s: 1.0, max_m: 1e3, wound_per_m: per_m };
+        c.founders[SP.index()].drop = DropRule { after_s: 1.0, max_m: 1e3, wound_per_m: per_m, water_max_m: 0.0 };
         let mut flora = Flora::new(FloraConfig::default());
         let mut fauna = Fauna::new(c.clone());
         fauna.set_births_enabled(false);
@@ -283,7 +283,7 @@ fn a_body_with_a_walking_way_out_never_drops() {
         }
     }
     rock(&mut world, 14..=20, 12..=15, FLOOR + 1..=top);
-    c.founders[SP.index()].drop = DropRule { after_s: 1.0, max_m: 1e3, wound_per_m: 0.0 };
+    c.founders[SP.index()].drop = DropRule { after_s: 1.0, max_m: 1e3, wound_per_m: 0.0, water_max_m: 0.0 };
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(c.clone());
     fauna.set_births_enabled(false);
@@ -314,7 +314,7 @@ fn the_route_planner_never_uses_a_drop() {
     let k = down.max(up) + 1;
     rock(&mut world, 10..=20, 3..=12, FLOOR + 1..=FLOOR + k);
     for f in Founder::ALL {
-        c.founders[f.index()].drop = DropRule { after_s: 0.0, max_m: 1e3, wound_per_m: 0.0 };
+        c.founders[f.index()].drop = DropRule { after_s: 0.0, max_m: 1e3, wound_per_m: 0.0, water_max_m: 0.0 };
     }
     let mut fauna = Fauna::new(c);
     let wv = world.view();
@@ -335,7 +335,7 @@ fn drop_is_a_constraint_for_both_layers() {
         let (h, w) = (down + 2, down + 1);
         the_glide_is_out_of_reach(&c, h);
         let top = ledge(&mut world, h, w);
-        c.founders[SP.index()].drop = DropRule { after_s: 0.1, max_m: 1e3, wound_per_m: 0.0 };
+        c.founders[SP.index()].drop = DropRule { after_s: 0.1, max_m: 1e3, wound_per_m: 0.0, water_max_m: 0.0 };
         let bound = drop_bound_s(&c);
         let mut flora = Flora::new(FloraConfig::default());
         let mut fauna = Fauna::new(c);

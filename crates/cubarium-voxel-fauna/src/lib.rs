@@ -76,6 +76,11 @@ pub use defend::Defence;
 pub mod roam;
 /// NUTS: checking trees for food a glider cannot see (the host test, the memory).
 pub mod treecheck;
+/// SP-CRAVE: a body's cravings for nitrogen and energy, and what a food is worth to them.
+pub mod crave;
+#[cfg(test)]
+#[path = "sp_crave_tests.rs"]
+mod sp_crave_tests;
 #[cfg(test)]
 mod nuts_tests;
 #[cfg(test)]
@@ -181,7 +186,7 @@ pub use predation::{
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use encounter::{
-    DROP_HOPS, DROP_LANDINGS, DropWay, HEADING_SAMPLES, RouteGraph, RouteMap, RouteRule, SightMap, band_crown_layers, band_layers, crown_columns, crown_layer,
+    DROP_HOPS, DROP_LANDINGS, DropWay, WaterDrop, HEADING_SAMPLES, RouteGraph, RouteMap, RouteRule, SightMap, band_crown_layers, band_layers, crown_columns, crown_layer,
     crown_slab_m, eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns,
     mouth_columns_at, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
     reachable_layers_of, route_components, standable_faces, surface_m, walkable_components,

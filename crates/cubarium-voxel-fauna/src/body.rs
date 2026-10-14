@@ -1293,6 +1293,33 @@ pub struct Glider {
     /// 2.0 (room for the turns, a press and a climb back down on the way).
     #[serde(default = "check_walk_factor")]
     pub check_walk_factor: f64,
+    /// **SP-CRAVE: the nitrogen craving** ([`crate::crave::cravings`]; Wrysk 2026-10-14:
+    /// "animals normally with have different cravings based on needs"), in `[0, 1]`: held by a
+    /// body building tissue past its upkeep (a growing young under `birth_body`, a gestating or
+    /// nursing mother, a brood under target) or whose fuel is full over a lagging reserve. It
+    /// wins over the energy craving while that is lower: then the food it walks to is the one
+    /// that funds the most tissue per second of walking and eating, and with plain fruit in
+    /// sight it checks a tree. Real: primates hold protein intake and feed for it (protein
+    /// leverage, Felton et al. 2009, *Behav. Ecol.* 20, spider monkeys); lactating and young
+    /// callitrichids take more insects. 0.5 (it wins until the energy craving passes half,
+    /// stores under a quarter of their room at `crave_energy_low` 0.5); 0: no nitrogen craving.
+    #[serde(default = "crave_nitrogen")]
+    pub crave_nitrogen: f64,
+    /// **SP-CRAVE: fuel this full** (fraction of `fuel_cap` × body) over a reserve under
+    /// `crave_reserve_lag` of its cap reads as nitrogen binding: the N-free store is full and
+    /// the N-funded one is not. 0.9.
+    #[serde(default = "crave_fuel_full")]
+    pub crave_fuel_full: f64,
+    /// **SP-CRAVE: a reserve this far under its cap** (fraction of `reserve_cap` × body) lags,
+    /// with fuel at `crave_fuel_full`. 0.75.
+    #[serde(default = "crave_reserve_lag")]
+    pub crave_reserve_lag: f64,
+    /// **SP-CRAVE: the energy craving** rises from 0 at this fullness of its combined fuel and
+    /// reserve room to 1 empty (and is 1 with its emergency latch on); craving energy, the
+    /// food it walks to is the one it absorbs the most of per second of walking and eating.
+    /// 0.5; 0: no energy craving.
+    #[serde(default = "crave_energy_low")]
+    pub crave_energy_low: f64,
 }
 
 fn roost_search_m() -> f64 {
@@ -1327,6 +1354,22 @@ fn check_walk_factor() -> f64 {
     Glider::SEEDPORTER.check_walk_factor
 }
 
+fn crave_nitrogen() -> f64 {
+    Glider::SEEDPORTER.crave_nitrogen
+}
+
+fn crave_fuel_full() -> f64 {
+    Glider::SEEDPORTER.crave_fuel_full
+}
+
+fn crave_reserve_lag() -> f64 {
+    Glider::SEEDPORTER.crave_reserve_lag
+}
+
+fn crave_energy_low() -> f64 {
+    Glider::SEEDPORTER.crave_energy_low
+}
+
 impl Glider {
     /// The seedporter's table (predation-and-flight §3.5, §3.9; Brief F3; placeholders):
     /// climbs stands from 1 m, glides from 1 m at 2.5 : 1 and 2 × its cruise for 1.2 × basal.
@@ -1344,6 +1387,10 @@ impl Glider {
         check_search_m: 16.0,
         check_memory_s: 3600.0,
         check_walk_factor: 2.0,
+        crave_nitrogen: 0.5,
+        crave_fuel_full: 0.9,
+        crave_reserve_lag: 0.75,
+        crave_energy_low: 0.5,
     };
 }
 
