@@ -15,7 +15,10 @@
 //!   whether it held food then, kept while perched in the crown so a tree it eats out is
 //!   remembered empty. It does not check a remembered-empty host again until the memory
 //!   lapses (`Glider::check_memory_s`) and goes first to one remembered holding food
-//!   ([`order`]): the trap-lining of tamarins and marmosets, coarse;
+//!   ([`order`]): the trap-lining of tamarins and marmosets, coarse. **SP-CHURN**: the memory
+//!   is bounded by that time alone; it was also capped at 16 hosts, and a body crossing a
+//!   field of small latticevines (a look at each leafy face its mouth passes) forgot the hosts
+//!   it had checked within seconds and walked back to check them again;
 //! - **the readout** ([`CheckTally`]).
 //!
 //! The rule shapes no reward and enters no observation: a brain sees only what it sees.
@@ -26,10 +29,6 @@ use crate::larva::LarvaHost;
 use crate::{Fauna, Food, FounderPhysiology, MobilityMode, Perch, PerchAnchor};
 use cubarium_voxel_flora::{CoveredFace, FloraView, Stand, Vine};
 
-/// The most hosts a body remembers at once; the oldest is forgotten first. A memory bound,
-/// not a knob.
-pub const CHECK_SLOTS: usize = 16;
-
 /// One host a body looked into: its key (a stand or a vine, never confused: ECO-INT), the
 /// tick it last looked, and whether it held food then.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -39,8 +38,8 @@ pub struct Checked {
     pub held_food: bool,
 }
 
-/// **A body's tree-check memory** (saved): the hosts it looked into (at most
-/// [`CHECK_SLOTS`]), the host its check walk is taking it to and the tick it set out, the
+/// **A body's tree-check memory** (saved): the hosts it looked into within its memory
+/// (`Glider::check_memory_s`; older looks are forgotten, [`prune`]), the host its check walk is taking it to and the tick it set out, the
 /// host whose crown it is in, and how many checks it has made.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TreeChecks {
@@ -284,7 +283,8 @@ pub(crate) fn note(fauna: &mut Fauna, i: usize, view: &cubarium_voxel::VoxelView
 }
 
 /// Body `id` remembers now that `host` held food (`food`) or not: its entry is refreshed, or
-/// a new one takes the oldest slot once all [`CHECK_SLOTS`] are full.
+/// a new one is added. **SP-CHURN**: no slot is taken from an older look; looks older than
+/// the memory go in [`prune`].
 pub(crate) fn remember(fauna: &mut Fauna, id: u64, host: LarvaHost, food: bool) {
     let now = fauna.tick;
     let m = fauna.tree_checks.entry(id).or_default();
@@ -293,25 +293,36 @@ pub(crate) fn remember(fauna: &mut Fauna, id: u64, host: LarvaHost, food: bool) 
             c.tick = now;
             c.held_food = food;
         }
-        None => {
-            if m.seen.len() >= CHECK_SLOTS
-                && let Some(k) = m.seen.iter().enumerate().min_by_key(|(_, c)| c.tick).map(|(k, _)| k)
-            {
-                m.seen.swap_remove(k);
-            }
-            m.seen.push(Checked { host, tick: now, held_food: food });
-        }
+        None => m.seen.push(Checked { host, tick: now, held_food: food }),
     }
 }
 
-/// The dead's memories go, at most once a tick and every 256 ticks.
+/// The dead's memories go, and (**SP-CHURN**) each living body forgets the looks older than
+/// its memory (`Glider::check_memory_s`, as [`recall`] reads it), at most once a tick and
+/// every 256 ticks.
 pub(crate) fn prune(fauna: &mut Fauna) {
     let now = fauna.tick;
     if now % 256 != 0 || fauna.check_pruned == Some(now) || fauna.tree_checks.is_empty() {
         return;
     }
     fauna.check_pruned = Some(now);
-    let alive: rustc_hash::FxHashSet<u64> = fauna.animals.iter().map(|a| a.id).collect();
-    fauna.tree_checks.retain(|id, _| alive.contains(id));
-    fauna.check_walks.retain(|id, _| alive.contains(id));
+    let config = &fauna.config;
+    let memory: rustc_hash::FxHashMap<u64, Option<u64>> = fauna
+        .animals
+        .iter()
+        .map(|a| {
+            let g = a.founder.and_then(|f| config.founder(f).glider);
+            (a.id, g.map(|g| cubarium_voxel::ticks_at_least_one(g.check_memory_s.max(0.0))))
+        })
+        .collect();
+    fauna.tree_checks.retain(|id, m| match memory.get(id) {
+        None => false,
+        Some(ticks) => {
+            if let Some(ticks) = *ticks {
+                m.seen.retain(|c| now.saturating_sub(c.tick) < ticks);
+            }
+            true
+        }
+    });
+    fauna.check_walks.retain(|id, _| memory.contains_key(id));
 }
