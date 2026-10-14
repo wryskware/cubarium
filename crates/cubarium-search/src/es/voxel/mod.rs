@@ -76,6 +76,7 @@ pub mod imitate;
 pub mod kin;
 pub mod landscape;
 pub mod live;
+pub mod pg;
 pub mod pin;
 pub mod remote;
 pub mod score;

@@ -29,6 +29,9 @@ enum Policies {
         nets: Arc<[Arc<crate::es::voxel::two_layer::TwoLayerNet>]>,
         arbitration: crate::es::voxel::two_layer::IntentArbitration,
     },
+    /// PG-PILOT: no variants; every body runs the centre with an exploring top, logged by
+    /// the window's [`crate::es::voxel::pg::Recorder`].
+    Explore(crate::es::voxel::pg::ExplorePlan),
 }
 
 impl VariantTable {
@@ -64,11 +67,27 @@ impl VariantTable {
         })
     }
 
+    /// A policy-gradient lineage's generation (PG-PILOT): the centre, exploring. It has no
+    /// candidates ([`VariantTable::len`] is 0); the window hands it to a recorder instead of
+    /// placing variants.
+    pub fn explore(founder: Founder, plan: crate::es::voxel::pg::ExplorePlan) -> VariantTable {
+        Self { founder, policies: Policies::Explore(plan) }
+    }
+
+    /// The exploring plan, for a policy-gradient lineage's table.
+    pub fn explore_plan(&self) -> Option<&crate::es::voxel::pg::ExplorePlan> {
+        match &self.policies {
+            Policies::Explore(p) => Some(p),
+            _ => None,
+        }
+    }
+
     /// Candidate `index`'s weights (for checks and reports).
     pub fn theta(&self, index: usize) -> &[f64] {
         match &self.policies {
             Policies::Plain(p) => p[index].theta(),
             Policies::TwoLayer { nets, .. } => nets[index].theta(),
+            Policies::Explore(p) => p.net.theta(),
         }
     }
 
@@ -98,6 +117,7 @@ impl VariantTable {
         match &self.policies {
             Policies::Plain(p) => p.len(),
             Policies::TwoLayer { nets, .. } => nets.len(),
+            Policies::Explore(_) => 0,
         }
     }
     pub fn is_empty(&self) -> bool {
@@ -111,6 +131,7 @@ impl VariantTable {
             Policies::TwoLayer { nets, arbitration } => Box::new(
                 nets[index].brain(*arbitration, self.founder.manifest().controller_period_s),
             ),
+            Policies::Explore(_) => panic!("an exploring table has no candidates; its window records it"),
         }
     }
 }

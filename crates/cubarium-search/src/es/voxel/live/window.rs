@@ -102,6 +102,9 @@ pub struct WindowResult {
     pub intake_anomalies: u64,
     /// The living bodies' familiarity, for the next window of this world.
     pub memory: Memory,
+    /// PG-PILOT: each exploring lineage's decision log and energy readings (empty without
+    /// a `policy_gradient` lineage).
+    pub pg: Vec<crate::es::voxel::pg::PgWorld>,
 }
 
 /// Where a body stands around the ring, metres, and its id.
@@ -365,6 +368,8 @@ pub struct Window {
     geometry: Vec<Geometry>,
     memory: Memory,
     roster: crate::es::voxel::kin::Roster,
+    /// PG-PILOT: one recorder per exploring lineage ([`VariantTable::explore`]).
+    pg: Vec<crate::es::voxel::pg::Recorder>,
 }
 
 impl Window {
@@ -455,6 +460,7 @@ impl Window {
                     .map(crate::es::voxel::kin::KinRecord::of)
                     .collect::<Vec<_>>(),
             ),
+            pg: Vec::new(),
         };
         let bodies: Vec<(u64, Founder, f64, BodyMeter, EnergyMeter)> = sim
             .fauna()
@@ -491,6 +497,8 @@ impl Window {
                 .map(|b| Placed { id: b.0, x_m: b.2 })
                 .collect();
             let placed: FxHashMap<u64, usize> = match &w.tables[fi] {
+                // An exploring lineage places no variants: its recorder drives it.
+                Some(t) if t.explore_plan().is_some() => FxHashMap::default(),
                 Some(_) if !mine.is_empty() => {
                     if w.kin.of(f).comparison == crate::es::voxel::kin::Comparison::Family {
                         crate::es::voxel::kin::place_families(&mine, &w.roster, pairs[fi], first_pair[fi])
@@ -529,6 +537,12 @@ impl Window {
                 });
             }
         }
+        for f in Founder::ALL {
+            if let Some(plan) = w.tables[f.index()].as_ref().and_then(|t| t.explore_plan()) {
+                let r = crate::es::voxel::pg::Recorder::begin(sim, f, plan.clone(), false);
+                w.pg.push(r);
+            }
+        }
         w
     }
 
@@ -549,6 +563,9 @@ impl Window {
     /// itself (a staged encounter's own step that reads its events): `before_step`, the
     /// host's one tick, then `after_step`.
     pub fn before_step(&self, sim: &Sim) -> StepMark {
+        for r in &self.pg {
+            r.before_step(self.elapsed);
+        }
         StepMark(sim.fauna().view().ledger.assimilated_by_founder)
     }
 
@@ -636,7 +653,7 @@ impl Window {
                 .flatten()
                 .and_then(|m| self.index.get(&m))
                 .and_then(|&k| self.tracked[k].candidate);
-            let candidate = self.tables[fi].as_ref().map(|table| {
+            let candidate = self.tables[fi].as_ref().filter(|t| t.explore_plan().is_none()).map(|table| {
                 let c = mothers.unwrap_or_else(|| {
                     newborn_candidate(x, self.ring_m, &self.assigned[fi], &self.counts[fi])
                 });
@@ -672,6 +689,9 @@ impl Window {
                 minute_ticks: 0,
                 earned: 0.0,
             });
+        }
+        for r in &mut self.pg {
+            r.after_step(sim, stamp);
         }
         if stamp.is_multiple_of(TICKS_PER_MIN) {
             // How clumped each lineage is: its bodies' mean nearest-neighbour distance.
@@ -835,6 +855,7 @@ impl Window {
             wall_s,
             intake_anomalies: anomalies,
             memory: self.memory,
+            pg: self.pg.into_iter().map(|r| r.finish()).collect(),
         }
     }
 }

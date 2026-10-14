@@ -43,7 +43,8 @@ use serde::{Deserialize, Serialize};
 use super::arbitration::{EarlyEnd, IntentArbitration};
 use super::brain::{CandidateRow, DecisionSample, SubjectRef, TwoLayerNet};
 use super::net::{
-    SubjectKind, TopForward, bottom_input, conditioning as conditioning_block, none_score,
+    SubjectKind, TopForward, bottom_input, conditioning as conditioning_block, intent_head_backward,
+    none_score, top_hidden_backward,
     pointer_query, pointer_row, pointer_score, readout, squash_time, top_forward,
 };
 use super::shape::{TYPE_TAGS, TwoLayerLayout, TwoLayerShape, initial_center};
@@ -714,17 +715,10 @@ fn window(
                     sums.intent_hits += 1;
                 }
                 if let Some(gr) = gtop.as_deref_mut() {
-                    for kk in 0..m {
-                        let dl = w.intent * (p_int[kk] - f64::from(u8::from(kk == label)));
-                        if dl == 0.0 {
-                            continue;
-                        }
-                        gr[to.b2 + kk] += dl;
-                        for j in 0..th {
-                            gr[to.w2 + kk * th + j] += dl * top.z[j];
-                            dz[j] += dl * theta[to.w2 + kk * th + j];
-                        }
-                    }
+                    let dl: Vec<f64> = (0..m)
+                        .map(|kk| w.intent * (p_int[kk] - f64::from(u8::from(kk == label))))
+                        .collect();
+                    intent_head_backward(&to, theta, &top, &dl, gr, &mut dz);
                 }
             }
             if let Some((intent, rows, ok, label)) = &lab.pointer {
@@ -784,21 +778,8 @@ fn window(
                 }
             }
             if let Some(gr) = gtop {
-                let uw = shape.top_inputs();
                 let dht = &mut dh_top[i * hw..(i + 1) * hw];
-                for j in 0..th {
-                    let da = dz[j] * (1.0 - top.z[j] * top.z[j]);
-                    if da == 0.0 {
-                        continue;
-                    }
-                    gr[to.b1 + j] += da;
-                    for c in 0..uw {
-                        gr[to.w1 + j * uw + c] += da * top.u[c];
-                    }
-                    for c in 0..hw {
-                        dht[c] += da * theta[to.w1 + j * uw + c];
-                    }
-                }
+                top_hidden_backward(&to, theta, &top, &dz, gr, Some(dht));
             }
         }
     }

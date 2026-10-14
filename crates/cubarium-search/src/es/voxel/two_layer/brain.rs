@@ -20,7 +20,8 @@
 //! A plain brain has no top: steps 1, 3, 4 and 5 do nothing and step 2 is today's GRU
 //! step, with today's input, on today's weights.
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -107,6 +108,7 @@ impl TwoLayerNet {
             row_valid: vec![false; s.candidates + 1],
             all_valid: vec![true; s.menu],
             answer: BrainAnswer::new(s),
+            explore: None,
         }
     }
 }
@@ -262,6 +264,77 @@ pub struct TwoLayerBrain {
     row_valid: Vec<bool>,
     all_valid: Vec<bool>,
     answer: BrainAnswer,
+    /// Training-only exploration (PG-PILOT); `None` everywhere else, and then the top's
+    /// proposal is the masked argmax exactly as before.
+    explore: Option<Box<Explore>>,
+}
+
+/// **Training-only exploration** (PG-PILOT, `design/handoffs/pg-pilot-2026-10-14.md`): a
+/// brain carrying one **samples** its intent proposal from the top's probabilities at the
+/// arbitration temperature instead of taking the argmax, and logs every decision. Hold and
+/// margin still settle the held intent from the (sampled) proposal; the subject is the
+/// pointer's argmax for the sampled intent, as it is for the argmax one. Never on a
+/// deployed or checked brain.
+#[derive(Clone, Debug)]
+pub struct Explore {
+    /// The sampler's state (splitmix64), seeded per body by the trainer.
+    rng: u64,
+    /// The window's tick, set by the trainer before each sim step: the decision's time.
+    clock: Arc<AtomicU64>,
+    /// Where the decisions go.
+    log: Arc<Mutex<Vec<TopDecision>>>,
+}
+
+impl Explore {
+    pub fn new(seed: u64, clock: Arc<AtomicU64>, log: Arc<Mutex<Vec<TopDecision>>>) -> Explore {
+        Explore { rng: seed, clock, log }
+    }
+
+    fn uniform(&mut self) -> f64 {
+        self.rng = self.rng.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.rng;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        (z >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// An index drawn from `p` (masked entries 0); `None` when `p` carries no mass.
+    fn sample(&mut self, p: &[f64]) -> Option<usize> {
+        let x = self.uniform();
+        let mut acc = 0.0;
+        let mut last = None;
+        for (i, &pi) in p.iter().enumerate() {
+            if pi > 0.0 {
+                acc += pi;
+                last = Some(i);
+                if x < acc {
+                    return Some(i);
+                }
+            }
+        }
+        last
+    }
+}
+
+/// One logged decision of an exploring top: what it read, what it may choose, what it
+/// sampled and with what log-probability, and when.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TopDecision {
+    /// The window tick at which it decided (ticks of the window before this sim step).
+    pub tick: u64,
+    /// The GRU state the top read.
+    pub hidden: Vec<f64>,
+    /// The intent held before the decision (the top's input).
+    pub held: Option<usize>,
+    /// The squashed time in that intent (the top's input).
+    pub time: f64,
+    /// Which intents were valid (`M'` long).
+    pub valid: Vec<bool>,
+    /// The sampled proposal.
+    pub intent: usize,
+    /// `ln p(intent)` at the arbitration temperature, as sampled.
+    pub logp: f64,
 }
 
 impl TwoLayerBrain {
@@ -270,6 +343,11 @@ impl TwoLayerBrain {
     }
     pub fn arbitration(&self) -> &IntentArbitration {
         &self.arbitration
+    }
+
+    /// Sample and log the intent proposal from now on ([`Explore`]; training only).
+    pub fn explore_with(&mut self, explore: Explore) {
+        self.explore = Some(Box::new(explore));
     }
 
     /// A copy of the brain's state, for a save.
@@ -479,7 +557,24 @@ impl TwoLayerBrain {
             cfg.temperature,
             &mut self.answer.intent_probs,
         );
-        let intent = masked_argmax(&self.top.logits, &self.valid).unwrap_or(0);
+        let argmax = masked_argmax(&self.top.logits, &self.valid).unwrap_or(0);
+        let intent = match self.explore.as_deref_mut() {
+            None => argmax,
+            Some(e) => {
+                let a = e.sample(&self.answer.intent_probs).unwrap_or(argmax);
+                let d = TopDecision {
+                    tick: e.clock.load(Ordering::Relaxed),
+                    hidden: self.state.hidden.clone(),
+                    held: held.map(|h| h.intent),
+                    time,
+                    valid: self.valid.clone(),
+                    intent: a,
+                    logp: self.answer.intent_probs[a].ln(),
+                };
+                e.log.lock().expect("decision log").push(d);
+                a
+            }
+        };
 
         let mut subject = None;
         if s.candidates > 0 {

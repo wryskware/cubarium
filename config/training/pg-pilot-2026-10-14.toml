@@ -1,0 +1,42 @@
+# PG-PILOT: the lanternjaw's top trained by per-decision policy gradient on its live windows
+# (design/handoffs/pg-pilot-2026-10-14.md; option D of
+# design/7_Research/training-review-2026-10-14.md §4). `--kin` on voxel-live-train.
+#
+# comparison = "policy_gradient": no variants and no twin copies. In every live window each
+# lanternjaw runs the centre with its top sampling its intent proposal at the arbitration
+# temperature (hold and margin stay the world's rules); every decision is logged and every
+# body's energy read each tick. Stage 1 only: the bottom stays frozen.
+#
+# Reward per decision (outcome terms only): the body's own net energy until its next decision,
+# (E + E_given)/body_ref with E = 0 from a death on, plus each relative's at its share below
+# (design/behaviour-ai-2026-10-11.md §10.3, "0.5 to start").
+#
+# [lanternjaw.pg] (es::voxel::pg::knobs):
+#   discount_horizon_s  return discount exp(-dt/h), s
+#   lambda_horizon_s    GAE trace exp(-dt/h), s
+#   clip                PPO ratio clip
+#   entropy             entropy bonus weight (normalised-advantage scale)
+#   policy_lr, value_lr Adam rates of the intent head and of the value baseline
+#   value_hidden        the baseline's tanh width (it reads the top's input)
+#   epochs, minibatches passes and Adam steps per pass over a generation's decisions
+#   splits              random half-splits in the split-half cosine readout
+
+[lanternjaw]
+comparison = "policy_gradient"
+stage = "top"
+[lanternjaw.shares]
+calf = 0.5
+mother = 0.5
+sibling = 0.5
+packmate = 0.5
+[lanternjaw.pg]
+discount_horizon_s = 300.0
+lambda_horizon_s = 60.0
+clip = 0.2
+entropy = 0.01
+policy_lr = 0.0003
+value_lr = 0.001
+value_hidden = 32
+epochs = 4
+minibatches = 4
+splits = 16
