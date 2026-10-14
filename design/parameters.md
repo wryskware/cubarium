@@ -1572,7 +1572,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.04 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4629 rows)
+**`fauna.*`** (4703 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1586,6 +1586,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.birth_cost` | 0.3 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.frondgrazer.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.frondgrazer.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.frondgrazer.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.frondgrazer.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.frondgrazer.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.frondgrazer.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.frondgrazer.lifespan_median_s` | 14400.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -1624,6 +1626,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.birth_cost` | 0.1875 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.littershredder.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.littershredder.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.littershredder.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.littershredder.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.littershredder.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.littershredder.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.littershredder.core.lifespan_median_s` | 43200.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -1721,6 +1725,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.littershredder.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.littershredder.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.littershredder.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.littershredder.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.littershredder.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.littershredder.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -1907,6 +1912,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.littershredder.drop.max_m` | 1.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.littershredder.drop.wound_per_m` | 0.02 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.littershredder.drop.water_max_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-CRAVE: deepest jump into water an adult takes, to the surface (a smaller body: x its height / the adult's); only into water it swims or wades out of, the wound from the height over the surface; last, after every dry jump (0: never into water) |
 | `fauna.founders.littershredder.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1957,6 +1963,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
 | `fauna.founders.littershredder.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.littershredder.glider.check_walk_factor` | (absent) | ratio | (0, inf) | 0.5–8 | - | placeholder | SP-PROTEIN: a check walk is given up after walking this many times its longest route (route_detour x check_search_m) at its own cruise without arriving, and lapses when not walked that long (a giving-up time growing with patch distance, Charnov 1976) |
+| `fauna.founders.littershredder.glider.crave_nitrogen` | (absent) | craving 0-1 | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: nitrogen craving of a body building tissue (young under birth_body, gestating or nursing mother, brood short) or with fuel full over a lagging reserve; it wins over a lower energy craving, so the walk goes to the food funding most tissue per second and plain fruit in sight starts a tree check (0: none; protein leverage, Felton et al. 2009) |
+| `fauna.founders.littershredder.glider.crave_fuel_full` | (absent) | fraction of fuel cap | [0, 1] |  | - | placeholder | SP-CRAVE: fuel this full over a reserve under crave_reserve_lag reads as nitrogen binding (the N-free store full, the N-funded one not) |
+| `fauna.founders.littershredder.glider.crave_reserve_lag` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | SP-CRAVE: a reserve under this, with fuel at crave_fuel_full, lags (nitrogen craving) |
+| `fauna.founders.littershredder.glider.crave_energy_low` | (absent) | fraction of fuel+reserve room | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: the energy craving rises from 0 at this fullness of fuel and reserve to 1 empty (1 with the emergency latch); the walk then goes to the food absorbed most per second (0: none) |
 | `fauna.founders.littershredder.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.littershredder.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.littershredder.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -2113,6 +2123,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.birth_cost` | 0.3 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.frondgrazer.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.frondgrazer.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.frondgrazer.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.frondgrazer.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.frondgrazer.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.frondgrazer.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.frondgrazer.core.lifespan_median_s` | 57600.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -2210,6 +2222,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.frondgrazer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.frondgrazer.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.frondgrazer.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.frondgrazer.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.frondgrazer.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.frondgrazer.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -2396,6 +2409,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.frondgrazer.drop.max_m` | 1.1 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.frondgrazer.drop.wound_per_m` | 0.15 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.frondgrazer.drop.water_max_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-CRAVE: deepest jump into water an adult takes, to the surface (a smaller body: x its height / the adult's); only into water it swims or wades out of, the wound from the height over the surface; last, after every dry jump (0: never into water) |
 | `fauna.founders.frondgrazer.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -2446,6 +2460,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
 | `fauna.founders.frondgrazer.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.frondgrazer.glider.check_walk_factor` | (absent) | ratio | (0, inf) | 0.5–8 | - | placeholder | SP-PROTEIN: a check walk is given up after walking this many times its longest route (route_detour x check_search_m) at its own cruise without arriving, and lapses when not walked that long (a giving-up time growing with patch distance, Charnov 1976) |
+| `fauna.founders.frondgrazer.glider.crave_nitrogen` | (absent) | craving 0-1 | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: nitrogen craving of a body building tissue (young under birth_body, gestating or nursing mother, brood short) or with fuel full over a lagging reserve; it wins over a lower energy craving, so the walk goes to the food funding most tissue per second and plain fruit in sight starts a tree check (0: none; protein leverage, Felton et al. 2009) |
+| `fauna.founders.frondgrazer.glider.crave_fuel_full` | (absent) | fraction of fuel cap | [0, 1] |  | - | placeholder | SP-CRAVE: fuel this full over a reserve under crave_reserve_lag reads as nitrogen binding (the N-free store full, the N-funded one not) |
+| `fauna.founders.frondgrazer.glider.crave_reserve_lag` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | SP-CRAVE: a reserve under this, with fuel at crave_fuel_full, lags (nitrogen craving) |
+| `fauna.founders.frondgrazer.glider.crave_energy_low` | (absent) | fraction of fuel+reserve room | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: the energy craving rises from 0 at this fullness of fuel and reserve to 1 empty (1 with the emergency latch); the walk then goes to the food absorbed most per second (0: none) |
 | `fauna.founders.frondgrazer.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.frondgrazer.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.frondgrazer.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -2602,6 +2620,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.birth_cost` | 0.15 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.lanternjaw.core.reserve_cap` | 0.6 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.lanternjaw.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.lanternjaw.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.lanternjaw.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.lanternjaw.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.lanternjaw.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.lanternjaw.core.lifespan_median_s` | 86400.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -2699,6 +2719,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.lanternjaw.yield_by_food.*` | 0.6, 0.6, 0.6, 0.6 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.lanternjaw.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.lanternjaw.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.lanternjaw.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.lanternjaw.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -2885,6 +2906,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.lanternjaw.drop.max_m` | 1.8 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.lanternjaw.drop.wound_per_m` | 0.1 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.lanternjaw.drop.water_max_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-CRAVE: deepest jump into water an adult takes, to the surface (a smaller body: x its height / the adult's); only into water it swims or wades out of, the wound from the height over the surface; last, after every dry jump (0: never into water) |
 | `fauna.founders.lanternjaw.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -2935,6 +2957,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
 | `fauna.founders.lanternjaw.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.lanternjaw.glider.check_walk_factor` | (absent) | ratio | (0, inf) | 0.5–8 | - | placeholder | SP-PROTEIN: a check walk is given up after walking this many times its longest route (route_detour x check_search_m) at its own cruise without arriving, and lapses when not walked that long (a giving-up time growing with patch distance, Charnov 1976) |
+| `fauna.founders.lanternjaw.glider.crave_nitrogen` | (absent) | craving 0-1 | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: nitrogen craving of a body building tissue (young under birth_body, gestating or nursing mother, brood short) or with fuel full over a lagging reserve; it wins over a lower energy craving, so the walk goes to the food funding most tissue per second and plain fruit in sight starts a tree check (0: none; protein leverage, Felton et al. 2009) |
+| `fauna.founders.lanternjaw.glider.crave_fuel_full` | (absent) | fraction of fuel cap | [0, 1] |  | - | placeholder | SP-CRAVE: fuel this full over a reserve under crave_reserve_lag reads as nitrogen binding (the N-free store full, the N-funded one not) |
+| `fauna.founders.lanternjaw.glider.crave_reserve_lag` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | SP-CRAVE: a reserve under this, with fuel at crave_fuel_full, lags (nitrogen craving) |
+| `fauna.founders.lanternjaw.glider.crave_energy_low` | (absent) | fraction of fuel+reserve room | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: the energy craving rises from 0 at this fullness of fuel and reserve to 1 empty (1 with the emergency latch); the walk then goes to the food absorbed most per second (0: none) |
 | `fauna.founders.lanternjaw.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.lanternjaw.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.lanternjaw.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -3091,6 +3117,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.birth_cost` | 0.3192 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.capgnawer.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.capgnawer.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.capgnawer.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.capgnawer.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.capgnawer.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.capgnawer.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.capgnawer.core.lifespan_median_s` | 43200.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -3188,6 +3216,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.capgnawer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.capgnawer.yield_by_food.*` | 0.25, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.capgnawer.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.capgnawer.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.capgnawer.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.capgnawer.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -3374,6 +3403,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.capgnawer.drop.max_m` | 1.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.capgnawer.drop.wound_per_m` | 0.03 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.capgnawer.drop.water_max_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-CRAVE: deepest jump into water an adult takes, to the surface (a smaller body: x its height / the adult's); only into water it swims or wades out of, the wound from the height over the surface; last, after every dry jump (0: never into water) |
 | `fauna.founders.capgnawer.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -3424,6 +3454,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
 | `fauna.founders.capgnawer.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.capgnawer.glider.check_walk_factor` | (absent) | ratio | (0, inf) | 0.5–8 | - | placeholder | SP-PROTEIN: a check walk is given up after walking this many times its longest route (route_detour x check_search_m) at its own cruise without arriving, and lapses when not walked that long (a giving-up time growing with patch distance, Charnov 1976) |
+| `fauna.founders.capgnawer.glider.crave_nitrogen` | (absent) | craving 0-1 | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: nitrogen craving of a body building tissue (young under birth_body, gestating or nursing mother, brood short) or with fuel full over a lagging reserve; it wins over a lower energy craving, so the walk goes to the food funding most tissue per second and plain fruit in sight starts a tree check (0: none; protein leverage, Felton et al. 2009) |
+| `fauna.founders.capgnawer.glider.crave_fuel_full` | (absent) | fraction of fuel cap | [0, 1] |  | - | placeholder | SP-CRAVE: fuel this full over a reserve under crave_reserve_lag reads as nitrogen binding (the N-free store full, the N-funded one not) |
+| `fauna.founders.capgnawer.glider.crave_reserve_lag` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | SP-CRAVE: a reserve under this, with fuel at crave_fuel_full, lags (nitrogen craving) |
+| `fauna.founders.capgnawer.glider.crave_energy_low` | (absent) | fraction of fuel+reserve room | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: the energy craving rises from 0 at this fullness of fuel and reserve to 1 empty (1 with the emergency latch); the walk then goes to the food absorbed most per second (0: none) |
 | `fauna.founders.capgnawer.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.capgnawer.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.capgnawer.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -3580,6 +3614,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.birth_cost` | 1.056 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.loftstrider.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.loftstrider.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.loftstrider.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.loftstrider.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.loftstrider.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.loftstrider.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.loftstrider.core.lifespan_median_s` | 115200.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -3677,6 +3713,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.contact_height_fraction` | 0.15 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.loftstrider.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.loftstrider.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.loftstrider.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.loftstrider.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.loftstrider.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.loftstrider.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -3863,6 +3900,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.loftstrider.drop.max_m` | 2.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.loftstrider.drop.wound_per_m` | 0.3 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.loftstrider.drop.water_max_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-CRAVE: deepest jump into water an adult takes, to the surface (a smaller body: x its height / the adult's); only into water it swims or wades out of, the wound from the height over the surface; last, after every dry jump (0: never into water) |
 | `fauna.founders.loftstrider.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -3913,6 +3951,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
 | `fauna.founders.loftstrider.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.loftstrider.glider.check_walk_factor` | (absent) | ratio | (0, inf) | 0.5–8 | - | placeholder | SP-PROTEIN: a check walk is given up after walking this many times its longest route (route_detour x check_search_m) at its own cruise without arriving, and lapses when not walked that long (a giving-up time growing with patch distance, Charnov 1976) |
+| `fauna.founders.loftstrider.glider.crave_nitrogen` | (absent) | craving 0-1 | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: nitrogen craving of a body building tissue (young under birth_body, gestating or nursing mother, brood short) or with fuel full over a lagging reserve; it wins over a lower energy craving, so the walk goes to the food funding most tissue per second and plain fruit in sight starts a tree check (0: none; protein leverage, Felton et al. 2009) |
+| `fauna.founders.loftstrider.glider.crave_fuel_full` | (absent) | fraction of fuel cap | [0, 1] |  | - | placeholder | SP-CRAVE: fuel this full over a reserve under crave_reserve_lag reads as nitrogen binding (the N-free store full, the N-funded one not) |
+| `fauna.founders.loftstrider.glider.crave_reserve_lag` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | SP-CRAVE: a reserve under this, with fuel at crave_fuel_full, lags (nitrogen craving) |
+| `fauna.founders.loftstrider.glider.crave_energy_low` | (absent) | fraction of fuel+reserve room | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: the energy craving rises from 0 at this fullness of fuel and reserve to 1 empty (1 with the emergency latch); the walk then goes to the food absorbed most per second (0: none) |
 | `fauna.founders.loftstrider.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.loftstrider.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.loftstrider.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -4069,6 +4111,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.birth_cost` | 0.0727776 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.ripple-snail.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.ripple-snail.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.ripple-snail.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.ripple-snail.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.ripple-snail.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.ripple-snail.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.ripple-snail.core.lifespan_median_s` | 43200.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -4166,6 +4210,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.ripple-snail.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.ripple-snail.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.ripple-snail.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.ripple-snail.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.ripple-snail.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.ripple-snail.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -4352,6 +4397,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.ripple-snail.drop.max_m` | 0.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.ripple-snail.drop.wound_per_m` | 0.0 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.ripple-snail.drop.water_max_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-CRAVE: deepest jump into water an adult takes, to the surface (a smaller body: x its height / the adult's); only into water it swims or wades out of, the wound from the height over the surface; last, after every dry jump (0: never into water) |
 | `fauna.founders.ripple-snail.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -4402,6 +4448,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
 | `fauna.founders.ripple-snail.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.ripple-snail.glider.check_walk_factor` | (absent) | ratio | (0, inf) | 0.5–8 | - | placeholder | SP-PROTEIN: a check walk is given up after walking this many times its longest route (route_detour x check_search_m) at its own cruise without arriving, and lapses when not walked that long (a giving-up time growing with patch distance, Charnov 1976) |
+| `fauna.founders.ripple-snail.glider.crave_nitrogen` | (absent) | craving 0-1 | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: nitrogen craving of a body building tissue (young under birth_body, gestating or nursing mother, brood short) or with fuel full over a lagging reserve; it wins over a lower energy craving, so the walk goes to the food funding most tissue per second and plain fruit in sight starts a tree check (0: none; protein leverage, Felton et al. 2009) |
+| `fauna.founders.ripple-snail.glider.crave_fuel_full` | (absent) | fraction of fuel cap | [0, 1] |  | - | placeholder | SP-CRAVE: fuel this full over a reserve under crave_reserve_lag reads as nitrogen binding (the N-free store full, the N-funded one not) |
+| `fauna.founders.ripple-snail.glider.crave_reserve_lag` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | SP-CRAVE: a reserve under this, with fuel at crave_fuel_full, lags (nitrogen craving) |
+| `fauna.founders.ripple-snail.glider.crave_energy_low` | (absent) | fraction of fuel+reserve room | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: the energy craving rises from 0 at this fullness of fuel and reserve to 1 empty (1 with the emergency latch); the walk then goes to the food absorbed most per second (0: none) |
 | `fauna.founders.ripple-snail.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.ripple-snail.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.ripple-snail.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -4558,6 +4608,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.birth_cost` | 0.015 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.bellwing.core.reserve_cap` | 0.8 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.bellwing.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.bellwing.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.bellwing.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.bellwing.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.bellwing.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.bellwing.core.lifespan_median_s` | 43200.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -4655,6 +4707,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.bellwing.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.bellwing.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.bellwing.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.bellwing.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.bellwing.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.bellwing.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -4841,6 +4894,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.bellwing.drop.max_m` | 0.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.bellwing.drop.wound_per_m` | 0.0 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.bellwing.drop.water_max_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-CRAVE: deepest jump into water an adult takes, to the surface (a smaller body: x its height / the adult's); only into water it swims or wades out of, the wound from the height over the surface; last, after every dry jump (0: never into water) |
 | `fauna.founders.bellwing.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -4891,6 +4945,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
 | `fauna.founders.bellwing.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.bellwing.glider.check_walk_factor` | (absent) | ratio | (0, inf) | 0.5–8 | - | placeholder | SP-PROTEIN: a check walk is given up after walking this many times its longest route (route_detour x check_search_m) at its own cruise without arriving, and lapses when not walked that long (a giving-up time growing with patch distance, Charnov 1976) |
+| `fauna.founders.bellwing.glider.crave_nitrogen` | (absent) | craving 0-1 | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: nitrogen craving of a body building tissue (young under birth_body, gestating or nursing mother, brood short) or with fuel full over a lagging reserve; it wins over a lower energy craving, so the walk goes to the food funding most tissue per second and plain fruit in sight starts a tree check (0: none; protein leverage, Felton et al. 2009) |
+| `fauna.founders.bellwing.glider.crave_fuel_full` | (absent) | fraction of fuel cap | [0, 1] |  | - | placeholder | SP-CRAVE: fuel this full over a reserve under crave_reserve_lag reads as nitrogen binding (the N-free store full, the N-funded one not) |
+| `fauna.founders.bellwing.glider.crave_reserve_lag` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | SP-CRAVE: a reserve under this, with fuel at crave_fuel_full, lags (nitrogen craving) |
+| `fauna.founders.bellwing.glider.crave_energy_low` | (absent) | fraction of fuel+reserve room | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: the energy craving rises from 0 at this fullness of fuel and reserve to 1 empty (1 with the emergency latch); the walk then goes to the food absorbed most per second (0: none) |
 | `fauna.founders.bellwing.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.bellwing.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.bellwing.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -5047,6 +5105,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.birth_cost` | 0.07111111111111111 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.seedporter.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.seedporter.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.seedporter.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.seedporter.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.seedporter.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.seedporter.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.seedporter.core.lifespan_median_s` | 57600.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -5144,6 +5204,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.seedporter.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.seedporter.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.seedporter.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.seedporter.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.seedporter.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.seedporter.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -5330,6 +5391,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.seedporter.drop.max_m` | 1.6 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.seedporter.drop.wound_per_m` | 0.1 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.seedporter.drop.water_max_m` | 4.0 | m | [0, inf) |  | - | placeholder | SP-CRAVE: deepest jump into water an adult takes, to the surface (a smaller body: x its height / the adult's); only into water it swims or wades out of, the wound from the height over the surface; last, after every dry jump (0: never into water) |
 | `fauna.founders.seedporter.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -5380,6 +5442,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.glider.check_search_m` | 16.0 | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
 | `fauna.founders.seedporter.glider.check_memory_s` | 3600.0 | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.seedporter.glider.check_walk_factor` | 2.0 | ratio | (0, inf) | 0.5–8 | - | placeholder | SP-PROTEIN: a check walk is given up after walking this many times its longest route (route_detour x check_search_m) at its own cruise without arriving, and lapses when not walked that long (a giving-up time growing with patch distance, Charnov 1976) |
+| `fauna.founders.seedporter.glider.crave_nitrogen` | 0.5 | craving 0-1 | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: nitrogen craving of a body building tissue (young under birth_body, gestating or nursing mother, brood short) or with fuel full over a lagging reserve; it wins over a lower energy craving, so the walk goes to the food funding most tissue per second and plain fruit in sight starts a tree check (0: none; protein leverage, Felton et al. 2009) |
+| `fauna.founders.seedporter.glider.crave_fuel_full` | 0.9 | fraction of fuel cap | [0, 1] |  | - | placeholder | SP-CRAVE: fuel this full over a reserve under crave_reserve_lag reads as nitrogen binding (the N-free store full, the N-funded one not) |
+| `fauna.founders.seedporter.glider.crave_reserve_lag` | 0.75 | fraction of reserve cap | [0, 1] |  | - | placeholder | SP-CRAVE: a reserve under this, with fuel at crave_fuel_full, lags (nitrogen craving) |
+| `fauna.founders.seedporter.glider.crave_energy_low` | 0.5 | fraction of fuel+reserve room | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: the energy craving rises from 0 at this fullness of fuel and reserve to 1 empty (1 with the emergency latch); the walk then goes to the food absorbed most per second (0: none) |
 | `fauna.founders.seedporter.gut_seeds.seeds_per_fruit_organic` | 0.1 | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.seedporter.gut_seeds.gut_transit_s` | 900.0 | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.seedporter.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -5536,6 +5602,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.birth_cost` | 0.5331199999999999 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.chorister.core.reserve_cap` | 1.0 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.chorister.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.chorister.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.chorister.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.chorister.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.chorister.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.chorister.core.lifespan_median_s` | 86400.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -5633,6 +5701,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.chorister.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.chorister.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.chorister.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.chorister.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.chorister.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.chorister.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -5819,6 +5888,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.chorister.drop.max_m` | 3.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.chorister.drop.wound_per_m` | 0.08 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.chorister.drop.water_max_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-CRAVE: deepest jump into water an adult takes, to the surface (a smaller body: x its height / the adult's); only into water it swims or wades out of, the wound from the height over the surface; last, after every dry jump (0: never into water) |
 | `fauna.founders.chorister.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -5869,6 +5939,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
 | `fauna.founders.chorister.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.chorister.glider.check_walk_factor` | (absent) | ratio | (0, inf) | 0.5–8 | - | placeholder | SP-PROTEIN: a check walk is given up after walking this many times its longest route (route_detour x check_search_m) at its own cruise without arriving, and lapses when not walked that long (a giving-up time growing with patch distance, Charnov 1976) |
+| `fauna.founders.chorister.glider.crave_nitrogen` | (absent) | craving 0-1 | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: nitrogen craving of a body building tissue (young under birth_body, gestating or nursing mother, brood short) or with fuel full over a lagging reserve; it wins over a lower energy craving, so the walk goes to the food funding most tissue per second and plain fruit in sight starts a tree check (0: none; protein leverage, Felton et al. 2009) |
+| `fauna.founders.chorister.glider.crave_fuel_full` | (absent) | fraction of fuel cap | [0, 1] |  | - | placeholder | SP-CRAVE: fuel this full over a reserve under crave_reserve_lag reads as nitrogen binding (the N-free store full, the N-funded one not) |
+| `fauna.founders.chorister.glider.crave_reserve_lag` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | SP-CRAVE: a reserve under this, with fuel at crave_fuel_full, lags (nitrogen craving) |
+| `fauna.founders.chorister.glider.crave_energy_low` | (absent) | fraction of fuel+reserve room | [0, 1] | 0–1 | - | placeholder | SP-CRAVE: the energy craving rises from 0 at this fullness of fuel and reserve to 1 empty (1 with the emergency latch); the walk then goes to the food absorbed most per second (0: none) |
 | `fauna.founders.chorister.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.chorister.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.chorister.pack.pack_radius_m` | 6.0 | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
