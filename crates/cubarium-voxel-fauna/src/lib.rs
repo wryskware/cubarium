@@ -82,6 +82,8 @@ pub mod crave;
 #[path = "sp_crave_tests.rs"]
 mod sp_crave_tests;
 #[cfg(test)]
+mod sp_meal_tests;
+#[cfg(test)]
 mod nuts_tests;
 #[cfg(test)]
 mod intent_tests;
