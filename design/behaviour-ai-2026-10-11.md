@@ -891,6 +891,14 @@ an already isolated prey). The heuristics add local memory:
   0.1 of the difference. Live training now runs `comparison = "twins"`
   (`config/training/kin-twins-2026-10-13.toml`: 1024 pairs × 2-minute windows a generation).
   The other modes stay as switches.
+- **Flat after 3 h (2026-10-13/14).** Lanternjaw (44–60 generations) and seedporter (33) twin
+  runs end where they start (brain ≈ rules, a small lead that never grows; seedporter roosting
+  falls .56 → .06); Adam steps ~0.001 rms, so each step is mostly luck. **Wrysk, 2026-10-14:**
+  "i guess id say go ahead with your suggestion" — measure the gradient's noise first (one
+  generation's step estimated twice from fresh luck), then raise the signal per step to fit,
+  not a blind long run. And: "i wanna also revisit like how we are training though. i mean
+  theres the algorithm we use and then also optimizations for the runs. both could be subject
+  to improvements." A review of both comes back to him one topic at a time.
 - **Checks.** An algebraic check that a perturbation improving only a relative's energy
   survives the whole scorer. Readouts of raw own, relative and combined scores. Missing signs
   are never scored as zero returns.
