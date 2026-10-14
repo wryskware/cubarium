@@ -206,7 +206,10 @@ use crate::{Fauna, FaunaConfig};
 // 88: LARVA-FIX — `LarvaField::pool` (each lineage's pool of ready larvae), `Cohort::unfed_s`
 //     (the starvation clock) and the ledger loses `died_remainder` (a state layout change).
 //     `Larva::starve_s` is named config.
-pub const SCHEMA: u32 = 88;
+// 89: N-POOL — `Animal::n_pool` (the absorbed-nitrogen pool, a state layout change).
+//     `FounderPhysiology::protein_digestibility` and `SpeciesConfig::{n_pool_half_life_s,
+//     n_pool_cap}` are named config.
+pub const SCHEMA: u32 = 89;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {
@@ -349,6 +352,7 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
             ("fuel", a.fuel),
             ("fuel energy", a.fuel_energy),
             ("mineral", a.mineral),
+            ("absorbed-N pool", a.n_pool),
             ("energy", a.energy),
         ] {
             if !value.is_finite() || value < 0.0 {
@@ -639,6 +643,7 @@ mod tests {
             age_ticks: 0,
             lifespan_ticks: 0,
             gut: cubarium_voxel_flora::Taken::default(),
+            n_pool: 0.0,
             state: State::Resting,
             mobility: crate::Mobility::default(),
             wound: 0.0,

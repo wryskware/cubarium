@@ -21,6 +21,7 @@ pub fn registry() -> &'static Registry {
             vec![
                 Alias { pattern: "fauna.founders".into(), names: founders.clone() },
                 Alias { pattern: "fauna.founders.*.yield_by_food".into(), names: foods.clone() },
+                Alias { pattern: "fauna.founders.*.protein_digestibility".into(), names: foods.clone() },
                 Alias { pattern: "fauna.founders.*.gut.digestion_s".into(), names: foods },
                 Alias { pattern: "fauna.founders.*.hunter.prey".into(), names: founders.clone() },
                 Alias { pattern: "fauna.founders.*.hunter.prey_weight".into(), names: founders.clone() },
@@ -142,6 +143,10 @@ fn species_rows() -> Vec<Row> {
             .search(0.2, 5.0).grade("A"),
         r("fuel_cap", "fraction of body", nonneg, "nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat")
             .evolve().grade("A").prov("derived"),
+        r("n_pool_half_life_s", "s", nonneg, "N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006)")
+            .search(60.0, 10800.0).log().grade("C"),
+        r("n_pool_cap", "tissue it funds per unit body", nonneg, "N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006)")
+            .search(0.005, 0.2).log().grade("C"),
         r("drown_depth_m", "m", nonneg, "standing water that kills the heuristic body and a clutch").grade("D"),
         r("energy_density", "energy per org-unit", nonneg, "energy an introduced animal arrives with").grade("N"),
         r("lifespan_median_s", "s", nonneg, "median lifespan (0: none)")
@@ -285,6 +290,8 @@ fn founder_rows() -> Vec<Row> {
         r("mouth_reach_length_fraction", "x body length", nonneg, "the mouth's reach ahead of the footprint")
             .evolve().digest(),
         r("yield_by_food.*", "fraction", fraction, "assimilation yield of one food class").search(0.05, 0.99),
+        r("protein_digestibility.*", "fraction", fraction, "N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY)")
+            .search(0.2, 1.0).grade("B"),
         r("organ_structure_fraction", "fraction of body", Range::closed(0.0, 1.0).open_hi(), "sensor/organ share of structure")
             .grade("N"),
         r("flower_ambush_m", "m", nonneg, "MIMIC: holds an ambush this close to a flower"),

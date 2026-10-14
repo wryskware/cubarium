@@ -30,6 +30,9 @@ pub struct Body {
     /// Mineral carried by each pool. Unspecified open-loop pools retain the model's
     /// fully funded assumption; a specified zero is genuinely mineral-free food.
     pub stomach_mineral: [Option<f64>; Food::COUNT],
+    /// The absorbed-N pool (N-POOL, the sim's `Animal::n_pool`), mineral units: digested
+    /// protein N waiting for carbon, decaying at `n_pool_half_life_s`, held to `n_pool_cap`.
+    pub n_pool: f64,
     pub eating: bool,
     pub emergency: bool,
 }
@@ -50,7 +53,7 @@ impl Body {
         let gut: f64 = Food::ALL.iter().map(|food| {
             self.stomach_mineral[food.index()].unwrap_or(n_tissue * self.stomach[food.index()])
         }).sum();
-        n_tissue * (self.body + self.reserve) + gut
+        n_tissue * (self.body + self.reserve) + gut + self.n_pool
     }
 }
 
@@ -179,79 +182,118 @@ pub fn digested_share(tau: f64, dt: f64) -> f64 {
     1.0 - (1.0 - per_tick).powf(dt / DT)
 }
 
-/// **Digestion and assimilation** over `dt` (`step.rs:822-876` and `assimilate`,
-/// `step.rs:2705-2766`): each class's pool empties at `S/τ`, `τ` shortened for a small body
-/// by the gut's mass exponent (`Gut::throughput_factor`); the classes' yields are scaled
-/// together to the reserve's room `reserve_cap · body − reserve`; what the yield does not
-/// absorb is dung; a mature body earmarks `brood_share` of what was placed as its brood,
-/// up to `Reproduction::brood_target`.
+/// **Digestion and assimilation** over `dt` (`step.rs` `digest`, `assimilate_food`,
+/// `n_pool_step`): each class's pool empties at `S/τ`, `τ` shortened for a small body by the
+/// gut's mass exponent (`Gut::throughput_factor`); the classes' yields are scaled together to
+/// the reserve's room `reserve_cap · body − reserve`; what the yield does not absorb is dung;
+/// a mature body earmarks `brood_share` of what was placed as its brood, up to
+/// `Reproduction::brood_target`.
 ///
-/// Mineral limits the reserve share. Unfunded absorption fills mineral-free fuel to
-/// `fuel_cap · body`; only overflow heats digestion. Fully funded open-loop inputs may
-/// omit their mineral amount. Fuel pays respiration and never builds tissue or brood.
+/// N-POOL: a class's digestible protein N (`protein_digestibility` × its mineral) joins the
+/// absorbed-N pool, and the reserve takes absorbed matter as far as the pool's N funds it;
+/// the unfunded absorption fills mineral-free fuel to `fuel_cap · body` and only overflow
+/// heats digestion. N left in the pool builds with the fuel's carbon where the reserve has
+/// room, then decays at `n_pool_half_life_s` and is held to `n_pool_cap · n_tissue · body`
+/// (the lost N leaves the body). Fully funded open-loop inputs may omit their mineral amount
+/// (taken as `n_tissue` per unit).
 pub fn digest(phys: &FounderPhysiology, b: &mut Body, dt: f64) -> Flows {
     let sc = &phys.core;
     let mut f = Flows::default();
-    if !(b.stomach_total() > 0.0) {
-        return f;
-    }
-    let speed = phys.gut.throughput_factor(b.body, sc.body_max);
-    let room = (sc.reserve_of(b.body) - b.reserve).max(0.0);
-    let mut raw = [0.0f64; Food::COUNT];
-    let mut yields = 0.0;
-    let mut funded = [0.0; Food::COUNT];
-    for food in Food::ALL {
-        let p = b.stomach[food.index()];
-        if !(p > 0.0) {
-            continue;
-        }
-        let tau = phys.gut.digestion_s[food.index()] / speed;
-        raw[food.index()] = p * digested_share(tau, dt);
-        let mineral = b.stomach_mineral[food.index()].unwrap_or(sc.n_tissue * p);
-        let mineral_share = if sc.n_tissue > 0.0 {
-            mineral / (sc.n_tissue * p)
-        } else {
-            f64::INFINITY
-        };
-        funded[food.index()] = phys
-            .yield_for(food)
-            .clamp(0.0, 1.0)
-            .min(mineral_share.max(0.0));
-        yields += raw[food.index()] * funded[food.index()];
-    }
-    let scale = if yields > room && yields > 0.0 { room / yields } else { 1.0 };
-    for food in Food::ALL {
-        // A pool with no mineral-funded share does not compete for reserve room.
-        // The sim passes its full gut throughput to fuel or digestion overflow.
-        let pool_scale = if funded[food.index()] > 0.0 { scale } else { 1.0 };
-        let d = raw[food.index()] * pool_scale;
-        if !(d > 0.0) {
-            continue;
-        }
-        let before = b.stomach[food.index()];
-        b.stomach[food.index()] = (before - d).max(0.0);
-        if let Some(mineral) = &mut b.stomach_mineral[food.index()] {
-            *mineral *= (1.0 - d / before).max(0.0);
-        }
-        let y = phys.yield_for(food).clamp(0.0, 1.0);
-        let tissue = funded[food.index()] * d;
-        let placed = tissue.min((sc.reserve_of(b.body) - b.reserve).max(0.0));
-        let fuel = ((y * d - tissue).max(0.0)).min((sc.fuel_cap * b.body - b.fuel).max(0.0));
-        b.reserve += placed;
-        b.fuel += fuel;
-        let rule = sc.reproduction;
-        if rule.brood_share > 0.0 && b.body >= sc.birth_body {
-            let target = rule.brood_target(sc, b.body);
-            if b.brood < target {
-                b.brood = (b.brood + rule.brood_share * placed).min(target);
+    if b.stomach_total() > 0.0 {
+        let speed = phys.gut.throughput_factor(b.body, sc.body_max);
+        let room = (sc.reserve_of(b.body) - b.reserve).max(0.0);
+        let mut raw = [0.0f64; Food::COUNT];
+        let mut yields = 0.0;
+        let mut spare = 0.0;
+        let mut funded = [0.0; Food::COUNT];
+        let mut n_share = [0.0; Food::COUNT];
+        for food in Food::ALL {
+            let p = b.stomach[food.index()];
+            if !(p > 0.0) {
+                continue;
+            }
+            let tau = phys.gut.digestion_s[food.index()] / speed;
+            raw[food.index()] = p * digested_share(tau, dt);
+            let mineral = b.stomach_mineral[food.index()].unwrap_or(sc.n_tissue * p);
+            n_share[food.index()] = phys.digestibility_for(food).clamp(0.0, 1.0) * mineral / p;
+            let mineral_share = if sc.n_tissue > 0.0 {
+                n_share[food.index()] / sc.n_tissue
+            } else {
+                f64::INFINITY
+            };
+            let y = phys.yield_for(food).clamp(0.0, 1.0);
+            funded[food.index()] = y.min(mineral_share.max(0.0));
+            yields += raw[food.index()] * funded[food.index()];
+            if funded[food.index()] > 0.0 {
+                spare += raw[food.index()] * (y - funded[food.index()]);
             }
         }
-        f.digested += d;
-        f.assimilated += placed + fuel;
-        f.digestion_heat += y * d - placed - fuel;
-        f.egested += (1.0 - y) * d;
+        yields += spare.min(pool_tissue(sc, b.n_pool));
+        let scale = if yields > room && yields > 0.0 { room / yields } else { 1.0 };
+        for food in Food::ALL {
+            // A pool with no mineral-funded share does not compete for reserve room.
+            // The sim passes its full gut throughput to fuel or digestion overflow.
+            let pool_scale = if funded[food.index()] > 0.0 { scale } else { 1.0 };
+            let d = raw[food.index()] * pool_scale;
+            if !(d > 0.0) {
+                continue;
+            }
+            let before = b.stomach[food.index()];
+            b.stomach[food.index()] = (before - d).max(0.0);
+            if let Some(mineral) = &mut b.stomach_mineral[food.index()] {
+                *mineral *= (1.0 - d / before).max(0.0);
+            }
+            b.n_pool += n_share[food.index()] * d;
+            let y = phys.yield_for(food).clamp(0.0, 1.0);
+            let absorbed = y * d;
+            let tissue = absorbed.min(pool_tissue(sc, b.n_pool));
+            let placed = tissue.min((sc.reserve_of(b.body) - b.reserve).max(0.0));
+            let fuel = ((absorbed - tissue).max(0.0)).min((sc.fuel_cap * b.body - b.fuel).max(0.0));
+            b.reserve += placed;
+            b.n_pool = (b.n_pool - sc.n_tissue * placed).max(0.0);
+            b.fuel += fuel;
+            earmark_brood(sc, b, placed);
+            f.digested += d;
+            f.assimilated += placed + fuel;
+            f.digestion_heat += absorbed - placed - fuel;
+            f.egested += (1.0 - y) * d;
+        }
     }
+    n_pool(sc, b, dt);
     f
+}
+
+/// Tissue the pool's N funds.
+fn pool_tissue(sc: &SpeciesConfig, n_pool: f64) -> f64 {
+    if sc.n_tissue > 0.0 { (n_pool / sc.n_tissue).max(0.0) } else { f64::INFINITY }
+}
+
+fn earmark_brood(sc: &SpeciesConfig, b: &mut Body, placed: f64) {
+    let rule = sc.reproduction;
+    if rule.brood_share > 0.0 && b.body >= sc.birth_body {
+        let target = rule.brood_target(sc, b.body);
+        if b.brood < target {
+            b.brood = (b.brood + rule.brood_share * placed).min(target);
+        }
+    }
+}
+
+/// The pool over `dt` (`step.rs` `pair_pool_with_fuel`, `n_pool_step`): its N builds with
+/// the fuel's carbon where the reserve has room, then decays and is held to its cap.
+fn n_pool(sc: &SpeciesConfig, b: &mut Body, dt: f64) {
+    if !(b.n_pool > 0.0) {
+        return;
+    }
+    let room = (sc.reserve_of(b.body) - b.reserve).max(0.0);
+    let x = b.fuel.min(pool_tissue(sc, b.n_pool)).min(room).max(0.0);
+    if x > 0.0 {
+        b.fuel -= x;
+        b.reserve += x;
+        b.n_pool = (b.n_pool - sc.n_tissue * x).max(0.0);
+        earmark_brood(sc, b, x);
+    }
+    let kept = if sc.n_pool_half_life_s > 0.0 { 0.5f64.powf(dt / sc.n_pool_half_life_s) } else { 0.0 };
+    b.n_pool = (b.n_pool * kept).min((sc.n_pool_cap * sc.n_tissue * b.body).max(0.0)).max(0.0);
 }
 
 /// **Growth** over `dt` (`step.rs:959-993`): structure is built out of the reserve above the

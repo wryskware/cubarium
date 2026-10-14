@@ -137,7 +137,7 @@ pub(crate) struct Sky {
     pub clock_on: bool,
     pub daylight: f64,
 }
-use cubarium_voxel::organism::{Budget, build_from, settle_mineral, tissue_funded};
+use cubarium_voxel::organism::{Budget, build_from, tissue_funded};
 use cubarium_voxel::pro_rata;
 
 pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora, threads: usize) {
@@ -229,6 +229,7 @@ pub(crate) fn begin(fauna: &mut Fauna, world: &World, flora: &mut Flora) -> Tick
         // The minimal gut: the stomach digests into the room upkeep and the rider's
         // take just made.
         digest(fauna);
+        n_pool_step(fauna);
         heal(fauna);
         egg_upkeep(fauna);
         let matured = grow(fauna);
@@ -1291,6 +1292,9 @@ fn digest(fauna: &mut Fauna) {
         let mut raw = [0.0f64; Food::COUNT];
         let mut passing = [0.0f64; Food::COUNT];
         let mut yields = 0.0;
+        // N-POOL: carbon the classes' own digestible N cannot fund, which the pool's N
+        // already waiting can.
+        let mut spare = 0.0;
         for food in Food::ALL {
             let p = a.stomach.pools[food.index()];
             if !(p.organic > 0.0) {
@@ -1299,7 +1303,7 @@ fn digest(fauna: &mut Fauna) {
             let tau = phys.gut.digestion_s[food.index()] / speed;
             let d = if tau > 0.0 { (p.organic * DT / tau).min(p.organic) } else { p.organic };
             let funded = if sc.n_tissue > 0.0 {
-                p.mineral / (sc.n_tissue * p.organic)
+                phys.digestibility_for(food).clamp(0.0, 1.0) * p.mineral / (sc.n_tissue * p.organic)
             } else {
                 f64::INFINITY
             };
@@ -1310,7 +1314,9 @@ fn digest(fauna: &mut Fauna) {
             }
             raw[food.index()] = d;
             yields += d * y_eff;
+            spare += d * (phys.yield_for(food) - y_eff).max(0.0);
         }
+        yields += spare.min(tissue_funded(a.n_pool, sc.n_tissue));
         let scale = if yields > room { room / yields } else { 1.0 };
         for food in Food::ALL {
             let d = raw[food.index()] * scale + passing[food.index()];
@@ -1324,7 +1330,8 @@ fn digest(fauna: &mut Fauna) {
             l.digested.energy += t.energy;
             l.digested_by_founder[f.index()] += t.organic;
             let fuel_before = fauna.animals[i].fuel;
-            let placed = assimilate(fauna, i, &sc, t, phys.yield_for(food)) + fauna.animals[i].fuel
+            let placed = assimilate_food(fauna, i, &sc, t, phys.yield_for(food), phys.digestibility_for(food))
+                + fauna.animals[i].fuel
                 - fuel_before;
             fauna.ledger.assimilated_by_founder[f.index()] += placed;
             if fauna.animals[i].mobility.ashore {
@@ -5046,7 +5053,7 @@ fn corpse_contents(a: &Animal) -> Taken {
     let fed = a.stomach.total();
     Taken {
         organic: a.organic() + a.gut.organic + seeds.organic + fed.organic,
-        mineral: a.mineral + a.gut.mineral + seeds.mineral + fed.mineral,
+        mineral: a.mineral + a.n_pool + a.gut.mineral + seeds.mineral + fed.mineral,
         energy: a.energy + a.fuel_energy + a.gut.energy + seeds.energy + fed.energy,
     }
 }
@@ -5236,49 +5243,53 @@ fn founder_feed(
     true
 }
 
-/// A bite becoming tissue and fuel: the food class's own yield is stored **as far as the
-/// bite's own mineral pays for**, the undigested `(1 − yield)` share is egested, the
-/// unfunded rest fills fuel, its overflow is respired, and energy follows at the bite's own
-/// density, and the undigested share and the mineral that came with more tissue than was
-/// built go to the gut, voided later as dung ([`void_guts`]).
+/// A bite becoming tissue and fuel (N-POOL): the food class's yield of its matter is
+/// absorbed and its digestible share of protein N joins the body's absorbed-N pool
+/// ([`Animal::n_pool`]); the absorbed matter is stored into the reserve **as far as the pool's
+/// N pays for it**, the undigested `(1 − yield)` share and the indigestible N are egested to
+/// the gut, the absorbed matter the pool cannot fund fills fuel and its overflow is respired,
+/// and energy follows at the bite's own density. N left in the pool then pairs with stored
+/// fuel ([`pair_pool_with_fuel`]) and otherwise waits for the next bite's carbon, decaying
+/// to the gut meanwhile ([`n_pool_step`]); the gut is voided as dung ([`void_guts`]).
 ///
-/// **The mineral budget comes before the tissue.** `n_tissue` is mineral per
-/// unit of tissue *built*, so a bite can only build `t.mineral / n_tissue` of it. At the
-/// placeholders that binds on every bite: a plant's foliage carries `n_tissue` 0.02 and
-/// this animal's tissue wants 0.05, so a `1e-4` bite brings `2e-6` of mineral and funds
-/// `4e-5` of the `5e-5` a yield of 0.5 would otherwise have built. The unfunded
-/// organic matter fills nitrogen-free fuel up to `fuel_cap · body`; overflow leaves
-/// with its energy as heat.
+/// **The pool comes before the tissue.** `n_tissue` is mineral per unit of tissue *built*,
+/// so the reserve takes at most `n_pool / n_tissue` of this bite's absorbed matter. A
+/// foliage bite (0.02 mineral at digestibility 0.65) funds about a quarter of its own
+/// matter against tissue's 0.05; a larva's (0.05 at 0.8) more than its yield of 0.5, and the
+/// N its own carbon cannot match waits for a fruit's.
 ///
-/// **The yield is the food's, not the eater's**: the caller hands in
-/// [`crate::FounderPhysiology::yield_for`] for what was actually eaten, because a
-/// detritivore with three foods has no single yield.
+/// **The yield and the digestibility are the food's, not the eater's**: the caller hands in
+/// [`crate::FounderPhysiology::yield_for`] and
+/// [`crate::FounderPhysiology::digestibility_for`] for what was actually eaten.
 ///
-/// **No internal mineral reserve.** [`Animal::mineral`] is an inventory of what is already
-/// in the tissue and not a stock growth may draw on — the plant layer's `Stand::mineral`
-/// is the same — so an animal holding mineral still builds nothing out of a mineral-free
-/// bite.
-/// Returns the organic matter placed into the reserve. The caller adds the fuel gained
-/// when recording total assimilation and prior-interval intake feedback.
-fn assimilate(
+/// **No mineral reserve beyond the pool.** [`Animal::mineral`] is an inventory of what is
+/// already in the tissue and not a stock growth may draw on; only the pool's absorbed N,
+/// which decays within hours, funds new tissue.
+/// Returns the organic matter placed into the reserve (from the bite and from fuel). The
+/// caller adds the fuel change when recording total assimilation and prior-interval intake
+/// feedback, so fuel moved into the reserve is not counted twice.
+fn assimilate_food(
     fauna: &mut Fauna,
     i: usize,
     sc: &SpeciesConfig,
     t: Taken,
     yield_fraction: f64,
+    digestibility: f64,
 ) -> f64 {
     let a = &mut fauna.animals[i];
-    // The feeding income function: the food's yield of the bite, as far as this bite's
-    // mineral can pay for the tissue.
-    let funded = tissue_funded(t.mineral, sc.n_tissue);
-    let assimilated = (yield_fraction * t.organic).min(funded);
-    // Egested: the share the yield never absorbs goes to the gut, not to heat. Only the
-    // absorbed matter the bite's mineral cannot fund fills fuel; cap overflow and
-    // the reserve backstop are respired.
-    // The absorbed share its mineral cannot fund, exactly zero when the mineral pays for
-    // the whole yield; the egested share is the remainder, so the three add up.
-    let unfunded = (yield_fraction * t.organic - assimilated).clamp(0.0, t.organic - assimilated);
-    let egested = (t.organic - assimilated - unfunded).max(0.0);
+    // Protein N: the digestible share joins the pool, the rest leaves with the dung.
+    let n_in = (digestibility.clamp(0.0, 1.0) * t.mineral).max(0.0);
+    a.n_pool += n_in;
+    a.gut.mineral += t.mineral - n_in;
+    // The feeding income function: the food's yield of the bite, as far as the pool's N
+    // can pay for the tissue.
+    let absorbed = (yield_fraction * t.organic).clamp(0.0, t.organic.max(0.0));
+    let funded = tissue_funded(a.n_pool, sc.n_tissue);
+    let assimilated = absorbed.min(funded);
+    // The absorbed share the pool cannot fund, exactly zero when it pays for the whole
+    // yield; the egested share is the remainder, so the three add up.
+    let unfunded = absorbed - assimilated;
+    let egested = (t.organic - absorbed).max(0.0);
 
     // The organism budget: the income stored into the reserve, up to `reserve_cap · body`.
     // Structure is built out of the reserve at the growth rate ([`grow`]), never straight
@@ -5288,15 +5299,8 @@ fn assimilate(
     let mut budget = Budget::new(assimilated, funded);
     let placed = budget.store((sc.reserve_of(a.body) - a.reserve).max(0.0));
     a.reserve += placed;
-    // The brood (D1b): a mature body earmarks its share of the income for its next clutch,
-    // up to what that clutch costs.
-    let rule = sc.reproduction;
-    if rule.brood_share > 0.0 && a.body >= sc.birth_body {
-        let target = rule.brood_target(sc, a.body);
-        if a.reproduction.brood < target {
-            a.reproduction.brood = (a.reproduction.brood + rule.brood_share * placed).min(target);
-        }
-    }
+    take_pool_n(a, sc, placed);
+    earmark_brood(a, sc, placed);
     let fuel_kept = unfunded.min((sc.fuel_cap * a.body - a.fuel).max(0.0));
     a.fuel += fuel_kept;
     let respired = unfunded - fuel_kept + budget.close();
@@ -5313,19 +5317,87 @@ fn assimilate(
         0.0
     };
     let heat = (t.energy - kept_energy - fuel_energy - egested_energy).max(0.0);
-
-    // Mineral: what the new tissue needs is kept and the excess joins the gut, voided
-    // with the undigested matter as dung. An animal draws mineral from nothing but its
-    // food, so there is no pool to draw a shortfall from.
-    let settled = settle_mineral(t.mineral, sc.n_tissue * placed, 0.0);
-    a.mineral += t.mineral - settled.released;
     a.gut.organic += egested;
-    a.gut.mineral += settled.released;
     a.gut.energy += egested_energy;
+    // N the bite's carbon could not match builds with the stored fuel's.
+    let from_fuel = pair_pool_with_fuel(a, sc);
 
     book_respired(fauna, respired, Respiration::Digestion);
     fauna.ledger.heat_out += heat;
-    placed
+    placed + from_fuel
+}
+
+/// [`assimilate_food`] for a bite whose protein is wholly digestible: the per-bite cases'
+/// entry, where the digestibility is not what is being asked about.
+#[cfg(test)]
+fn assimilate(fauna: &mut Fauna, i: usize, sc: &SpeciesConfig, t: Taken, yield_fraction: f64) -> f64 {
+    assimilate_food(fauna, i, sc, t, yield_fraction, 1.0)
+}
+
+/// The pool's N in `placed` of new reserve tissue moves into the tissue's inventory.
+fn take_pool_n(a: &mut Animal, sc: &SpeciesConfig, placed: f64) {
+    let n = (sc.n_tissue * placed).clamp(0.0, a.n_pool.max(0.0));
+    a.n_pool -= n;
+    a.mineral += n;
+}
+
+/// The brood (D1b): a mature body earmarks its share of the income for its next clutch,
+/// up to what that clutch costs.
+fn earmark_brood(a: &mut Animal, sc: &SpeciesConfig, placed: f64) {
+    let rule = sc.reproduction;
+    if rule.brood_share > 0.0 && a.body >= sc.birth_body {
+        let target = rule.brood_target(sc, a.body);
+        if a.reproduction.brood < target {
+            a.reproduction.brood = (a.reproduction.brood + rule.brood_share * placed).min(target);
+        }
+    }
+}
+
+/// **The pool's N builds with the fuel's carbon** (N-POOL): absorbed N no bite's carbon
+/// matched builds reserve tissue out of the nitrogen-free fuel, as far as the reserve has
+/// room, at par (the reserve is stored, not built), the fuel's energy pro rata. A transfer
+/// inside the body: nothing is respired or created. Returns the organic matter moved.
+fn pair_pool_with_fuel(a: &mut Animal, sc: &SpeciesConfig) -> f64 {
+    if !(a.n_pool > 0.0) || !(a.fuel > 0.0) {
+        return 0.0;
+    }
+    let room = (sc.reserve_of(a.body) - a.reserve).max(0.0);
+    let x = a.fuel.min(tissue_funded(a.n_pool, sc.n_tissue)).min(room).max(0.0);
+    if !(x > 0.0) {
+        return 0.0;
+    }
+    let out = take_fuel(a, x);
+    a.reserve += out.organic;
+    a.energy += out.energy;
+    take_pool_n(a, sc, out.organic);
+    earmark_brood(a, sc, out.organic);
+    out.organic
+}
+
+/// Step 2, after digestion: **the absorbed-N pool** (N-POOL). Each body's pool first builds
+/// with its fuel where the reserve has room ([`pair_pool_with_fuel`]), then decays at
+/// [`SpeciesConfig::n_pool_half_life_s`] and is held to [`SpeciesConfig::n_pool_cap`] ×
+/// `n_tissue` × body; the decayed and overflowing N (deaminated: its N leaves as urea) goes
+/// to the gut and out with the next void as dung. Mineral only moves.
+fn n_pool_step(fauna: &mut Fauna) {
+    for i in 0..fauna.animals.len() {
+        if !(fauna.animals[i].n_pool > 0.0) {
+            continue;
+        }
+        let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
+        let a = &mut fauna.animals[i];
+        pair_pool_with_fuel(a, &sc);
+        let kept = if sc.n_pool_half_life_s > 0.0 {
+            0.5f64.powf(DT / sc.n_pool_half_life_s)
+        } else {
+            0.0
+        };
+        let cap = (sc.n_pool_cap * sc.n_tissue * a.body).max(0.0);
+        let after = (a.n_pool * kept).min(cap).max(0.0);
+        let lost = a.n_pool - after;
+        a.n_pool = after;
+        a.gut.mineral += lost;
+    }
 }
 
 /// Step 6: **reproduction** — the gestation escrow, live birth, egg laying, incubation
@@ -5803,6 +5875,7 @@ pub(crate) fn newborn(
             false,
         ),
         gut: Taken::default(),
+        n_pool: 0.0,
         state: State::Resting,
         mobility: crate::Mobility::default(),
         wound: 0.0,
@@ -7469,6 +7542,9 @@ mod generation_tests;
 #[cfg(test)]
 #[path = "dung_tests.rs"]
 mod dung_tests;
+#[cfg(test)]
+#[path = "n_pool_tests.rs"]
+mod n_pool_tests;
 #[cfg(test)]
 #[path = "predation_fixture.rs"]
 mod predation_fixture;

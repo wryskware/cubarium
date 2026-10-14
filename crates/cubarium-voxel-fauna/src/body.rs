@@ -177,6 +177,38 @@ pub const LANTERNJAW_GROWTH_MAX_PER_S: f64 = 1.0e-5;
 /// lanternjaw's brood share, the fraction of a grown body's net income saved for its next
 /// clutch (the shared rule's 0.5 elsewhere).
 pub const LANTERNJAW_BROOD_SHARE: f64 = 0.75;
+/// **Protein digestibility per food class** (N-POOL, Wrysk 2026-10-14: "flesh about 0.9,
+/// insects about 0.8, plants lower"), in [`crate::Food::ALL`] order: the share of a bite's
+/// protein N absorbed, whatever the share of its matter
+/// ([`FounderPhysiology::protein_digestibility`]). Apparent digestibility, endogenous faecal N
+/// lumped in, since nothing else here charges it.
+/// - **Litter 0.5**: leaf litter's protein is mostly tannin- and lignin-bound, with microbial
+///   protein on it; litter-feeding macroarthropods assimilate litter poorly (commonly 10-30 %
+///   of its mass, David 2014, Soil Biol Biochem 76:109), its N better than its mass. A
+///   placeholder between that and fresh foliage.
+/// - **Cap tissue 0.7**: mushroom protein is about 0.7-0.9 digestible, the chitin walls binding
+///   some (Crisan & Sands 1978, in *The Biology and Cultivation of Edible Mushrooms*).
+/// - **Carrion 0.9**: meat's true protein digestibility is about 0.94-0.97 (FAO 2013, *Dietary
+///   protein quality evaluation in human nutrition*) and carnivores' apparent figure about 0.9;
+///   carrion is part decayed, so the low end.
+/// - **Foliage 0.65**: Robbins et al. 1987 (Ecology 68:98) give apparent digestible protein =
+///   0.93 · CP − 3.67 (% of dry matter) for tannin-free forage, about 0.65 at foliage's
+///   n_tissue 0.02 (CP 12.5 %); tannins lower it further.
+/// - **Film 0.75**: algal protein behind cell walls is about 0.7-0.85 digestible (Becker 2007,
+///   Biotechnol Adv 25:207).
+/// - **Nectar 0.8**: its little N is mostly free amino acids, absorbed almost whole, and the
+///   pollen lumped in with it is 0.5-0.9 digestible to pollen eaters (Roulston & Cane 2000,
+///   Plant Syst Evol 222:187).
+/// - **Fruit 0.5**: pulp is protein-poor (CP ~6 %), where Robbins' equation gives about 0.35;
+///   the vaulttree's nut (CP ~16 %) about 0.7, and both are this class.
+/// - **Larva 0.8**: insect protein is about 0.76-0.98 digestible, chitin binding some
+///   (Rumpold & Schlüter 2013, Mol Nutr Food Res 57:802).
+pub const PROTEIN_DIGESTIBILITY: [f64; crate::Food::COUNT] = [0.5, 0.7, 0.9, 0.65, 0.75, 0.8, 0.5, 0.8];
+
+fn default_protein_digestibility() -> [f64; crate::Food::COUNT] {
+    PROTEIN_DIGESTIBILITY
+}
+
 /// What a grazer builds out of a unit of foliage — and, by the decision, what a
 /// shredder builds out of a unit of glowcap cap tissue.
 const FOLIAGE_YIELD: f64 = 0.5;
@@ -422,6 +454,13 @@ pub struct FounderPhysiology {
     /// Every lineage fills all four honestly, including classes its diet never reaches:
     /// a zero there would be a trap for whoever adds a food later.
     pub yield_by_food: [f64; crate::Food::COUNT],
+    /// **Protein digestibility per [`crate::Food`] class** (N-POOL), in [`crate::Food::ALL`]
+    /// order: the share of a bite's mineral (its protein N) the gut absorbs into the
+    /// absorbed-N pool ([`crate::Animal::n_pool`]); the rest leaves in the dung. Separate
+    /// from [`FounderPhysiology::yield_by_food`], the share of the matter absorbed. By what
+    /// was eaten, not who ate it ([`PROTEIN_DIGESTIBILITY`] for every lineage).
+    #[serde(default = "default_protein_digestibility")]
+    pub protein_digestibility: [f64; crate::Food::COUNT],
     /// `f`, the declared share of the body's **total** structure that is sensor/organ
     /// tissue: 5% for the blind founder, 10% for the browser. The body's structure
     /// stock is the total; the sensor share is counted within it once — no second
@@ -2185,6 +2224,8 @@ impl FounderPhysiology {
                     birth_cost: 0.00625,
                     reserve_cap: 0.5,
                     fuel_cap: crate::default_fuel_cap(),
+                    n_pool_half_life_s: crate::default_n_pool_half_life_s(),
+                    n_pool_cap: crate::default_n_pool_cap(),
                     // Unused by the founder path: feeding is local and there is no
                     // target search. Recorded at the frondgrazer's placeholders so a
                     // founder body is a complete animal under the same validators.
@@ -2242,6 +2283,7 @@ impl FounderPhysiology {
                     // LARVA: nor larvae.
                     FOLIAGE_YIELD,
                 ],
+                protein_digestibility: PROTEIN_DIGESTIBILITY,
                 organ_structure_fraction: 0.05,
                 active: crate::Activity::Leaning,
                 active_window: crate::ActiveWindow { before_rise_h: 0.0, after_set_h: 0.0 },
@@ -2351,6 +2393,7 @@ impl FounderPhysiology {
                 // The browser eats foliage and nothing else; the other three are the
                 // same number so that a class it cannot reach is never a silent zero.
                 yield_by_food: [FOLIAGE_YIELD; crate::Food::COUNT],
+                protein_digestibility: PROTEIN_DIGESTIBILITY,
                 organ_structure_fraction: 0.10,
                 active: crate::Activity::Leaning,
                 active_window: crate::ActiveWindow { before_rise_h: 0.0, after_set_h: 0.0 },
@@ -2458,6 +2501,8 @@ impl FounderPhysiology {
                     // ([`Reproduction::DORMANT_EGGS_PLACEHOLDER`]).
                     reserve_cap: 0.6,
                     fuel_cap: crate::default_fuel_cap(),
+                    n_pool_half_life_s: crate::default_n_pool_half_life_s(),
+                    n_pool_cap: crate::default_n_pool_cap(),
                     drown_depth_m: 0.2,
                     energy_density: 2.0,
                     // LJ-GROW (d): a new adult earmarks three quarters of its net income for
@@ -2496,6 +2541,7 @@ impl FounderPhysiology {
                 // number so none is a silent zero. LJ-GROW: a predatory insect's
                 // conversion ([`LANTERNJAW_YIELD`]), not the litter feeders' 0.5.
                 yield_by_food: [LANTERNJAW_YIELD; crate::Food::COUNT],
+                protein_digestibility: PROTEIN_DIGESTIBILITY,
                 organ_structure_fraction: 0.10,
                 // S3 (D1, Wrysk 2026-10-06): active wherever it is dark — at night, and by
                 // day in caves and deep shade with the daylight-mimic switch off.
@@ -2776,6 +2822,7 @@ impl FounderPhysiology {
                         y[crate::Food::Nectar.index()] = NECTAR_YIELD;
                         y
                     },
+                    protein_digestibility: PROTEIN_DIGESTIBILITY,
                     organ_structure_fraction: 0.10,
                     active: crate::Activity::Leaning,
                     // LURE (Wrysk 2026-10-06: "dusk/dawn is fine for them to fly as well as
@@ -3117,6 +3164,11 @@ impl FounderPhysiology {
     /// The assimilation yield this lineage gets out of one food class (decisions §3).
     pub fn yield_for(&self, food: crate::Food) -> f64 {
         self.yield_by_food[food.index()]
+    }
+
+    /// The share of `food`'s protein N the gut absorbs ([`FounderPhysiology::protein_digestibility`]).
+    pub fn digestibility_for(&self, food: crate::Food) -> f64 {
+        self.protein_digestibility[food.index()]
     }
 
     /// The stock scale used by both a bite and its giving-up offer, raw org-units.

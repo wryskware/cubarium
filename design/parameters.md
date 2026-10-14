@@ -1572,7 +1572,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.04 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4619 rows)
+**`fauna.*`** (4648 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1586,6 +1586,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.birth_cost` | 0.3 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.frondgrazer.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.frondgrazer.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.frondgrazer.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.frondgrazer.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.frondgrazer.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.frondgrazer.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.frondgrazer.lifespan_median_s` | 14400.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -1624,6 +1626,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.birth_cost` | 0.1875 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.littershredder.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.littershredder.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.littershredder.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.littershredder.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.littershredder.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.littershredder.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.littershredder.core.lifespan_median_s` | 43200.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -1720,6 +1724,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.littershredder.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.littershredder.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.littershredder.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.littershredder.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.littershredder.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.littershredder.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -2112,6 +2117,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.birth_cost` | 0.3 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.frondgrazer.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.frondgrazer.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.frondgrazer.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.frondgrazer.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.frondgrazer.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.frondgrazer.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.frondgrazer.core.lifespan_median_s` | 57600.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -2208,6 +2215,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.frondgrazer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.frondgrazer.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.frondgrazer.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.frondgrazer.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.frondgrazer.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.frondgrazer.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -2600,6 +2608,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.birth_cost` | 0.15 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.lanternjaw.core.reserve_cap` | 0.6 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.lanternjaw.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.lanternjaw.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.lanternjaw.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.lanternjaw.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.lanternjaw.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.lanternjaw.core.lifespan_median_s` | 86400.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -2696,6 +2706,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.lanternjaw.yield_by_food.*` | 0.6, 0.6, 0.6, 0.6 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.lanternjaw.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.lanternjaw.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.lanternjaw.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.lanternjaw.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -3088,6 +3099,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.birth_cost` | 0.3192 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.capgnawer.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.capgnawer.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.capgnawer.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.capgnawer.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.capgnawer.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.capgnawer.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.capgnawer.core.lifespan_median_s` | 43200.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -3184,6 +3197,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.capgnawer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.capgnawer.yield_by_food.*` | 0.25, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.capgnawer.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.capgnawer.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.capgnawer.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.capgnawer.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -3576,6 +3590,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.birth_cost` | 1.056 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.loftstrider.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.loftstrider.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.loftstrider.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.loftstrider.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.loftstrider.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.loftstrider.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.loftstrider.core.lifespan_median_s` | 115200.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -3672,6 +3688,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.contact_height_fraction` | 0.15 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.loftstrider.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.loftstrider.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.loftstrider.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.loftstrider.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.loftstrider.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.loftstrider.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -4064,6 +4081,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.birth_cost` | 0.0727776 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.ripple-snail.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.ripple-snail.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.ripple-snail.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.ripple-snail.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.ripple-snail.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.ripple-snail.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.ripple-snail.core.lifespan_median_s` | 43200.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -4160,6 +4179,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.ripple-snail.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.ripple-snail.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.ripple-snail.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.ripple-snail.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.ripple-snail.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.ripple-snail.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -4552,6 +4572,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.birth_cost` | 0.015 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.bellwing.core.reserve_cap` | 0.8 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.bellwing.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.bellwing.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.bellwing.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.bellwing.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.bellwing.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.bellwing.core.lifespan_median_s` | 43200.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -4648,6 +4670,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.bellwing.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.bellwing.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.bellwing.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.bellwing.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.bellwing.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.bellwing.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -5040,6 +5063,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.birth_cost` | 0.07111111111111111 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.seedporter.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.seedporter.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.seedporter.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.seedporter.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.seedporter.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.seedporter.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.seedporter.core.lifespan_median_s` | 57600.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -5136,6 +5161,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.seedporter.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.seedporter.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.seedporter.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.seedporter.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.seedporter.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.seedporter.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -5528,6 +5554,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.birth_cost` | 0.5331199999999999 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.chorister.core.reserve_cap` | 1.0 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.chorister.core.fuel_cap` | 0.2 | fraction of body | [0, inf) | yes | A | derived | nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat |
+| `fauna.founders.chorister.core.n_pool_half_life_s` | 900.0 | s | [0, inf) | 60–10800 log | C | placeholder | N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006) |
+| `fauna.founders.chorister.core.n_pool_cap` | 0.05 | tissue it funds per unit body | [0, inf) | 0.005–0.2 log | C | placeholder | N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006) |
 | `fauna.founders.chorister.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.chorister.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.chorister.core.lifespan_median_s` | 86400.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
@@ -5624,6 +5652,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.chorister.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.chorister.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.chorister.protein_digestibility.*` | 0.5, 0.7, 0.9, 0.65 … (8 values) | fraction | [0, 1] | 0.2–1 | B | placeholder | N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY) |
 | `fauna.founders.chorister.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.chorister.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.chorister.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |

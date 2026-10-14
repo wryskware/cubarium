@@ -1077,6 +1077,16 @@ pub struct Animal {
     /// matter respiration burns. Emptied onto the ground as litter every
     /// `GUT_VOID_S` (30 s), and into the corpse at death. Counted in the stored totals.
     pub gut: Taken,
+    /// **The absorbed-nitrogen pool** (N-POOL, Wrysk 2026-10-14: "yeah sounds better"),
+    /// mineral units: a bite's digested protein N ([`FounderPhysiology::protein_digestibility`]
+    /// × its mineral) waits here, free amino acids and labile protein, and builds reserve
+    /// tissue with carbon from any later bite or from the fuel. It is not [`Animal::mineral`]
+    /// (the tissue's own inventory) and holds no organic matter. It decays at
+    /// [`SpeciesConfig::n_pool_half_life_s`] and holds at most [`SpeciesConfig::n_pool_cap`]
+    /// × `n_tissue` × body; what decays or overflows goes to the gut and leaves as dung (the
+    /// deaminated N as urea). Counted in the stored totals and the corpse.
+    #[serde(default)]
+    pub n_pool: f64,
     /// Ticks since it was born or introduced. Also its step phase: an animal steps on the
     /// ticks where `age_ticks` is a multiple of its species' step period, so two animals
     /// born on different ticks do not step in lockstep.
@@ -1597,6 +1607,7 @@ impl Animal {
     /// Mineral in this body, its gut and the escrowed offspring's included.
     pub fn stored_mineral(&self) -> f64 {
         self.mineral
+            + self.n_pool
             + self.gut.mineral
             + self.reproduction.escrow.map_or(0.0, |e| e.mineral)
             + self.gut_seeds.total().mineral
@@ -2420,6 +2431,23 @@ pub struct SpeciesConfig {
     /// no mass scaling. Absorbed food beyond it is respired as digestion heat.
     #[serde(default = "default_fuel_cap")]
     pub fuel_cap: f64,
+    /// **The absorbed-N pool's half-life** (N-POOL), seconds: [`Animal::n_pool`] not built
+    /// into tissue decays at this half-life and leaves through the gut as dung (deaminated,
+    /// its N out as urea). Absorbed amino acids not built into protein are oxidised within
+    /// a few hours of a meal (post-meal ureagenesis is back to baseline in roughly 3-6 h;
+    /// labile protein turns over on the scale of hours, Swick & Benevenga 1977, J Dairy Sci
+    /// 60:505; Waterlow 2006, *Protein Turnover*): about 3 h, on the animals' physiological
+    /// clock, whose day is `life.ecological_day_s` (7200 s) and not 86 400 s, so 3 h / 12 =
+    /// 900 s.
+    #[serde(default = "default_n_pool_half_life_s")]
+    pub n_pool_half_life_s: f64,
+    /// **The absorbed-N pool's ceiling** (N-POOL), as the tissue it would fund per unit of
+    /// body: the pool holds at most `n_pool_cap · n_tissue · body` of mineral, and absorbed N
+    /// over it goes to the gut. The free amino-acid pool is about 1 % of body protein and
+    /// labile protein reserves a few per cent more (Waterlow 2006; Swick & Benevenga 1977):
+    /// 0.05.
+    #[serde(default = "default_n_pool_cap")]
+    pub n_pool_cap: f64,
     /// The depth of standing water on its own face that kills it.
     pub drown_depth_m: f64,
     /// Energy per unit of organic matter an **introduced** animal arrives with. Used for
@@ -2452,6 +2480,14 @@ pub(crate) fn default_fuel_cap() -> f64 {
     0.2
 }
 
+pub(crate) fn default_n_pool_half_life_s() -> f64 {
+    900.0
+}
+
+pub(crate) fn default_n_pool_cap() -> f64 {
+    0.05
+}
+
 impl SpeciesConfig {
     /// The paid ground browser of the biosphere's grazed meadow
     /// (`design/theoretical-biosphere-2026-09-16.md` §5, branch 1): a small body that
@@ -2482,6 +2518,8 @@ impl SpeciesConfig {
             birth_cost: 0.01,
             reserve_cap: 0.5,
             fuel_cap: default_fuel_cap(),
+            n_pool_half_life_s: default_n_pool_half_life_s(),
+            n_pool_cap: default_n_pool_cap(),
             drown_depth_m: 0.2,
             energy_density: 2.0,
             reproduction: Reproduction::LIVE_BIRTH_PLACEHOLDER,
@@ -5442,6 +5480,7 @@ impl Fauna {
             a.fuel *= k;
             a.fuel_energy *= k;
             a.mineral *= k;
+            a.n_pool *= k;
             a.energy *= k;
             // Brood is a label inside the reserve, not additional matter.
             a.reproduction.brood *= k;
@@ -6162,6 +6201,7 @@ impl Fauna {
                 true,
             ),
             gut: Taken::default(),
+            n_pool: 0.0,
             state: State::Resting,
             mobility: crate::Mobility::default(),
             wound: 0.0,
