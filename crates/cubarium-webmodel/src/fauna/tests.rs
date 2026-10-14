@@ -30,6 +30,8 @@ fn fuel_fixture(cap: f64) -> (cubarium_voxel_fauna::FounderPhysiology, Body) {
     p.gut.mass_exponent = 0.0;
     p.gut.digestion_s[Food::Nectar.index()] = cubarium_voxel_fauna::DT;
     p.yield_by_food[Food::Nectar.index()] = 0.8;
+    // Wholly digestible protein: these cases weigh fuel against tissue, not digestibility.
+    p.protein_digestibility = [1.0; Food::COUNT];
     let mut b = Body {
         body: 1.0,
         reserve: 0.1,

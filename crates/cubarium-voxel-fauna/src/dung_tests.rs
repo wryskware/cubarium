@@ -430,9 +430,10 @@ fn a_mineral_free_bite_builds_no_tissue_and_stores_fuel() {
 
 /// A bite whose mineral funds less than the yield would build stores exactly
 /// `mineral / n_tissue`, keeps all of that mineral, and fuels the unfunded absorbed
-/// share; one carrying more mineral than its tissue needs sends the excess to the gut.
+/// share; one carrying more mineral than its tissue needs leaves the excess in the
+/// absorbed-N pool (N-POOL), which empties to the gut as it decays (`n_pool_tests`).
 #[test]
-fn a_bite_stores_what_its_mineral_funds_and_the_excess_mineral_goes_to_the_gut() {
+fn a_bite_stores_what_its_mineral_funds_and_the_excess_mineral_waits_in_the_pool() {
     let world = plain(6);
     let mut fauna = Fauna::new(config_with(|s| s.maintenance_per_s = 0.0));
     let i = grazer(&mut fauna, &world, 2);
@@ -459,7 +460,8 @@ fn a_bite_stores_what_its_mineral_funds_and_the_excess_mineral_goes_to_the_gut()
         "the unfunded absorbed share fills fuel"
     );
 
-    // Carries twice what its tissue needs: the yield binds, the excess is dung.
+    // Carries twice what its tissue needs: the yield binds, the excess builds with the
+    // first bite's fuel and the rest waits in the pool.
     let before = fauna.animals[i];
     let t = Taken {
         organic: bite,
@@ -468,8 +470,13 @@ fn a_bite_stores_what_its_mineral_funds_and_the_excess_mineral_goes_to_the_gut()
     };
     let placed = feed_directly(&mut fauna, i, t, y);
     let a = fauna.animals[i];
-    assert!((placed - y * bite).abs() <= 1e-15);
+    assert!(placed >= y * bite - 1e-15, "the yield is placed");
+    assert!(
+        ((placed - y * bite) - (before.fuel - a.fuel)).abs() <= 1e-15,
+        "and beyond it only fuel's carbon"
+    );
     assert!((a.mineral - (before.mineral + n * placed)).abs() <= 1e-15);
-    assert!((a.gut.mineral - (before.gut.mineral + t.mineral - n * placed)).abs() <= 1e-15);
+    assert!((a.n_pool - (before.n_pool + t.mineral - n * placed)).abs() <= 1e-15);
+    assert_eq!(a.gut.mineral, before.gut.mineral, "wholly digestible: none is egested");
     assert_fauna_closes(&fauna, "after two bites");
 }
