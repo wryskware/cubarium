@@ -462,6 +462,12 @@ pub struct TeacherConfig {
     /// walk straight on without feeding, seconds.
     #[serde(default = "give_up_leave_s")]
     pub give_up_leave_s: f64,
+    /// **LS-ROAM**: the time constant of a body's remembered intake while foraging (its
+    /// trailing mean offer with the eating latch on, travel included), which a lineage with
+    /// `FounderPhysiology::give_up_vs_memory` weighs a patch against, seconds. 600 s: ten
+    /// minutes, several patches and the walks between them.
+    #[serde(default = "give_up_memory_s")]
+    pub give_up_memory_s: f64,
     /// **HUNGRY-SEARCH** (`step::rove`): this long after its last taste of food, a
     /// heuristic forager wanting food (its eating or emergency latch on) sets out on
     /// straight search legs away from ground it has covered whenever its own answer is its
@@ -531,6 +537,9 @@ fn give_up_shun_s() -> f64 {
 }
 fn give_up_zone_bl() -> f64 {
     2.0
+}
+fn give_up_memory_s() -> f64 {
+    600.0
 }
 fn give_up_leave_s() -> f64 {
     3.0
@@ -635,6 +644,7 @@ impl Default for TeacherConfig {
             give_up_shun_s: give_up_shun_s(),
             give_up_zone_bl: give_up_zone_bl(),
             give_up_leave_s: give_up_leave_s(),
+            give_up_memory_s: give_up_memory_s(),
             search_patience_s: search_patience_s(),
             search_leg_bl: search_leg_bl(),
             search_cell_bl: search_cell_bl(),

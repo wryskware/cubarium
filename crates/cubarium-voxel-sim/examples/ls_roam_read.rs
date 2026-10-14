@@ -269,6 +269,8 @@ fn run(args: &[String]) -> Result<(), String> {
     r["forage"] = json!({"stays": t.stays, "stay_s": t.stay_s, "stay_max_s": t.stay_max_s, "offer_samples": t.offer_samples,
         "offer_mean": if t.offer_samples > 0 { t.offer_sum / t.offer_samples as f64 } else { 0.0 }, "offer_low": t.offer_low,
         "give_ups": t.give_ups, "leave_samples": t.leave_samples});
+    let h = sim.fauna().herd_tally()[Founder::Loftstrider.index()];
+    r["herd"] = json!({"pulled_samples": h.pulled_samples, "followed_samples": h.followed_samples});
     r["wall_s"] = json!(started.elapsed().as_secs_f64());
     let mut w = std::fs::File::create(out.join("summary.json")).map_err(|e| e.to_string())?;
     w.write_all(serde_json::to_string_pretty(&r).map_err(|e| e.to_string())?.as_bytes()).map_err(|e| e.to_string())?;

@@ -1572,7 +1572,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.04 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4619 rows)
+**`fauna.*`** (4629 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1654,6 +1654,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.littershredder.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.littershredder.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.littershredder.give_up_vs_memory` | 0.0 | factor | [0, inf) |  | - | placeholder | LS-ROAM: a still-feeding body also gives the patch up when its trailing offer falls under this times its own remembered intake while foraging (1: the marginal value theorem's rule; 0 off) |
 | `fauna.founders.littershredder.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
 | `fauna.founders.littershredder.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
 | `fauna.founders.littershredder.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
@@ -2142,6 +2143,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.frondgrazer.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.frondgrazer.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.frondgrazer.give_up_vs_memory` | 0.0 | factor | [0, inf) |  | - | placeholder | LS-ROAM: a still-feeding body also gives the patch up when its trailing offer falls under this times its own remembered intake while foraging (1: the marginal value theorem's rule; 0 off) |
 | `fauna.founders.frondgrazer.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
 | `fauna.founders.frondgrazer.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
 | `fauna.founders.frondgrazer.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
@@ -2630,6 +2632,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.lanternjaw.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.lanternjaw.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.lanternjaw.give_up_vs_memory` | 0.0 | factor | [0, inf) |  | - | placeholder | LS-ROAM: a still-feeding body also gives the patch up when its trailing offer falls under this times its own remembered intake while foraging (1: the marginal value theorem's rule; 0 off) |
 | `fauna.founders.lanternjaw.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
 | `fauna.founders.lanternjaw.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
 | `fauna.founders.lanternjaw.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
@@ -3118,6 +3121,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.capgnawer.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.capgnawer.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.capgnawer.give_up_vs_memory` | 0.0 | factor | [0, inf) |  | - | placeholder | LS-ROAM: a still-feeding body also gives the patch up when its trailing offer falls under this times its own remembered intake while foraging (1: the marginal value theorem's rule; 0 off) |
 | `fauna.founders.capgnawer.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
 | `fauna.founders.capgnawer.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
 | `fauna.founders.capgnawer.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
@@ -3606,6 +3610,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.loftstrider.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.loftstrider.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.loftstrider.give_up_vs_memory` | 1.0 | factor | [0, inf) |  | - | placeholder | LS-ROAM: a still-feeding body also gives the patch up when its trailing offer falls under this times its own remembered intake while foraging (1: the marginal value theorem's rule; 0 off) |
 | `fauna.founders.loftstrider.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
 | `fauna.founders.loftstrider.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
 | `fauna.founders.loftstrider.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
@@ -4094,6 +4099,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.ripple-snail.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.ripple-snail.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.ripple-snail.give_up_vs_memory` | 0.0 | factor | [0, inf) |  | - | placeholder | LS-ROAM: a still-feeding body also gives the patch up when its trailing offer falls under this times its own remembered intake while foraging (1: the marginal value theorem's rule; 0 off) |
 | `fauna.founders.ripple-snail.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
 | `fauna.founders.ripple-snail.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
 | `fauna.founders.ripple-snail.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
@@ -4582,6 +4588,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.bellwing.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.bellwing.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.bellwing.give_up_vs_memory` | 0.0 | factor | [0, inf) |  | - | placeholder | LS-ROAM: a still-feeding body also gives the patch up when its trailing offer falls under this times its own remembered intake while foraging (1: the marginal value theorem's rule; 0 off) |
 | `fauna.founders.bellwing.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
 | `fauna.founders.bellwing.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
 | `fauna.founders.bellwing.larva.vaulttree_share` | 0.5 | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
@@ -5070,6 +5077,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.seedporter.fruit_bite_half_stock` | 0.00001 | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.seedporter.give_up_fraction` | 0.05 | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.seedporter.give_up_vs_memory` | 0.0 | factor | [0, inf) |  | - | placeholder | LS-ROAM: a still-feeding body also gives the patch up when its trailing offer falls under this times its own remembered intake while foraging (1: the marginal value theorem's rule; 0 off) |
 | `fauna.founders.seedporter.larva_bite_half_stock` | 0.01 | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
 | `fauna.founders.seedporter.larva_sight_m` | 2.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
 | `fauna.founders.seedporter.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
@@ -5558,6 +5566,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.gestation_upkeep_factor` | 1.5 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.chorister.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.chorister.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.chorister.give_up_vs_memory` | 0.0 | factor | [0, inf) |  | - | placeholder | LS-ROAM: a still-feeding body also gives the patch up when its trailing offer falls under this times its own remembered intake while foraging (1: the marginal value theorem's rule; 0 off) |
 | `fauna.founders.chorister.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
 | `fauna.founders.chorister.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
 | `fauna.founders.chorister.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
@@ -6104,6 +6113,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.teachers.give_up_shun_s` | 180.0 | s | [0, inf) | 30–1800 log | - | placeholder | how long a patch given up is avoided |
 | `fauna.teachers.give_up_zone_bl` | 2.0 | body lengths | [0, inf) | 0.5–6 | - | placeholder | a stay continues, and a given-up patch is avoided, within this of where the stay began |
 | `fauna.teachers.give_up_leave_s` | 3.0 | s | [0, inf) | 0.5–15 log | - | placeholder | after giving a patch up, any feeding answer of the heuristic becomes a walk straight on for this long |
+| `fauna.teachers.give_up_memory_s` | 600.0 | s | (0, inf) | 60–3600 log | - | placeholder | LS-ROAM: time constant of a body's remembered intake while foraging, travel included, that a lineage with give_up_vs_memory weighs a patch against |
 | `fauna.teachers.search_patience_s` | 30.0 | s | [0, inf) | 5–300 log | - | placeholder | this long after its last taste of food, a hungry heuristic forager's own no-signal search gives way to legs away from ground it has covered (HUNGRY-SEARCH) |
 | `fauna.teachers.search_leg_bl` | 12.0 | body lengths | [0, inf) | 3–40 log | - | placeholder | one hungry-search leg: the net way it holds a heading for (0 turns the search off) |
 | `fauna.teachers.search_cell_bl` | 2.0 | body lengths | (0, inf) | 0.5–6 | - | placeholder | the hungry search's visited-ground memory cell |

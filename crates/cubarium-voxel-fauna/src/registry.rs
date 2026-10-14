@@ -199,6 +199,7 @@ fn founder_rows() -> Vec<Row> {
     vec![
         r("fruit_bite_half_stock", "org-units at the mouth", nonneg, "fruit-only K override; absent uses core.bite_half_stock, other foods retain core K").optional().prov("derived"),
         r("give_up_fraction", "fraction of the fill rate", nonneg, "lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up").optional().prov("derived"),
+        r("give_up_vs_memory", "factor", nonneg, "LS-ROAM: a still-feeding body also gives the patch up when its trailing offer falls under this times its own remembered intake while foraging (1: the marginal value theorem's rule; 0 off)"),
         // LARVA (design/larva-nuts-plan-2026-10-12.md §3-§4): the larva field's table (the bellwing's).
         r("larva_bite_half_stock", "org-units of visible larvae", nonneg, "larva-only K override for a larva eater's bite; absent uses core.bite_half_stock").optional().prov("decision"),
         r("larva_sight_m", "m", nonneg, "LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae)").prov("decision"),
@@ -895,6 +896,7 @@ fn knob_rows() -> Vec<Row> {
         t("give_up_shun_s", "s", nonneg, "how long a patch given up is avoided").search(30.0, 1800.0).log(),
         t("give_up_zone_bl", "body lengths", nonneg, "a stay continues, and a given-up patch is avoided, within this of where the stay began").search(0.5, 6.0),
         t("give_up_leave_s", "s", nonneg, "after giving a patch up, any feeding answer of the heuristic becomes a walk straight on for this long").search(0.5, 15.0).log(),
+        t("give_up_memory_s", "s", pos, "LS-ROAM: time constant of a body's remembered intake while foraging, travel included, that a lineage with give_up_vs_memory weighs a patch against").search(60.0, 3600.0).log(),
         t("search_patience_s", "s", nonneg, "this long after its last taste of food, a hungry heuristic forager's own no-signal search gives way to legs away from ground it has covered (HUNGRY-SEARCH)").search(5.0, 300.0).log(),
         t("search_leg_bl", "body lengths", nonneg, "one hungry-search leg: the net way it holds a heading for (0 turns the search off)").search(3.0, 40.0).log(),
         t("search_cell_bl", "body lengths", pos, "the hungry search's visited-ground memory cell").search(0.5, 6.0),

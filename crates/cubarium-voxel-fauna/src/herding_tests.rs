@@ -44,7 +44,7 @@ fn config_for(f: Founder) -> FaunaConfig {
         kin_tracks: 8,
         ..SenseTable::default()
     };
-    p.herding = Herding { comfort_m: COMFORT, pull: 0.5, herd_max: 0, memory_s: 0.0, young_only: false };
+    p.herding = Herding { comfort_m: COMFORT, pull: 0.5, herd_max: 0, memory_s: 0.0, young_only: false, follow_moving: false };
     c
 }
 
@@ -335,4 +335,51 @@ fn the_skill_walks_to_the_group_outside_the_heuristics_trigger() {
     let go = crate::herding::stay_with_group(&f, i, ring(&w)).expect("beyond comfort");
     assert_eq!(go.forward, 0.0, "behind it: it turns before it walks");
     assert!(go.turn.abs() > 0.0);
+}
+
+/// LS-ROAM's scene: a loftstrider facing east at x = 3 m, sated or hungry, holding still on its
+/// stand (its forager's sated stand: mouth asking, no forward), kin at `kin_x` walking or still;
+/// `follow` sets its lineage's `follow_moving`.
+fn going_with(follow: bool, hungry: bool, kin_moving: bool, kin_x: f64) -> Option<Actions> {
+    let ls = Founder::Loftstrider;
+    let mut c = config_for(ls);
+    c.founders[ls.index()].herding.follow_moving = follow;
+    let (w, mut f, g, kin) = scene(c, ls, 1.0, &[kin_x]);
+    let still_after = f.config.predation.still_after_ticks();
+    animal_mut(&mut f, kin[0]).still_ticks = if kin_moving { 0 } else { still_after + 10 };
+    place(&mut f, g, 3.0, LANE_Z, EAST);
+    animal_mut(&mut f, g).eating = hungry;
+    steer(&mut f, &w, g, CROP, Seek::Taste)
+}
+
+#[test]
+fn a_sated_body_standing_goes_with_kin_walking_off_beyond_its_comfort() {
+    let far = 3.0 + 2.5 * COMFORT;
+    let go = going_with(true, false, true, far).expect("a sated body goes with kin walking off");
+    assert_eq!(go.feed, 0.0, "it walks, not feeding: {go:?}");
+    assert!(go.forward > 0.0, "facing them, it walks: {go:?}");
+    assert_eq!(go.turn, 0.0, "straight at them, dead ahead: {go:?}");
+}
+
+#[test]
+fn a_sated_body_stays_with_kin_standing_or_within_comfort_and_a_hungry_one_feeds() {
+    let far = 3.0 + 2.5 * COMFORT;
+    assert_eq!(going_with(true, false, false, far), None, "kin standing beyond comfort do not draw it");
+    assert_eq!(going_with(true, false, true, 3.0 + 0.5 * COMFORT), None, "kin walking within comfort do not draw it");
+    assert_eq!(going_with(true, true, true, far), None, "a hungry body holding still feeds");
+    assert_eq!(going_with(false, false, true, far), None, "follow_moving off: it stands, as before");
+}
+
+#[test]
+fn a_sated_body_turns_on_the_spot_toward_kin_walking_behind_it() {
+    let ls = Founder::Loftstrider;
+    let mut c = config_for(ls);
+    c.founders[ls.index()].herding.follow_moving = true;
+    // Kin to the east, the body facing north: a quarter turn off, more than 60°.
+    let (w, mut f, g, kin) = scene(c, ls, 1.0, &[3.0 + 2.5 * COMFORT]);
+    animal_mut(&mut f, kin[0]).still_ticks = 0;
+    animal_mut(&mut f, g).eating = false;
+    let go = steer(&mut f, &w, g, CROP, Seek::Taste).expect("it goes with them");
+    assert_eq!(go.forward, 0.0, "it turns before it walks: {go:?}");
+    assert!(turns_east(go), "toward them: {go:?}");
 }

@@ -61,7 +61,7 @@ fn config(edit: impl FnOnce(&mut Nursing)) -> FaunaConfig {
         kin_tracks: 8,
         ..SenseTable::default()
     };
-    p.herding = Herding { comfort_m: 2.0, pull: 0.5, herd_max: 0, memory_s: 0.0, young_only: false };
+    p.herding = Herding { comfort_m: 2.0, pull: 0.5, herd_max: 0, memory_s: 0.0, young_only: false, follow_moving: false };
     let mut n = nursing();
     edit(&mut n);
     p.nursing = n;
