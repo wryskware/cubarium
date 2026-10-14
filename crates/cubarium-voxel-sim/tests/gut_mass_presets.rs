@@ -15,7 +15,7 @@
 //! These are role relations, read off each preset's resolved config; no mass or ratio is
 //! pinned.
 
-use cubarium_voxel_fauna::{FaunaConfig, Founder, FounderPhysiology};
+use cubarium_voxel_fauna::{FaunaConfig, Food, Founder, FounderPhysiology};
 use cubarium_voxel_sim::params::{Layers, Params};
 
 const PRESETS: [&str; 9] = [
@@ -147,6 +147,34 @@ fn a_presets_gut_ceiling_over_upkeep_does_not_depend_on_its_mass() {
             let (a, b) = (ceiling(&fauna, f), ceiling(&heavy, f));
             assert!((a - b).abs() <= 1e-12 * a.abs(), "{path} {f:?}: {a} against {b}");
             assert!(heavy.founder(f).core.body_max > fauna.founder(f).core.body_max, "{path} {f:?}: heavier");
+        }
+    }
+}
+
+/// **SP-PROTEIN: a preset that sets a lineage's digestion time sets it for every food the
+/// lineage eats.** A food left out keeps the code's default beside the preset's rescaled
+/// times (the seedporter's larvae, added after GUT-MASS rescaled the rest, digested at the
+/// default 60 s beside 386 s for every other food). No time or ratio is asserted, only that
+/// none of a lineage's foods is left out.
+#[test]
+fn a_preset_that_sets_a_lineages_digestion_sets_it_for_every_food_it_eats() {
+    for path in PRESETS {
+        let full = format!("{}/../../{path}", env!("CARGO_MANIFEST_DIR"));
+        let text = std::fs::read_to_string(&full).unwrap_or_else(|e| panic!("{full}: {e}"));
+        let file: toml::Table = text.parse().unwrap_or_else(|e| panic!("{path}: {e}"));
+        let fauna = resolved(path).fauna;
+        let Some(founders) = file.get("fauna").and_then(|f| f.get("founders")).and_then(|f| f.as_table()) else {
+            continue;
+        };
+        for (name, section) in founders {
+            let Some(set) = section.get("gut").and_then(|g| g.get("digestion_s")).and_then(|d| d.as_table()) else {
+                continue;
+            };
+            let founder = *Founder::ALL.iter().find(|f| f.name() == name).unwrap_or_else(|| panic!("{path}: no lineage is called {name}"));
+            let diet = fauna.founder(founder).eating_diet();
+            for food in Food::ALL.into_iter().filter(|&food| diet.eats(food)) {
+                assert!(set.contains_key(food.name()), "{path}: {name} sets digestion_s for some foods but not for {}, which it eats", food.name());
+            }
         }
     }
 }

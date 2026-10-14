@@ -2980,9 +2980,12 @@ impl SpeciesConfig {
             // - nut N 0.025 per organic (`fruit_mineral_fraction`): real nuts are 2.4-3.5 % N
             //   dry (USDA FoodData Central: almond, cashew, Brazil nut), which the world's
             //   power-law map of real N puts at 0.021-0.026; half of flesh, 2.5x fruit;
-            // - `fruit_handling` 0.33: a nut takes ~3x a fruit's feeding time (tree squirrels
-            //   spend tens of seconds to minutes per ~1 g kernel; small frugivores take pulp
-            //   at several g/min);
+            // - `fruit_handling` 1.0 (SP-PROTEIN; was 0.33): per dry organic, the world's
+            //   unit, an opened soft-shelled nut is eaten about as fast as pulp. Tree squirrels
+            //   spend tens of seconds to minutes per ~1 g kernel (~5 % water: 0.5-2 g dry/min);
+            //   small frugivores take pulp at several g/min, but pulp is ~75-85 % water (banana
+            //   75 g/100 g, USDA FoodData Central): 0.6-1.2 g dry/min. The 0.33 compared wet
+            //   pulp with a dry kernel;
             // - `fruit_seeds_in_gut` false: an eaten nut is a dead seed;
             // - `fruit_sight_m` 2.0: a nut among a crown's leaves is found by close search
             //   (small primates find nuts and insects by close visual search in the canopy;
@@ -2995,7 +2998,7 @@ impl SpeciesConfig {
             fruit_cost: 2.0,
             pollination_floor: 1.0,
             fruit_mineral_fraction: 0.025,
-            fruit_handling: 0.33,
+            fruit_handling: 1.0,
             fruit_seeds_in_gut: false,
             fruit_sight_m: 2.0,
             dispersal: Dispersal::Wald,

@@ -63,6 +63,33 @@ pub struct CheckTally {
     pub checks: u64,
     pub found: u64,
     pub checkers: u64,
+    /// SP-PROTEIN: check walks given up past their walking bound ([`walk_bound`]).
+    pub give_ups: u64,
+}
+
+/// **SP-PROTEIN: a check walk under way** (session state, not saved): the last tick the walk
+/// steered toward its aim, and the ticks of walking it has spent on that aim. A load starts
+/// every walk afresh.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct CheckWalk {
+    pub last: u64,
+    pub walked: u64,
+}
+
+/// **SP-PROTEIN: a check walk's walking bound**, ticks, for body `a`: `check_walk_factor` ×
+/// the longest route a reflex walk takes to a host at the edge of its search
+/// (`teachers.route_detour` × `check_search_m`), at its own cruise (its lineage's body
+/// lengths per second × its own length). A walk that has spent this long walking toward its
+/// aim without arriving is given up; one not walked for this long has lapsed, and the next
+/// walk to the same host starts afresh. `None` without a glider, a search or a pace.
+pub(crate) fn walk_bound(fauna: &Fauna, a: &crate::Animal) -> Option<u64> {
+    let phys = fauna.config.founder(a.founder?);
+    let glider = phys.glider?;
+    let length = crate::body_of(&fauna.config, a)?.length_m;
+    let cruise = phys.cruise_body_lengths_per_s * length;
+    let route = fauna.config.teachers.route_detour.max(1.0) * glider.check_search_m;
+    let s = glider.check_walk_factor * route / cruise;
+    (s > 0.0 && s.is_finite()).then(|| cubarium_voxel::ticks_at_least_one(s))
 }
 
 /// A plant as the check finds it: a stand, or a latticevine at one of its covered faces.
@@ -153,15 +180,43 @@ pub(crate) fn aim_of(fauna: &Fauna, id: u64) -> Option<LarvaHost> {
 }
 
 /// A check walk for body `id` takes it to `host` this sample: a new aim is a walk set out on.
-pub(crate) fn aim(fauna: &mut Fauna, id: u64, host: LarvaHost) {
+/// **SP-PROTEIN**: the walk's time on its aim accrues between its samples; a walk last walked
+/// longer ago than `bound` ticks ([`walk_bound`]; with no record, as after a load) has lapsed,
+/// so this sample sets out afresh (its `aim_since` now), and replacing a lapsed aim is not a
+/// switch. It was: an aim was dropped only on arrival, so a body that ate, slept or fled on
+/// the way kept its first aim's clock for hours.
+pub(crate) fn aim(fauna: &mut Fauna, id: u64, host: LarvaHost, bound: u64) {
     let now = fauna.tick;
+    let lapsed = fauna.check_walks.get(&id).is_none_or(|w| now.saturating_sub(w.last) > bound);
     let m = fauna.tree_checks.entry(id).or_default();
-    if m.aim != Some(host) {
-        fauna.check_tally.switches += u64::from(m.aim.is_some());
+    if m.aim != Some(host) || lapsed {
+        fauna.check_tally.switches += u64::from(m.aim.is_some_and(|h| h != host) && !lapsed);
         m.aim = Some(host);
         m.aim_since = now;
         fauna.check_tally.walks += 1;
+        fauna.check_walks.insert(id, CheckWalk { last: now, walked: 0 });
+    } else if let Some(w) = fauna.check_walks.get_mut(&id) {
+        w.walked += now.saturating_sub(w.last);
+        w.last = now;
     }
+}
+
+/// **SP-PROTEIN: the give-up**: body `id`'s aim, when its walk has spent at least `bound`
+/// ticks walking toward it ([`walk_bound`]) without arriving, is given up: the aim goes, and
+/// the host is remembered as one not to check again within the memory, as an empty one is
+/// ([`order`]). `true` when it gave up.
+pub(crate) fn give_up_if_overdue(fauna: &mut Fauna, id: u64, bound: u64) -> bool {
+    let Some(host) = aim_of(fauna, id) else { return false };
+    if fauna.check_walks.get(&id).is_none_or(|w| w.walked < bound) {
+        return false;
+    }
+    if let Some(m) = fauna.tree_checks.get_mut(&id) {
+        m.aim = None;
+    }
+    fauna.check_walks.remove(&id);
+    fauna.check_tally.give_ups += 1;
+    remember(fauna, id, host, false);
+    true
 }
 
 /// **The look** (each tick of a glider's act): on a host it remembers whether the host holds
@@ -216,6 +271,7 @@ pub(crate) fn note(fauna: &mut Fauna, i: usize, view: &cubarium_voxel::VoxelView
         tally.visits += 1;
         if m.aim == Some(key) {
             m.aim = None;
+            fauna.check_walks.remove(&a.id);
             tally.checks += 1;
             tally.found += u64::from(food);
             if m.checks == 0 {
@@ -257,4 +313,5 @@ fn prune(fauna: &mut Fauna) {
     fauna.check_pruned = Some(now);
     let alive: rustc_hash::FxHashSet<u64> = fauna.animals.iter().map(|a| a.id).collect();
     fauna.tree_checks.retain(|id, _| alive.contains(id));
+    fauna.check_walks.retain(|id, _| alive.contains(id));
 }
