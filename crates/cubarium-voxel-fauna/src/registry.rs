@@ -21,6 +21,7 @@ pub fn registry() -> &'static Registry {
             vec![
                 Alias { pattern: "fauna.founders".into(), names: founders.clone() },
                 Alias { pattern: "fauna.founders.*.yield_by_food".into(), names: foods.clone() },
+                Alias { pattern: "fauna.founders.*.protein_digestibility".into(), names: foods.clone() },
                 Alias { pattern: "fauna.founders.*.gut.digestion_s".into(), names: foods },
                 Alias { pattern: "fauna.founders.*.hunter.prey".into(), names: founders.clone() },
                 Alias { pattern: "fauna.founders.*.hunter.prey_weight".into(), names: founders.clone() },
@@ -142,6 +143,10 @@ fn species_rows() -> Vec<Row> {
             .search(0.2, 5.0).grade("A"),
         r("fuel_cap", "fraction of body", nonneg, "nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat")
             .evolve().grade("A").prov("derived"),
+        r("n_pool_half_life_s", "s", nonneg, "N-POOL: absorbed N not built into tissue decays to the dung at this half-life; ~3 h amino-acid oxidation on the 7200 s physiological day (Swick & Benevenga 1977; Waterlow 2006)")
+            .search(60.0, 10800.0).log().grade("C"),
+        r("n_pool_cap", "tissue it funds per unit body", nonneg, "N-POOL: the absorbed-N pool holds at most this x n_tissue x body; free amino acids ~1 % of body protein plus labile protein a few % (Waterlow 2006)")
+            .search(0.005, 0.2).log().grade("C"),
         r("drown_depth_m", "m", nonneg, "standing water that kills the heuristic body and a clutch").grade("D"),
         r("energy_density", "energy per org-unit", nonneg, "energy an introduced animal arrives with").grade("N"),
         r("lifespan_median_s", "s", nonneg, "median lifespan (0: none)")
@@ -286,6 +291,8 @@ fn founder_rows() -> Vec<Row> {
         r("mouth_reach_length_fraction", "x body length", nonneg, "the mouth's reach ahead of the footprint")
             .evolve().digest(),
         r("yield_by_food.*", "fraction", fraction, "assimilation yield of one food class").search(0.05, 0.99),
+        r("protein_digestibility.*", "fraction", fraction, "N-POOL: share of one food class's protein N absorbed into the pool (flesh 0.9, larvae 0.8, foliage 0.65 by Robbins et al. 1987; body.rs PROTEIN_DIGESTIBILITY)")
+            .search(0.2, 1.0).grade("B"),
         r("organ_structure_fraction", "fraction of body", Range::closed(0.0, 1.0).open_hi(), "sensor/organ share of structure")
             .grade("N"),
         r("flower_ambush_m", "m", nonneg, "MIMIC: holds an ambush this close to a flower"),
@@ -508,6 +515,7 @@ fn founder_rows() -> Vec<Row> {
         r("drop.after_s", "s", nonneg, "DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down"),
         r("drop.max_m", "m", nonneg, "DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump)"),
         r("drop.wound_per_m", "wound per m", nonneg, "DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills)"),
+        r("drop.water_max_m", "m", nonneg, "SP-CRAVE: deepest jump into water an adult takes, to the surface (a smaller body: x its height / the adult's); only into water it swims or wades out of, the wound from the height over the surface; last, after every dry jump (0: never into water)"),
         // WADE-OUT (`WadeRule`).
         r("wade.swim_out", "switch", fraction, "WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays)").optional(),
         r("agility", "fraction", fraction, "the dodge's species factor"),
@@ -565,6 +573,10 @@ fn founder_rows() -> Vec<Row> {
         r("glider.check_search_m", "m", nonneg, "NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees)").optional().search(0.0, 32.0),
         r("glider.check_memory_s", "s", nonneg, "NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets)").optional().search(0.0, 14400.0),
         r("glider.check_walk_factor", "ratio", Range::positive(), "SP-PROTEIN: a check walk is given up after walking this many times its longest route (route_detour x check_search_m) at its own cruise without arriving, and lapses when not walked that long (a giving-up time growing with patch distance, Charnov 1976)").optional().search(0.5, 8.0),
+        r("glider.crave_nitrogen", "craving 0-1", fraction, "SP-CRAVE: nitrogen craving of a body building tissue (young under birth_body, gestating or nursing mother, brood short) or with fuel full over a lagging reserve; it wins over a lower energy craving, so the walk goes to the food funding most tissue per second and plain fruit in sight starts a tree check (0: none; protein leverage, Felton et al. 2009)").optional().search(0.0, 1.0),
+        r("glider.crave_fuel_full", "fraction of fuel cap", fraction, "SP-CRAVE: fuel this full over a reserve under crave_reserve_lag reads as nitrogen binding (the N-free store full, the N-funded one not)").optional(),
+        r("glider.crave_reserve_lag", "fraction of reserve cap", fraction, "SP-CRAVE: a reserve under this, with fuel at crave_fuel_full, lags (nitrogen craving)").optional(),
+        r("glider.crave_energy_low", "fraction of fuel+reserve room", fraction, "SP-CRAVE: the energy craving rises from 0 at this fullness of fuel and reserve to 1 empty (1 with the emergency latch); the walk then goes to the food absorbed most per second (0: none)").optional().search(0.0, 1.0),
         // Gut seeds (`GutSeeds`, F3): the seedporter's only, optional on the others.
         r("gut_seeds.seeds_per_fruit_organic", "org-units per org-unit of fruit", fraction, "share of a fruit meal that is the source's seeds, carried in the gut").optional(),
         r("gut_seeds.gut_transit_s", "s", nonneg, "a meal's seeds are voided at the body's face this long after it").optional(),

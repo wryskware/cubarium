@@ -858,8 +858,10 @@ fn mineral_free_food_passes_and_frees_the_stomach() {
 /// `y_eff` 0.5, τ 60 s) and foliage (mineral-poor, `y_eff` 0.2, τ 120 s) in one stomach,
 /// with reserve room for only 0.3 of what their yields would place this tick. One tick
 /// moves exactly the scaled raw shares out of the pools, places exactly the room, egests
-/// the undigested halves, respires only the foliage's unfunded share (no surplus), keeps
-/// the tissue's mineral and egests the rest, and splits the energy in proportion.
+/// the undigested halves, respires only the foliage's unplaced share (no surplus), keeps
+/// the tissue's mineral and sends the rest to the absorbed-N pool or the gut (N-POOL: the
+/// carrion's N its carbon did not match waits in the pool; wholly digestible protein here,
+/// so the digestibility is not what is weighed), and splits the energy in proportion.
 #[test]
 fn a_two_pool_digestion_by_the_numbers() {
     let f = Founder::Browser;
@@ -871,6 +873,7 @@ fn a_two_pool_digestion_by_the_numbers() {
     p.core.maintenance_per_s = 0.0;
     p.motor_respiration_per_s = 0.0;
     p.yield_by_food[Food::Foliage.index()] = 0.5;
+    p.protein_digestibility = [1.0; Food::COUNT];
     p.gut.digestion_s[Food::Carrion.index()] = 60.0;
     p.gut.digestion_s[Food::Foliage.index()] = 120.0;
     let n = p.core.n_tissue;
@@ -918,9 +921,9 @@ fn a_two_pool_digestion_by_the_numbers() {
     let kept_mineral = n * room;
     close(a1.mineral - a0.mineral, kept_mineral, "tissue mineral kept");
     close(
-        a1.gut.mineral - a0.gut.mineral,
+        a1.gut.mineral - a0.gut.mineral + a1.n_pool - a0.n_pool,
         (mc / oc) * tc + (mf / of) * tf - kept_mineral,
-        "the rest of the mineral egested",
+        "the rest of the mineral in the pool or egested",
     );
     let placed_c = 0.5 * tc;
     let placed_f = room - placed_c;

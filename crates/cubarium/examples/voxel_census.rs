@@ -2035,6 +2035,11 @@ fn print_header() {
     for f in Founder::ALL {
         header.push_str(&format!(",wounds_{0}_loftstrider,wounds_{0}_{1}", f.name(), Founder::Chorister.name()));
     }
+    // N-POOL (2026-10-14): per lineage, cumulative digested protein N into the absorbed-N
+    // pool and N the pool built into reserve tissue, mineral units.
+    for f in Founder::ALL {
+        header.push_str(&format!(",n_absorbed_{0},n_built_{0}", f.name()));
+    }
     header.push_str(",seed");
     println!("{header}");
 }
@@ -2438,6 +2443,10 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
             row.push(h.wounds[f.index()][ls.index()].to_string());
             row.push(h.wounds[f.index()][Founder::Chorister.index()].to_string());
         }
+    }
+    for k in Founder::ALL {
+        row.push(format!("{:.6e}", a.ledger.n_absorbed_by_founder[k.index()]));
+        row.push(format!("{:.6e}", a.ledger.n_built_by_founder[k.index()]));
     }
     // Read the kept world's seed, including fallback and loaded-world starts.
     row.push(sim.world().config().seed.to_string());

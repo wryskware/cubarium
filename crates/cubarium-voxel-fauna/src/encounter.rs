@@ -438,6 +438,14 @@ pub struct DropWay {
     pub at: u8,
 }
 
+/// **SP-CRAVE: a jump into water** ([`RouteGraph::drop_way_into`]): the highest drop to the
+/// water's surface it takes, metres, and whether a body landing on a face under water deeper
+/// than it wades gets out of it ([`crate::RouteGraph::wade_way`], the wade-out's way).
+pub struct WaterDrop<'a> {
+    pub reach_m: f64,
+    pub out: &'a dyn Fn(Site) -> bool,
+}
+
 /// SP-STUCK-2: the jumps after the first a trapped body's way down may take
 /// ([`RouteGraph::drop_way`]): one, a jump in two. A cost bound, not a knob.
 pub const DROP_HOPS: u32 = 1;
@@ -1065,10 +1073,36 @@ impl RouteGraph {
         own_cols: u32,
         max_cols: u32,
     ) -> Option<DropWay> {
-        self.drop_way_hops(view, site, xz, r, headroom, step, reach, wade_m, own_cols, max_cols, DROP_HOPS)
+        self.drop_way_hops(view, site, xz, r, headroom, step, reach, wade_m, own_cols, max_cols, DROP_HOPS, None)
     }
 
-    /// [`RouteGraph::drop_way`], with `hops` further jumps allowed after this one.
+    /// **SP-CRAVE: [`RouteGraph::drop_way`], or else a jump into water** (Wrysk's DROP rule,
+    /// 2026-10-06: "a trapped walker may jump down further than its normal step-down … escape
+    /// only", extended to water): with no dry jump on offer (one jump or two), the lowest
+    /// drop off the pocket's edge into water deeper than it wades, at most `water.reach_m`
+    /// from its face down to the water's surface, onto a face clear for its body under that
+    /// water, from which it gets out (`water.out`): never into water with no way out. The
+    /// pocket, the edge and the columns passed over are the dry jump's.
+    #[allow(clippy::too_many_arguments)]
+    pub fn drop_way_into(
+        &self,
+        view: &VoxelView<'_>,
+        site: Site,
+        xz: (f64, f64),
+        r: f64,
+        headroom: u32,
+        step: crate::StepLimits,
+        reach: u32,
+        wade_m: f64,
+        own_cols: u32,
+        max_cols: u32,
+        water: &WaterDrop<'_>,
+    ) -> Option<DropWay> {
+        self.drop_way_hops(view, site, xz, r, headroom, step, reach, wade_m, own_cols, max_cols, DROP_HOPS, Some(water))
+    }
+
+    /// [`RouteGraph::drop_way`], with `hops` further jumps allowed after this one, and a jump
+    /// into water last when `water` allows one.
     #[allow(clippy::too_many_arguments)]
     fn drop_way_hops(
         &self,
@@ -1083,8 +1117,10 @@ impl RouteGraph {
         own_cols: u32,
         max_cols: u32,
         hops: u32,
+        water_drop: Option<&WaterDrop<'_>>,
     ) -> Option<DropWay> {
-        if reach <= step.down {
+        let wet_ok = water_drop.is_some_and(|w| w.reach_m > 0.0);
+        if reach <= step.down && !wet_ok {
             return None;
         }
         let v = self.voxel_m;
@@ -1160,6 +1196,8 @@ impl RouteGraph {
         // every column it passes over from a step over the landing up.
         let out = (r / v).ceil().max(0.0) as i64 + 1;
         let mut jumps: Vec<(u32, usize, Site, Site, Site, u8)> = Vec::new();
+        // SP-CRAVE: the jumps into water, as `jumps` (their layers counted to the surface).
+        let mut wet: Vec<(u32, usize, Site, Site, Site, u8)> = Vec::new();
         for (order, &(f, _)) in pocket.iter().enumerate() {
             let (fx, fz) = centre(f);
             for (dx, dz) in dirs {
@@ -1203,10 +1241,22 @@ impl RouteGraph {
                 let edge = Site { x: ex as u32, y: f.y, z: ez };
                 for k in 1..=out {
                     let Some((nx, nz)) = col(k) else { break };
-                    let Some(ly) = view.nearest_support(nx, nz, f.y, reach, 0) else {
+                    // A dry landing lies within `reach`; one under water may lie deeper.
+                    let Some(ly) = view.nearest_support(nx, nz, f.y, if wet_ok { f.y } else { reach }, 0) else {
                         continue;
                     };
                     if ly + step.down >= f.y {
+                        continue;
+                    }
+                    let depth = water(Site { x: nx as u32, y: ly, z: nz });
+                    let into_water = depth > wade_m;
+                    if into_water {
+                        // Its drop to the surface, metres, within its reach into water.
+                        let over = crate::surface_m(f.y, v) - (crate::surface_m(ly, v) + depth);
+                        if !water_drop.is_some_and(|w| over <= w.reach_m) {
+                            continue;
+                        }
+                    } else if f.y - ly > reach {
                         continue;
                     }
                     // SP-STUCK: a column it passes over may hold a step within its step up of
@@ -1217,9 +1267,6 @@ impl RouteGraph {
                         continue;
                     }
                     let land = Site { x: nx as u32, y: ly, z: nz };
-                    if water(land) > wade_m {
-                        continue;
-                    }
                     // Its disc clear at the column's centre, else pressed to a side of it.
                     let Some(at) = (0..DROP_LANDINGS.len() as u8).find(|&at| {
                         let (x, z) = drop_landing(land, at, v, self.width);
@@ -1227,7 +1274,12 @@ impl RouteGraph {
                     }) else {
                         continue;
                     };
-                    jumps.push((f.y - ly, order, f, land, edge, at));
+                    if into_water {
+                        let over = crate::surface_m(f.y, v) - (crate::surface_m(ly, v) + depth);
+                        wet.push(((over / v).ceil().max(0.0) as u32, order, f, land, edge, at));
+                    } else {
+                        jumps.push((f.y - ly, order, f, land, edge, at));
+                    }
                 }
             }
         }
@@ -1241,22 +1293,28 @@ impl RouteGraph {
         if let Some(j) = direct {
             return Some(way(j));
         }
-        if hops == 0 {
-            return None;
-        }
         // A jump in two: into a lower pocket with a jump on of its own. Each landing face is
         // asked once, from its first landing point.
-        let mut asked: FxHashMap<Site, ()> = FxHashMap::default();
-        jumps
-            .iter()
-            .find(|&&(_, _, _, land, _, at)| {
+        if hops > 0 && reach > step.down {
+            let mut asked: FxHashMap<Site, ()> = FxHashMap::default();
+            let two = jumps.iter().find(|&&(_, _, _, land, _, at)| {
                 if asked.insert(land, ()).is_some() {
                     return false;
                 }
                 let p = drop_landing(land, at, v, self.width);
-                self.drop_way_hops(view, land, p, r, headroom, step, reach, wade_m, own_cols, max_cols, hops - 1).is_some()
-            })
-            .map(way)
+                self.drop_way_hops(view, land, p, r, headroom, step, reach, wade_m, own_cols, max_cols, hops - 1, None).is_some()
+            });
+            if let Some(j) = two {
+                return Some(way(j));
+            }
+        }
+        // SP-CRAVE: last, into water it gets out of: the lowest drop to the surface, then the
+        // nearest pocket face. Each landing face is asked once.
+        let Some(w) = water_drop else { return None };
+        wet.sort_by_key(|&(layers, order, _, _, _, at)| (layers, order, at));
+        wet.retain(|j| !seen.contains_key(&j.3));
+        let mut asked: FxHashMap<Site, bool> = FxHashMap::default();
+        wet.iter().find(|&&(_, _, _, land, _, _)| *asked.entry(land).or_insert_with(|| (w.out)(land))).map(way)
     }
 
     /// **WADE-OUT, the way out through the water**: for a body held on `site` — out of its
