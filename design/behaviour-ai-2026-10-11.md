@@ -918,6 +918,9 @@ an already isolated prey). The heuristics add local memory:
   pluggable; the reward design comes back from the research, one topic at a time. Tension to
   bring him: §9 "shape situations, never reward behaviour" and topic 7's "no curiosity
   reward" against drives such as curiosity (the 2026-10-02 novelty term exists, off).
+  Then: "at the very least, switching to RL from ES sounds like a better move for now." RL
+  (per-decision learning) is the direction; ES stays only as the pilot's yardstick, and
+  twin-copy speedups are not built.
 - **Checks.** An algebraic check that a perturbation improving only a relative's energy
   survives the whole scorer. Readouts of raw own, relative and combined scores. Missing signs
   are never scored as zero returns.
