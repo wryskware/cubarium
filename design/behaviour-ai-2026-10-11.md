@@ -899,6 +899,13 @@ an already isolated prey). The heuristics add local memory:
   not a blind long run. And: "i wanna also revisit like how we are training though. i mean
   theres the algorithm we use and then also optimizations for the runs. both could be subject
   to improvements." A review of both comes back to him one topic at a time.
+- **Calves and family movement (Wrysk, 2026-10-14).** Calves never strayed past their
+  excursion distance in 48 world-hours. His call: "B for now works i guess": older calves
+  wander farther and more often, bracketed to about one loftstrider a world-year, mostly
+  calves. Real calf curiosity waits: "requires like modelling real curiosity about the world
+  and a trained brain would currently have no reward for that since it doesnt actually count or
+  save 'experiences'". First the family must move: "loftstriders still parked at the same spot
+  forever. like they need to graze and move on" (LS-ROAM).
 - **Checks.** An algebraic check that a perturbation improving only a relative's energy
   survives the whole scorer. Readouts of raw own, relative and combined scores. Missing signs
   are never scored as zero returns.
