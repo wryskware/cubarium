@@ -2336,7 +2336,8 @@ fn check_tree(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<
     let bound = crate::treecheck::walk_bound(fauna, &a)?;
     crate::treecheck::give_up_if_overdue(fauna, a.id, bound);
     let aim = crate::treecheck::aim_of(fauna, a.id);
-    let cands = crate::treecheck::order(&near, aim, |host| crate::treecheck::recall(fauna, a.id, host, now, memory));
+    let known = crate::treecheck::recall_all(fauna, a.id, now, memory);
+    let cands = crate::treecheck::order(&near, aim, |host| known.get(&host).copied());
     let walk: Vec<(f64, u64, Site)> = cands.iter().map(|c| (c.0, c.2.0, c.2.1)).collect();
     // **The aim holds** (ECO-INT): a host it set out for that is still a candidate (in range,
     // a host, not remembered empty) and not given up by a pressed walk is the only one it

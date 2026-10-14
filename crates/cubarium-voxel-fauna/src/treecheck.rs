@@ -139,7 +139,9 @@ pub fn hidden_food(fauna: &Fauna, _fv: &FloraView<'_>, host: Host<'_>) -> bool {
     fruit || crate::larva::visible(fauna, host.key()).is_some()
 }
 
-/// What body `id` remembers of `host` within `memory` ticks of `now`.
+/// What body `id` remembers of `host` within `memory` ticks of `now` (one host; the check reads
+/// them all at once, [`recall_all`]).
+#[cfg(test)]
 pub(crate) fn recall(fauna: &Fauna, id: u64, host: LarvaHost, now: u64, memory: u64) -> Option<Checked> {
     fauna
         .tree_checks
@@ -148,6 +150,17 @@ pub(crate) fn recall(fauna: &Fauna, id: u64, host: LarvaHost, now: u64, memory: 
         .iter()
         .find(|c| c.host == host && now.saturating_sub(c.tick) < memory)
         .copied()
+}
+
+/// Everything body `id` remembers within `memory` ticks of `now`, keyed by host. **SP-CHURN**:
+/// the memory is bounded by time alone, so a body that crossed a field of small vines can hold
+/// hundreds of looks; a check over hundreds of candidates reads them once, not once each.
+pub(crate) fn recall_all(fauna: &Fauna, id: u64, now: u64, memory: u64) -> rustc_hash::FxHashMap<LarvaHost, Checked> {
+    fauna
+        .tree_checks
+        .get(&id)
+        .map(|m| m.seen.iter().filter(|c| now.saturating_sub(c.tick) < memory).map(|c| (c.host, *c)).collect())
+        .unwrap_or_default()
 }
 
 /// **The check's order** over `cands` (`(distance, host, …)`, nearest first): a host
@@ -298,7 +311,7 @@ pub(crate) fn remember(fauna: &mut Fauna, id: u64, host: LarvaHost, food: bool) 
 }
 
 /// The dead's memories go, and (**SP-CHURN**) each living body forgets the looks older than
-/// its memory (`Glider::check_memory_s`, as [`recall`] reads it), at most once a tick and
+/// its memory (`Glider::check_memory_s`, as [`recall_all`] reads it), at most once a tick and
 /// every 256 ticks.
 pub(crate) fn prune(fauna: &mut Fauna) {
     let now = fauna.tick;
