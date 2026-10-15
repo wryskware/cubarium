@@ -436,3 +436,51 @@ fn a_body_above_water_with_no_way_out_does_not_drop() {
     assert_eq!(fauna.view().ledger.drops_by_founder[SP.index()], 0, "no drop");
 }
 
+
+// ------------------------------------------------------------------ CRAVE-POOL
+
+/// A growing young seedporter in the grove's world, its reserve near full (room left in it
+/// and an empty fuel tank, so no energy craving), with its absorbed-N pool set to `fill` of
+/// the pool's own ceiling (`n_pool_cap · n_tissue · body`, `n_pool_step`). Its cravings.
+fn young_with_pool(fill: f64) -> crate::crave::Cravings {
+    use grove::*;
+    let c = config();
+    let w = world();
+    let mut f = Fauna::new(c.clone());
+    f.set_births_enabled(false);
+    let id = body(&mut f, &w, young(&c, 0.9));
+    let i = index(&f, id);
+    let sc = c.founder(SP).core;
+    let a = &mut f.animals[i];
+    assert!(a.body < sc.birth_body, "fixture: a growing young");
+    assert!(a.reserve < sc.reserve_of(a.body) && a.fuel < sc.fuel_cap * a.body, "fixture: room to fill");
+    a.n_pool = fill * sc.n_pool_cap * sc.n_tissue * a.body;
+    crate::crave::cravings(&f, i)
+}
+
+/// **CRAVE-POOL** (Wrysk 2026-10-14, "your recommendations sound fine"): **a growing young
+/// whose absorbed-N pool is full does not crave nitrogen over energy**: it holds N it lacks
+/// the carbon to build, so nitrogen is not what it is short of.
+#[test]
+fn a_growing_young_with_a_full_pool_does_not_crave_nitrogen() {
+    let craved = young_with_pool(1.0);
+    assert_ne!(craved.need(), crate::crave::Need::Nitrogen, "a full pool: {craved:?}");
+}
+
+/// **CRAVE-POOL: the same young with an empty pool craves nitrogen.**
+#[test]
+fn a_growing_young_with_an_empty_pool_craves_nitrogen() {
+    let craved = young_with_pool(0.0);
+    assert_eq!(craved.need(), crate::crave::Need::Nitrogen, "an empty pool: {craved:?}");
+}
+
+/// **CRAVE-POOL: the nitrogen craving never rises as the pool fills.**
+#[test]
+fn the_nitrogen_craving_does_not_rise_as_the_pool_fills() {
+    let mut last = f64::INFINITY;
+    for k in 0..=40 {
+        let n = young_with_pool(f64::from(k) / 40.0).nitrogen;
+        assert!(n <= last, "at fill {}/40 the craving rose: {n} after {last}", k);
+        last = n;
+    }
+}
