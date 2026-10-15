@@ -1,0 +1,12 @@
+# CALF-ROAM (design/handoffs/calf-roam-2026-10-15.md): one calf beside every grown
+# loftstrider, its mother's own, ten minutes old, placed on a settled save:
+# `voxel_census load=… edit=THIS`.
+#
+# Why ten minutes: a loftstrider calf strays from birth (it does not nurse), and its roam runs
+# from birth to `young.independence_s` (15,000 s). Placed at 600 s, a four-hour run (14,400 s)
+# ends at 15,000 s, at independence: the calf-hours sample its whole straying life evenly,
+# the older half (where CALF-ROAM's arms differ) included.
+[[calve]]
+lineage = "loftstrider"
+count = 1
+age_s = 600

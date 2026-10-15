@@ -277,7 +277,7 @@ fn out_on_excursion(founder: Founder, goal_m: f64, ago_s: f64) -> (World, Fauna,
     let (mother, calf) = family(&mut f, &w, founder, 10.0, 2.0, 0.3, 0.5 * (start + end));
     let a = animal(&f, calf);
     let since = f.tick - (ago_s / cubarium_voxel::DT).round() as u64;
-    let e = Excursion { goal: Goal::Place, track: 0, x: a.pose.x + goal_m, z: a.pose.z, y_m: a.pose.y_m, since };
+    let e = Excursion { goal: Goal::Place, track: 0, x: a.pose.x + goal_m, z: a.pose.z, y_m: a.pose.y_m, since, kin_tick: since };
     f.excursions.insert(calf, e);
     (w, f, mother, calf)
 }
@@ -451,5 +451,59 @@ fn an_excursion_is_recorded_as_the_young_menus_explore_with_its_goal() {
         let mask = crate::intent::intent_mask(menu, false, |_| true);
         assert!(!mask[k]);
         let _ = &mut f;
+    }
+}
+
+// ------------------------------------------------------------------ CALF-ROAM: bolder with age
+
+/// `calf`'s excursion with its kin last sensed `ago_s` before now.
+fn kin_last_sensed(f: &mut Fauna, calf: u64, ago_s: f64) {
+    let tick = f.tick - (ago_s / cubarium_voxel::DT).round() as u64;
+    let e = f.excursions.get_mut(&calf).expect("out");
+    e.since = e.since.min(tick);
+    e.kin_tick = tick;
+}
+
+#[test]
+fn an_older_young_walks_on_out_of_sight_until_its_lost_time_which_kin_in_sense_resets() {
+    for founder in [LS, SP] {
+        let name = founder.name();
+        // `lost_s` from none at the roam's start to the excursion's whole time at independence;
+        // the calf is midway through its roam, so its lost time is half the excursion's.
+        let set = |f: &mut Fauna| {
+            let y = &mut f.config.founders[founder.index()].young;
+            y.lost_s = [0.0, y.excursion_s];
+        };
+        let half = 0.5 * config().founder(founder).young.excursion_s;
+        // Out of sight for less than its lost time: it walks on toward its goal, silent.
+        let (_w, mut f, _, calf) = out_on_excursion(founder, 8.0, 1.0);
+        set(&mut f);
+        sees(&mut f, calf, &[]);
+        kin_last_sensed(&mut f, calf, 0.5 * half);
+        assert!(run_excursion(&mut f, calf).is_some(), "{name}: walks on out of sight");
+        assert!(f.excursions.contains_key(&calf) && !bleated(&f, calf), "{name}");
+        // Out of sight for longer: it gives up and bleats.
+        let (_w, mut f, _, calf) = out_on_excursion(founder, 8.0, 1.0);
+        set(&mut f);
+        sees(&mut f, calf, &[]);
+        kin_last_sensed(&mut f, calf, half + 1.0);
+        assert!(run_excursion(&mut f, calf).is_none(), "{name}: lost");
+        assert_eq!(f.roam_tally(founder).ended[End::LostSight.index()], 1, "{name}");
+        assert!(bleated(&f, calf), "{name}: it bleats when lost");
+        // Kin in sense again restarts the count, however long it was out of sight before.
+        let (_w, mut f, mother, calf) = out_on_excursion(founder, 8.0, 1.0);
+        set(&mut f);
+        kin_last_sensed(&mut f, calf, half + 1.0);
+        sees(&mut f, calf, &[(mother, class::KIN, false)]);
+        assert!(run_excursion(&mut f, calf).is_some(), "{name}: kin in sense, walks on");
+        assert_eq!(f.excursions[&calf].kin_tick, f.tick, "{name}: the count restarts");
+        // At the roam's start its lost time is `lost_s[0]` (none): out of sight ends it at once.
+        let (_w, mut f, _, calf) = out_on_excursion(founder, 8.0, 1.0);
+        set(&mut f);
+        let n = f.config.founder(founder).nursing;
+        set_age(&mut f, calf, if n.on() { n.weaning_age_s } else { 0.0 });
+        sees(&mut f, calf, &[]);
+        assert!(run_excursion(&mut f, calf).is_none(), "{name}: a young at its roam's start is lost at once");
+        assert_eq!(f.roam_tally(founder).ended[End::LostSight.index()], 1, "{name}");
     }
 }
