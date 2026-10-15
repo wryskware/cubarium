@@ -933,6 +933,13 @@ an already isolated prey). The heuristics add local memory:
   (a serde knob in body_ref units with a registry row, larger for breeding adults and the
   young), on top of the stored energy, with the learned value baseline underneath to price
   what follows. It belongs to the judge (death is an outcome).
+- **Score topic 3, drives (Wrysk, 2026-10-14: "yah lets do B and get baseline models. we can
+  always add temperment weights later and fine tune, but i think thats too much noise in the
+  first 90% of training.").** The teacher adds hunger (gut fill), wound load and sleep debt in
+  the potential form: reward = drive before − drive after, one knob each, the same weights for
+  every species. Over a window it sums to condition gained, so it leaves the best plan
+  unchanged (Ng 1999). Per-species temperament weights come later, as fine-tuning on baseline
+  models.
 - **Checks.** An algebraic check that a perturbation improving only a relative's energy
   survives the whole scorer. Readouts of raw own, relative and combined scores. Missing signs
   are never scored as zero returns.
