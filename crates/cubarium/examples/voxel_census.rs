@@ -2035,6 +2035,15 @@ fn print_header() {
     for f in Founder::ALL {
         header.push_str(&format!(",wounds_{0}_loftstrider,wounds_{0}_{1}", f.name(), Founder::Chorister.name()));
     }
+    // CALF-ROAM (2026-10-15): the farthest loftstrider calf from its living mother (ground,
+    // metres) and the calves beyond their day sight of her (`senses.sight_m`); this session's
+    // excursions ended, by why (`roam::End`); and the grown loftstriders asleep now, their mean
+    // and nearest ground distance to a Veilhound den, metres (empty with none asleep or no den).
+    header.push_str(",ls_calf_max_m,ls_calves_unseen");
+    for e in cubarium_voxel_fauna::roam::End::ALL {
+        header.push_str(&format!(",ls_exc_end_{}", e.name()));
+    }
+    header.push_str(",ls_asleep,ls_asleep_den_m,ls_asleep_den_min_m");
     // N-POOL (2026-10-14): per lineage, cumulative digested protein N into the absorbed-N
     // pool and N the pool built into reserve tissue, mineral units.
     for f in Founder::ALL {
@@ -2443,6 +2452,47 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
             row.push(h.wounds[f.index()][ls.index()].to_string());
             row.push(h.wounds[f.index()][Founder::Chorister.index()].to_string());
         }
+        // CALF-ROAM: the farthest calf, the calves out of sight, the excursions' ends, and the
+        // sleepers' distance to a den.
+        let sight_m = fa.config().founder(ls).senses.sight_m;
+        let ground = |ax: f64, az: f64, bx: f64, bz: f64| {
+            let dx = (ax - bx).rem_euclid(ring);
+            dx.min(ring - dx).hypot(az - bz)
+        };
+        let (mut max_m, mut unseen) = (0.0f64, 0usize);
+        for a in av.animals.iter().filter(|a| a.founder == Some(ls) && cubarium_voxel_fauna::roam::young_of_mother(fa.config(), a)) {
+            if let Some(m) = cubarium_voxel_fauna::mother_body(a).and_then(|m| av.animal(m)) {
+                let d = ground(a.pose.x, a.pose.z, m.pose.x, m.pose.z);
+                max_m = max_m.max(d);
+                unseen += usize::from(d > sight_m);
+            }
+        }
+        row.push(if with_mother > 0 { format!("{max_m:.2}") } else { String::new() });
+        row.push(unseen.to_string());
+        for e in cubarium_voxel_fauna::roam::End::ALL {
+            row.push(t.ended[e.index()].to_string());
+        }
+        let voxel_m = sim.world().config().voxel_m;
+        let dens: Vec<(f64, f64)> = fa
+            .packs()
+            .iter()
+            .filter(|p| p.lineage == Founder::Chorister)
+            .map(|p| ((f64::from(p.den.x) + 0.5) * voxel_m, (f64::from(p.den.z) + 0.5) * voxel_m))
+            .collect();
+        let (mut asleep, mut den_sum, mut den_min) = (0usize, 0.0f64, f64::INFINITY);
+        for a in av.animals.iter().filter(|a| {
+            a.founder == Some(ls) && a.state == cubarium_voxel_fauna::State::Asleep && !cubarium_voxel_fauna::roam::young_of_mother(fa.config(), a)
+        }) {
+            asleep += 1;
+            if let Some(d) = dens.iter().map(|&(x, z)| ground(a.pose.x, a.pose.z, x, z)).min_by(f64::total_cmp) {
+                den_sum += d;
+                den_min = den_min.min(d);
+            }
+        }
+        row.push(asleep.to_string());
+        let slept_by_den = asleep > 0 && !dens.is_empty();
+        row.push(if slept_by_den { format!("{:.2}", den_sum / asleep as f64) } else { String::new() });
+        row.push(if slept_by_den { format!("{den_min:.2}") } else { String::new() });
     }
     for k in Founder::ALL {
         row.push(format!("{:.6e}", a.ledger.n_absorbed_by_founder[k.index()]));

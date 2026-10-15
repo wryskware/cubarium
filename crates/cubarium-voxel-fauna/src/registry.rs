@@ -33,6 +33,7 @@ pub fn registry() -> &'static Registry {
                 Alias { pattern: "fauna.founders.*.calls.heed_s".into(), names: vec!["first", "second"] },
                 Alias { pattern: "fauna.founders.*.calls.stranger_delay_s".into(), names: vec!["first", "second"] },
                 Alias { pattern: "fauna.founders.*.young.excursion_per_h".into(), names: vec!["start", "independence"] },
+                Alias { pattern: "fauna.founders.*.young.lost_s".into(), names: vec!["start", "independence"] },
             ],
             Vec::new(),
         )
@@ -457,6 +458,7 @@ fn founder_rows() -> Vec<Row> {
         r("young.excursion_m", "m", nonneg, "YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother"),
         r("young.arrive_m", "m", nonneg, "YOUNG-ROAM: within this of its goal the excursion ends (quietly)"),
         r("young.excursion_s", "s", nonneg, "YOUNG-ROAM: an excursion ends (quietly) after this long"),
+        r("young.lost_s.*", "s", nonneg, "CALF-ROAM: out on an excursion, the young gives up and bleats once it has sensed no kin for this long, at the roam's start and at independence; linear between (0: as soon as it loses sight; older calves wander farther, balance knobs, topic 8)"),
         // Calls (`calls::CallTable`, CONTRACTS, behaviour-AI §11.2); `recognise_voice` is a switch.
         r("calls.range_m", "m", nonneg, "CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres"),
         r("calls.loudness.*", "x range", nonneg, "CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion"),

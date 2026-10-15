@@ -1,0 +1,21 @@
+# The wide terrarium's required roster (a copy of config/training/required-wide.toml) for
+# the CALF-ROAM arms (design/handoffs/calf-roam-2026-10-15.md). `scenario_file` is not read
+# by batch.py: labd stages every `*_file`
+# a `--required` file names beside it ({job}/inputs/required/), which is how the scenario
+# reaches a remote host until labkit stages an arm's `edit=` itself.
+scenario_file = "ls-calf-roam.toml"
+
+[required]
+animals = ["bellwing", "capgnawer", "chorister", "frondgrazer", "lanternjaw", "littershredder", "loftstrider", "ripple-snail", "seedporter"]
+plants = ["bloomcrown", "glowcap", "lanternberry", "siphonreed", "springturf", "stonecushion", "umbrellafrond", "vaulttree", "velvetpad"]
+
+[required.N_ref]
+"bellwing" = 6
+"capgnawer" = 6
+"chorister" = 4
+"frondgrazer" = 8
+"lanternjaw" = 9
+"littershredder" = 8
+"loftstrider" = 2
+"ripple-snail" = 8
+"seedporter" = 4

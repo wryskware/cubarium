@@ -1572,7 +1572,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.04 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4730 rows)
+**`fauna.*`** (4739 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1859,6 +1859,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
 | `fauna.founders.littershredder.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
 | `fauna.founders.littershredder.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
+| `fauna.founders.littershredder.young.lost_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALF-ROAM: out on an excursion, the young gives up and bleats once it has sensed no kin for this long, at the roam's start and at independence; linear between (0: as soon as it loses sight; older calves wander farther, balance knobs, topic 8) |
 | `fauna.founders.littershredder.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.littershredder.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.littershredder.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -2359,6 +2360,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
 | `fauna.founders.frondgrazer.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
 | `fauna.founders.frondgrazer.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
+| `fauna.founders.frondgrazer.young.lost_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALF-ROAM: out on an excursion, the young gives up and bleats once it has sensed no kin for this long, at the roam's start and at independence; linear between (0: as soon as it loses sight; older calves wander farther, balance knobs, topic 8) |
 | `fauna.founders.frondgrazer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.frondgrazer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.frondgrazer.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -2859,6 +2861,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
 | `fauna.founders.lanternjaw.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
 | `fauna.founders.lanternjaw.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
+| `fauna.founders.lanternjaw.young.lost_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALF-ROAM: out on an excursion, the young gives up and bleats once it has sensed no kin for this long, at the roam's start and at independence; linear between (0: as soon as it loses sight; older calves wander farther, balance knobs, topic 8) |
 | `fauna.founders.lanternjaw.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.lanternjaw.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.lanternjaw.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -3359,6 +3362,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
 | `fauna.founders.capgnawer.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
 | `fauna.founders.capgnawer.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
+| `fauna.founders.capgnawer.young.lost_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALF-ROAM: out on an excursion, the young gives up and bleats once it has sensed no kin for this long, at the roam's start and at independence; linear between (0: as soon as it loses sight; older calves wander farther, balance knobs, topic 8) |
 | `fauna.founders.capgnawer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.capgnawer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.capgnawer.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -3859,6 +3863,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.young.excursion_m` | 40.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
 | `fauna.founders.loftstrider.young.arrive_m` | 1.5 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
 | `fauna.founders.loftstrider.young.excursion_s` | 120.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
+| `fauna.founders.loftstrider.young.lost_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALF-ROAM: out on an excursion, the young gives up and bleats once it has sensed no kin for this long, at the roam's start and at independence; linear between (0: as soon as it loses sight; older calves wander farther, balance knobs, topic 8) |
 | `fauna.founders.loftstrider.calls.range_m` | 40.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.loftstrider.calls.loudness.*` | 1.0, 0.7 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.loftstrider.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -4359,6 +4364,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
 | `fauna.founders.ripple-snail.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
 | `fauna.founders.ripple-snail.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
+| `fauna.founders.ripple-snail.young.lost_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALF-ROAM: out on an excursion, the young gives up and bleats once it has sensed no kin for this long, at the roam's start and at independence; linear between (0: as soon as it loses sight; older calves wander farther, balance knobs, topic 8) |
 | `fauna.founders.ripple-snail.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.ripple-snail.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.ripple-snail.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -4859,6 +4865,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
 | `fauna.founders.bellwing.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
 | `fauna.founders.bellwing.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
+| `fauna.founders.bellwing.young.lost_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALF-ROAM: out on an excursion, the young gives up and bleats once it has sensed no kin for this long, at the roam's start and at independence; linear between (0: as soon as it loses sight; older calves wander farther, balance knobs, topic 8) |
 | `fauna.founders.bellwing.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.bellwing.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.bellwing.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -5359,6 +5366,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.young.excursion_m` | 12.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
 | `fauna.founders.seedporter.young.arrive_m` | 0.5 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
 | `fauna.founders.seedporter.young.excursion_s` | 120.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
+| `fauna.founders.seedporter.young.lost_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALF-ROAM: out on an excursion, the young gives up and bleats once it has sensed no kin for this long, at the roam's start and at independence; linear between (0: as soon as it loses sight; older calves wander farther, balance knobs, topic 8) |
 | `fauna.founders.seedporter.calls.range_m` | 30.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.seedporter.calls.loudness.*` | 1.0, 0.7 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.seedporter.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -5859,6 +5867,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
 | `fauna.founders.chorister.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
 | `fauna.founders.chorister.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
+| `fauna.founders.chorister.young.lost_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALF-ROAM: out on an excursion, the young gives up and bleats once it has sensed no kin for this long, at the roam's start and at independence; linear between (0: as soon as it loses sight; older calves wander farther, balance knobs, topic 8) |
 | `fauna.founders.chorister.calls.range_m` | 60.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.chorister.calls.loudness.*` | 0.3, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.chorister.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |

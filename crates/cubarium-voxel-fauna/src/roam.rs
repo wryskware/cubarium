@@ -28,6 +28,10 @@
 //!   sight of its family (no kin in its record); then it **bleats** (its lineage's distress
 //!   call) and its leash takes it back. It also ends, quietly, at its goal (within
 //!   `arrive_m`) or after `excursion_s`.
+//! - **Bolder with age** (CALF-ROAM, `design/handoffs/calf-roam-2026-10-15.md`). Losing sight
+//!   ends an excursion only once it has sensed no kin for `lost_s`, rising linearly with its
+//!   roam from `lost_s[0]` at its start to `lost_s[1]` at independence (0: at once, as before),
+//!   so an older young can walk on past its family's sight toward its goal.
 //! - **The mother comes** ([`answer`]). A body that hears its own young's distress call (it
 //!   recognises the voice) walks to where the call came from until within its calls'
 //!   `arrive_m`, while the record is younger than the kind's `heed_s`. A loftstrider's
@@ -70,6 +74,10 @@ pub struct Young {
     pub arrive_m: f64,
     /// An excursion ends after this long, seconds.
     pub excursion_s: f64,
+    /// Out on an excursion, it gives up and bleats once it has sensed no kin for this long, at
+    /// the start of its roam (birth, or weaning) and at independence; linear between, seconds.
+    /// 0: as soon as no kin is in its record.
+    pub lost_s: [f64; 2],
 }
 
 impl Default for Young {
@@ -85,6 +93,7 @@ impl Default for Young {
             excursion_m: 0.0,
             arrive_m: 0.0,
             excursion_s: 0.0,
+            lost_s: [0.0; 2],
         }
     }
 }
@@ -116,6 +125,8 @@ impl Young {
 ///   arriving within 1.5 m, for at most two minutes; a weaned seedporter twice an hour at
 ///   weaning and six at independence, 12 m off (inside its 16 m sight), within 0.5 m, two
 ///   minutes. Balance knobs (§6, topic 8): the pack's calf kills should come from strays.
+/// - **Bolder with age** (`lost_s`): 0 for every lineage, an excursion ending as soon as the
+///   young loses sight of its family (before CALF-ROAM).
 pub fn young_of(founder: Founder) -> Young {
     let d = Young { pace_floor: 0.5, ..Young::default() };
     match founder {
@@ -259,6 +270,8 @@ pub struct Excursion {
     pub y_m: f64,
     /// The tick it set out.
     pub since: u64,
+    /// The last tick it sensed kin (from `since`): `lost_s` counts from here.
+    pub kin_tick: u64,
 }
 
 /// **The excursions' readout** per lineage (diagnostics only; session state, not saved).
@@ -303,9 +316,15 @@ fn senses_class(fauna: &Fauna, id: u64, cls: u8) -> bool {
     fauna.percept(id).is_some_and(|p| p.tracks().iter().any(|t| t.known && t.class == cls && now.saturating_sub(t.tick) <= fresh))
 }
 
+/// The time out of sight of kin that ends an excursion at roam `k` (`lost_s`, linear), ticks.
+fn lost_ticks(y: &Young, k: f64) -> u64 {
+    let s = y.lost_s[0] + (y.lost_s[1] - y.lost_s[0]) * k.clamp(0.0, 1.0);
+    if s.is_finite() && s > 0.0 { (s / DT).round() as u64 } else { 0 }
+}
+
 /// Why body `i`'s excursion `e` ends now, if it does (module note), from its own record and
-/// calls.
-fn ends(fauna: &Fauna, i: usize, e: &Excursion, y: &Young, ring: f64) -> Option<End> {
+/// calls; `k` its roam.
+fn ends(fauna: &Fauna, i: usize, e: &Excursion, y: &Young, k: f64, ring: f64) -> Option<End> {
     let a = &fauna.animals[i];
     let heard = crate::calls::heard(fauna, a.id);
     if heard.iter().any(|r| r.relation == 1 && r.tick >= e.since) {
@@ -314,7 +333,7 @@ fn ends(fauna: &Fauna, i: usize, e: &Excursion, y: &Young, ring: f64) -> Option<
     if senses_class(fauna, a.id, class::THREAT) || heard.iter().any(|r| r.kind == 0 && r.tick >= e.since) {
         return Some(End::Alarmed);
     }
-    if !senses_class(fauna, a.id, class::KIN) {
+    if !senses_class(fauna, a.id, class::KIN) && fauna.tick.saturating_sub(e.kin_tick) >= lost_ticks(y, k) {
         return Some(End::LostSight);
     }
     let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, e.x, e.z, ring);
@@ -359,7 +378,7 @@ fn pick(fauna: &Fauna, i: usize, y: &Young, rng: &mut cubarium_voxel::KeyedRng, 
     options.push((Goal::Place, 0, px, a.pose.z + m * heading.cos(), a.pose.y_m));
     let k = ((rng.unit() * options.len() as f64) as usize).min(options.len() - 1);
     let (goal, track, x, z, y_m) = options[k];
-    Excursion { goal, track, x, z, y_m, since: now }
+    Excursion { goal, track, x, z, y_m, since: now, kin_tick: now }
 }
 
 /// Body `i`'s excursion as its intent subject: the goal's point.
@@ -389,7 +408,10 @@ pub(crate) fn excursion(fauna: &mut Fauna, i: usize, calm: bool, period_s: f64, 
                 (e.x, e.z, e.y_m) = (t.x, t.z, t.y_m);
             }
         }
-        if let Some(end) = ends(fauna, i, &e, &y, ring) {
+        if senses_class(fauna, a.id, class::KIN) {
+            e.kin_tick = fauna.tick;
+        }
+        if let Some(end) = ends(fauna, i, &e, &y, k, ring) {
             fauna.excursions.remove(&a.id);
             let tally = &mut fauna.roam_tally[f.index()];
             tally.ended[end.index()] += 1;
