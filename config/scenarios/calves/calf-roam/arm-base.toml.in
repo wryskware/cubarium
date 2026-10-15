@@ -1,0 +1,21 @@
+# CALF-ROAM arm base (design/handoffs/calf-roam-2026-10-15.md, steps 2-3), seeds @SEEDS@: from
+# the settled save at m240 of @SAVES@, one calf per grown loftstrider at 600 s
+# (ls-calf-roam.toml), 4 world-hours, on the branch binary 368d2eda. Arms differ only by set=:
+#   base  main defaults (lost_s [0, 0], excursion_per_h [1, 4])
+#   a     lost_s [0, 15],  excursion_per_h [1, 6]
+#   b     lost_s [0, 30],  excursion_per_h [1, 8]
+#   c     lost_s [0, 120], excursion_per_h [1, 16]
+# Written by chain.sh from arm-base.toml.in once the saves are done; submit from the worktree root.
+kind = "batch"
+name = "calf-roam-arm-base-s@SEEDS@"
+hosts = ["eidolon", "desktop"]
+parallel = 2
+est_h = 2.8
+binary = { tree = ".", commit = "368d2eda" }
+args = [
+  "--arm", "base=edit={job}/inputs/required/ls-calf-roam.toml",
+  "--starts", "/home/wrysk/wryskware/cubarium/runs/lab/@SAVES@/batch-task/batch/settle/s*/run/ckpt/m000240",
+  "--required", "config/scenarios/calves/required-wide-calf-roam.toml",
+  "--hours", "4", "--threads", "2",
+  "--stage", "check_min=3 segment_min=60 keep=2",
+]

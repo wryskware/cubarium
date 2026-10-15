@@ -1,0 +1,18 @@
+# CALF-ROAM step 1 (design/handoffs/calf-roam-2026-10-15.md): fresh settled wide saves on main
+# c507ad00 (LS-BROWSE; fauna schema 89), seeds 5-6, 4 world-hours (the pack first hunts at about
+# minute 200), checkpoints kept at m3, m63, m123, m183 and m240. The arms load m000240.
+# Two-seed jobs (4 threads) fit the free halves of the L3 groups.
+# Submit from the worktree root: scripts/lab/lab submit config/scenarios/calves/calf-roam/saves-s5-6.toml
+kind = "batch"
+name = "calf-roam-saves-s5-6"
+hosts = ["eidolon", "desktop"]
+parallel = 2
+est_h = 2.8
+binary = { tree = ".", commit = "c507ad00" }
+args = [
+  "--arm", "settle=",
+  "--config", "config/desktop/terrarium-wide.toml",
+  "--required", "config/training/required-wide.toml",
+  "--seeds", "5-6", "--hours", "4", "--threads", "2",
+  "--stage", "check_min=3 segment_min=60 keep=6",
+]
