@@ -1332,7 +1332,8 @@ pub struct Glider {
     /// 2.0 (room for the turns, a press and a climb back down on the way).
     #[serde(default = "check_walk_factor")]
     pub check_walk_factor: f64,
-    /// **SP-CRAVE: the nitrogen craving** ([`crate::crave::cravings`]; Wrysk 2026-10-14:
+    /// **SP-CRAVE: the nitrogen craving's ceiling** ([`crate::crave::cravings`], scaled down as
+    /// the absorbed-N pool fills by `crave_pool_full`; Wrysk 2026-10-14:
     /// "animals normally with have different cravings based on needs"), in `[0, 1]`: held by a
     /// body building tissue past its upkeep (a growing young under `birth_body`, a gestating or
     /// nursing mother, a brood under target) or whose fuel is full over a lagging reserve. It
@@ -1359,6 +1360,18 @@ pub struct Glider {
     /// 0.5; 0: no energy craving.
     #[serde(default = "crave_energy_low")]
     pub crave_energy_low: f64,
+    /// **CRAVE-POOL: the absorbed-N pool this full stills the nitrogen craving** (fraction of
+    /// the pool's ceiling, `n_pool_cap · n_tissue · body`; Wrysk 2026-10-14, "your
+    /// recommendations sound fine"). The craving is `crave_nitrogen` with the pool empty,
+    /// falling linearly to 0 at this fill: N absorbed and still unbuilt waits for carbon, so a
+    /// body holding it is short of energy to build, not of nitrogen (under the constant
+    /// craving, 19 % of a seedporter's absorbed N decayed unbuilt while it walked to trees past
+    /// fruit). Animals regulate protein intake against their free amino-acid and labile
+    /// protein status, feeding for it when that runs low (Simpson & Raubenheimer 2012, *The
+    /// Nature of Nutrition*; Felton et al. 2009). 0.25 (a quarter of the pool's ceiling funds
+    /// 1.25 % of body in tissue); 0: the pool is not read (the craving is the ceiling).
+    #[serde(default = "crave_pool_full")]
+    pub crave_pool_full: f64,
 }
 
 fn roost_search_m() -> f64 {
@@ -1409,6 +1422,10 @@ fn crave_energy_low() -> f64 {
     Glider::SEEDPORTER.crave_energy_low
 }
 
+fn crave_pool_full() -> f64 {
+    Glider::SEEDPORTER.crave_pool_full
+}
+
 impl Glider {
     /// The seedporter's table (predation-and-flight §3.5, §3.9; Brief F3; placeholders):
     /// climbs stands from 1 m, glides from 1 m at 2.5 : 1 and 2 × its cruise for 1.2 × basal.
@@ -1430,6 +1447,7 @@ impl Glider {
         crave_fuel_full: 0.9,
         crave_reserve_lag: 0.75,
         crave_energy_low: 0.5,
+        crave_pool_full: 0.25,
     };
 }
 

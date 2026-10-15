@@ -11,6 +11,10 @@
 //!     dependent young of hers alive), a brood under its target — or while its fuel is full
 //!     (`crave_fuel_full`) and its N-funded reserve lags (`crave_reserve_lag`): fuel is the
 //!     N-free share, so a full tank over a lagging reserve says N is what binds;
+//!     scaled by how short its absorbed-N pool runs (**CRAVE-POOL**, Wrysk 2026-10-14, "your
+//!     recommendations sound fine"): full at an empty pool, falling to 0 at `crave_pool_full`
+//!     of the pool's ceiling (`n_pool_cap · n_tissue · body`). A body holding absorbed N its
+//!     carbon has not matched lacks energy to build, not nitrogen;
 //!   - **energy**, rising from 0 at `crave_energy_low` of its combined fuel and reserve room
 //!     to 1 empty, and 1 with its emergency latch on.
 //!
@@ -88,7 +92,16 @@ pub fn cravings(fauna: &Fauna, i: usize) -> Cravings {
         || (a.body >= sc.birth_body && a.reproduction.brood < rule.brood_target(&sc, a.body))
         || nursing(fauna, i);
     let binds = fullness(a.fuel, fuel_cap) >= g.crave_fuel_full && fullness(a.reserve, reserve_cap) < g.crave_reserve_lag;
-    let nitrogen = if builds || binds { g.crave_nitrogen.clamp(0.0, 1.0) } else { 0.0 };
+    // CRAVE-POOL: N already absorbed and waiting for carbon is N it is not short of. The
+    // craving falls from its ceiling with the pool empty to 0 at `crave_pool_full` of the
+    // pool's own ceiling (`n_pool_step`'s cap).
+    let short = if g.crave_pool_full > 0.0 {
+        let fill = fullness(a.n_pool, sc.n_pool_cap * sc.n_tissue * a.body);
+        ((g.crave_pool_full - fill) / g.crave_pool_full).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let nitrogen = if builds || binds { g.crave_nitrogen.clamp(0.0, 1.0) * short } else { 0.0 };
     Cravings { nitrogen, energy }
 }
 
