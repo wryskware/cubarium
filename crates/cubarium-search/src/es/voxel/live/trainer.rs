@@ -226,7 +226,11 @@ impl Lineage {
                 ));
             }
             adam.learning_rate = kin.pg.policy_lr;
-            Some(crate::es::voxel::pg::PgState::new(&f.shape, &kin.pg, spec.train_seed ^ founder.index() as u64))
+            let mut state = crate::es::voxel::pg::PgState::new(&f.shape, &kin.pg, spec.train_seed ^ founder.index() as u64);
+            // SCORE-V2: the centre it starts from is the clone the KL pull anchors to (a
+            // resumed run restores the anchor from its checkpoint instead).
+            state.anchor = theta.clone();
+            Some(state)
         } else {
             None
         };
@@ -507,8 +511,11 @@ fn update(spec: &LiveSpec, l: &mut Lineage, results: &[WindowResult], generation
 }
 
 /// A `policy_gradient` lineage's update from its live windows' decision logs (PG-PILOT):
-/// every world's trajectories under the reward interface (own net energy plus the kin
-/// shares), then the learner's clipped step on the top's intent head.
+/// every world's trajectories under the teacher (SCORE-V2: the judge, own condition, life
+/// values and the kin shares of both, plus the drives in potential form; pilot v1's file
+/// pins every SCORE-V2 knob off and sums own energy and kin alone), then the learner's
+/// clipped step on the top's intent head, pulled toward the clone at this generation's
+/// weight.
 fn update_pg(spec: &LiveSpec, l: &mut Lineage, results: &[WindowResult], generation: u32) -> LineageUpdate {
     use crate::es::voxel::pg::{self, RewardTerm};
     let kin = spec.kin.of(l.founder);
@@ -516,9 +523,8 @@ fn update_pg(spec: &LiveSpec, l: &mut Lineage, results: &[WindowResult], generat
     let mut terms: Vec<(String, f64)> = Vec::new();
     for r in results {
         for w in r.pg.iter().filter(|w| w.founder == l.founder) {
-            let own = pg::OwnEnergy;
-            let relatives = pg::KinEnergy::new(w, &r.roster, &kin.shares);
-            let list: [&dyn RewardTerm; 2] = [&own, &relatives];
+            let boxed = pg::reward::teacher_terms(w, &r.roster, &kin.shares, &kin.pg);
+            let list: Vec<&dyn RewardTerm> = boxed.iter().map(|t| t.as_ref()).collect();
             let (t, totals) = pg::reward::trajectories(w, r.world, &list, cubarium_voxel::DT);
             trajs.extend(t);
             for (name, v) in totals.0 {
@@ -535,9 +541,12 @@ fn update_pg(spec: &LiveSpec, l: &mut Lineage, results: &[WindowResult], generat
     let policy = pg::Policy { shape: &shape, layout: &layout, temperature: l.arbitration(spec).temperature };
     let state = l.pg.as_mut().expect("a policy_gradient lineage has its learner");
     let seed = crate::es::voxel::kin::twins::job_seed(spec.train_seed ^ 0x7067_2d75_7064_6174, generation, l.founder);
-    let mut readout = pg::learner::update(&policy, &mut l.theta, &mut l.adam, state, &trajs, &kin.pg, seed, spec.threads);
+    let knobs = pg::PgKnobs { clone_kl: kin.pg.clone_kl_at(generation), ..kin.pg };
+    let mut readout = pg::learner::update(&policy, &mut l.theta, &mut l.adam, state, &trajs, &knobs, seed, spec.threads);
     let bodies = readout.bodies.max(1) as f64;
     readout.mean_terms = terms.into_iter().map(|(n, v)| (n, v / bodies)).collect();
+    readout.judge_return =
+        readout.mean_terms.iter().filter(|(n, _)| pg::reward::JUDGE_TERMS.contains(&n.as_str())).map(|(_, v)| v).sum();
     let mine: Vec<&window::MeteredBody> =
         results.iter().flat_map(|r| r.metered.iter().filter(|m| m.founder == l.founder)).collect();
     let mean = |f: &dyn Fn(&window::MeteredBody) -> f64| mine.iter().map(|m| f(m)).sum::<f64>() / mine.len().max(1) as f64;
@@ -1142,7 +1151,8 @@ fn run_checks(spec: &LiveSpec, lineages: &[Lineage], generation: u32, log: &mut 
         Ok(sim)
     };
     for l in lineages.iter().filter(|l| matches!(l.template, BrainFile::TwoLayer(_))) {
-        let report = crate::es::voxel::two_layer::check::check(l.founder, &l.driver(spec)?, generation, c, &found);
+        let judge = spec.kin.of(l.founder).pg.judge;
+        let report = crate::es::voxel::two_layer::check::check(l.founder, &l.driver(spec)?, generation, c, &judge, &found);
         println!("{}", crate::es::voxel::two_layer::check::summary_line(&report));
         writeln!(log, "{}", serde_json::to_string(&report).map_err(|e| e.to_string())?).map_err(|e| format!("check log: {e}"))?;
         log.flush().map_err(|e| format!("check log flush: {e}"))?;

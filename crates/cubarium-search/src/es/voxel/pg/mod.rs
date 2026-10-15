@@ -19,16 +19,26 @@
 //!   bottom frozen: stage 1, so no backprop through time), plus the split-half cosine
 //!   readout (the review's yardstick);
 //! - [`knobs`]: the learner's knobs, the kin file's `[<lineage>.pg]` table.
+//!
+//! **SCORE-V2** (`design/handoffs/score-v2-2026-10-15.md`) splits the score: the **judge**
+//! (outcomes only: own condition, the life value lost at a death or added at an own young's
+//! birth, and the kin shares of these; [`judge`], [`reward::JUDGE_TERMS`]) is what every
+//! comparison and check reads; the **teacher** the learner trains on is the judge per step
+//! plus hunger, wound load and sleep debt in potential form. The learner's entropy bonus
+//! gets a sibling, a KL pull toward the clone's intent distribution on the same input.
 
+pub mod judge;
 pub mod knobs;
 pub mod learner;
 pub mod record;
 pub mod reward;
 
 #[cfg(test)]
+mod score_tests;
+#[cfg(test)]
 mod tests;
 
-pub use knobs::PgKnobs;
+pub use knobs::{JudgeKnobs, PgKnobs, TeacherKnobs};
 pub use learner::{PgReadout, PgState, Policy, Step, TopInput, Trajectory};
 pub use record::{ExplorePlan, Recorder};
-pub use reward::{KinEnergy, OwnEnergy, PgBody, PgWorld, RewardTerm};
+pub use reward::{Drive, Kin, KinEnergy, LifeValue, OwnEnergy, PgBody, PgWorld, RewardTerm};

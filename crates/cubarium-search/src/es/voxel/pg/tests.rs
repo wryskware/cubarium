@@ -370,10 +370,11 @@ fn the_rewards_are_net_energy_with_death_and_kin() {
         series: (0..=12).map(|t| 1.0 + 0.1 * t as f64).collect(),
         died: false,
         decisions: [1, 4, 8, 11].map(decision).to_vec(),
+        ..PgBody::default()
     };
     let mut calf_series: Vec<f64> = (2..=8).map(|t| 0.5 - 0.02 * t as f64).collect();
     calf_series.push(0.0); // dead: E = 0, it gave nothing
-    let calf = PgBody { id: 11, start: 2, series: calf_series, died: true, decisions: [3, 5, 7].map(decision).to_vec() };
+    let calf = PgBody { id: 11, start: 2, series: calf_series, died: true, decisions: [3, 5, 7].map(decision).to_vec(), ..PgBody::default() };
     let w = PgWorld { founder: Founder::Lanternjaw, bodies: vec![mother.clone(), calf.clone()] };
     let roster = Roster::fixed(&[
         KinRecord { id: 10, mother: None, pack: None },

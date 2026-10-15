@@ -1,0 +1,31 @@
+# SCORE-V2: the lanternjaw's top by per-decision policy gradient on the split score
+# (design/handoffs/score-v2-2026-10-15.md): the teacher (judge per step plus the drives in
+# potential form) and the KL pull toward the clone, entropy 0. Same centre, worlds, window,
+# top-up, 24 check seeds and scenes as pilot v1 (config/lab/specs/pg-pilot-lj.toml).
+#   scripts/lab/lab submit config/lab/specs/score-v2-lj.toml
+# Binary: built by labd from branch score-v2 at 0013b1f3 (the implementation commit). Kin file: a
+# copy of config/training/score-v2-2026-10-15.toml under runs/score-v2-2026-10-15/inputs
+# (stable while the branch is unmerged). ~600 generations in the 3-hour wall, a 24-seed
+# check every 40.
+# Read: python3 -I scripts/studies/pg_pilot_read.py --pg <out>/run --every 40
+#   (beside v1: --pg runs/lab/1014-023624-pg-pilot-lj-56fc/run/run)
+name = "score-v2-lj"
+kind = "command"
+binary = { commit = "0013b1f3b8bde3a2b3c11994c9f5931fe4f876fd", name = "cubarium-search", tree = "/home/wrysk/wryskware/cubarium/.claude/worktrees/score-v2" }
+argv = ["{bin}", "voxel-live-train",
+  "--centre", "lanternjaw=/home/wrysk/wryskware/cubarium/runs/lab/1012-154001-brest-lj-clone-then-smok-fb68/run/clone/lanternjaw-two-layer.json",
+  "--worlds", "16", "--threads", "14", "--pairs", "16", "--window-min", "10",
+  "--generations", "100000", "--wall", "10800", "--first-generation-seconds", "1800",
+  "--sigma", "0.05", "--top-up", "lanternjaw=8:0.3",
+  "--kin", "/home/wrysk/wryskware/cubarium/runs/score-v2-2026-10-15/inputs/score-v2-2026-10-15.toml",
+  "--check-every", "40", "--check-seeds", "21,22,23,24,25,26,27,28,29,30,31,32,41,42,43,44,45,46,47,48,49,50,51,52", "--check-seconds", "600",
+  "--check-scene-seeds", "101,102,103,104",
+  "--save-every", "20", "--out", "{out}/run"]
+cwd = "/home/wrysk/wryskware/cubarium"
+threads = 14
+mem_gb = 24
+hosts = ["desktop"]
+est_h = 3.2
+timeout_h = 4.5
+done_marker = "run/centres/final-lanternjaw.json"
+priority = 1

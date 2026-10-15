@@ -40,3 +40,16 @@ value_hidden = 32
 epochs = 4
 minibatches = 4
 splits = 16
+# SCORE-V2 (2026-10-15) added the judge's life values, the teacher's drives and the pull
+# toward the clone, each on by default. Pilot v1 ran without them: pinned off here, so this
+# file still reproduces v1's reward (own net energy plus kin) and v1's entropy-only learner.
+clone_kl = 0.0
+clone_kl_fade_generations = 0.0
+[lanternjaw.pg.judge]
+life_young = 0.0
+life_adult = 0.0
+life_breeding = 0.0
+[lanternjaw.pg.teacher]
+hunger = 0.0
+wound = 0.0
+sleep = 0.0

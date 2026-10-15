@@ -14,6 +14,12 @@
 //!   over the generation, by Adam over minibatches and passes. Only the intent head
 //!   (`top.w1`, `top.b1`, `top.w2`, `top.b2`) receives gradient; the bottom and the pointer
 //!   do not move.
+//! - **The pull toward the clone** (SCORE-V2, research topic 6(c)): beside the entropy bonus,
+//!   `− β · mean(KL(π_clone ‖ π))`, the KL from the clone's intent proposal on the same
+//!   input at the same temperature (`π_clone` from [`PgState::anchor`], the centre the
+//!   lineage started from) to the policy's; its gradient on the logits is `β (π_clone − π)/τ`,
+//!   zero at the clone and pulling toward it. `β` is `knobs.clone_kl` (the caller fades it
+//!   by generation, [`PgKnobs::clone_kl_at`]); no anchor, no pull.
 //! - **The yardstick**: the split-half cosine of the plain advantage-weighted gradient at
 //!   the sampling policy, over random halves of the worlds and of the bodies, beside the
 //!   same with the advantages shuffled (the noise floor) and the cosine with the previous
@@ -93,6 +99,10 @@ pub struct PgState {
     pub value_adam: Adam,
     #[serde(with = "crate::es::bits::hex_f64s")]
     pub last_gradient: Vec<f64>,
+    /// **The clone** (SCORE-V2): the centre the lineage started from, the KL pull's anchor;
+    /// kept in the checkpoint so a resumed run pulls toward the same clone. Empty: no pull.
+    #[serde(default, with = "crate::es::bits::hex_f64s")]
+    pub anchor: Vec<f64>,
 }
 
 /// The clipped surrogate's value and its parts over a batch.
@@ -106,6 +116,8 @@ pub struct Surrogate {
     pub clip_fraction: f64,
     /// `mean(ln π_old − ln π)`, the approximate KL from the sampling policy.
     pub approx_kl: f64,
+    /// `mean(KL(π_clone ‖ π))`, nats (0 without the pull).
+    pub clone_kl: f64,
 }
 
 /// One generation's readout (`generations.jsonl`, the lineage's `pg` field).
@@ -131,6 +143,16 @@ pub struct PgReadout {
     pub explained_variance: f64,
     /// The surrogate's parts at the end of the update.
     pub entropy: f64,
+    /// Mean `KL(π_clone ‖ π)` at the end of the update (nats; 0 without the pull), and the
+    /// pull's weight this generation (SCORE-V2).
+    pub clone_kl: f64,
+    pub clone_kl_weight: f64,
+    /// The clone's mean entropy on the generation's decisions (nats; NaN without an
+    /// anchor): what `entropy` should stay near.
+    pub clone_entropy: f64,
+    /// Mean judge reward summed over a body's trained decisions (body references): the
+    /// [`super::reward::JUDGE_TERMS`] of `mean_terms` (SCORE-V2; the trainer fills it).
+    pub judge_return: f64,
     pub approx_kl: f64,
     pub clip_fraction: f64,
     /// Norm of the plain gradient at the sampling policy (normalised advantages).
@@ -161,7 +183,12 @@ struct Term {
     entropy: f64,
     clipped: bool,
     kl: f64,
+    clone_kl: f64,
 }
+
+/// The pull toward the clone over a batch: its weight and, per step, the clone's
+/// probabilities on that step's input.
+pub type Pull<'a> = Option<(f64, &'a [Vec<f64>])>;
 
 impl Policy<'_> {
     fn offsets(&self) -> TopOffsets {
@@ -201,7 +228,8 @@ impl Policy<'_> {
         t.w1..t.wr
     }
 
-    /// One decision: its clipped term, entropy, and (with `grad`) `scale ×` its gradient.
+    /// One decision: its clipped term, entropy, its KL from the clone's `pull` (weight and
+    /// the clone's probabilities on this input), and (with `grad`) `scale ×` its gradient.
     #[allow(clippy::too_many_arguments)]
     fn term(
         &self,
@@ -210,6 +238,7 @@ impl Policy<'_> {
         adv: f64,
         clip: f64,
         entropy: f64,
+        pull: Option<(f64, &[f64])>,
         scale: f64,
         grad: Option<&mut [f64]>,
         w: &mut Work,
@@ -227,6 +256,14 @@ impl Policy<'_> {
                 h -= p * p.ln();
             }
         }
+        let mut clone_kl = 0.0;
+        if let Some((_, c)) = pull {
+            for k in 0..w.p.len() {
+                if st.input.valid[k] && c[k] > 0.0 && w.p[k] > 0.0 {
+                    clone_kl += c[k] * (c[k].ln() - w.p[k].ln());
+                }
+            }
+        }
         if let Some(grad) = grad {
             let tau = if self.temperature > 0.0 { self.temperature } else { 1.0 };
             for k in 0..w.dl.len() {
@@ -234,7 +271,8 @@ impl Policy<'_> {
                 w.dl[k] = if st.input.valid[k] {
                     let pg = g_logp * (f64::from(u8::from(k == st.action)) - p);
                     let ent = if p > 0.0 { -entropy * p * (p.ln() + h) } else { 0.0 };
-                    scale * (pg + ent) / tau
+                    let toward = pull.map_or(0.0, |(beta, c)| beta * (c[k] - p));
+                    scale * (pg + ent + toward) / tau
                 } else {
                     0.0
                 };
@@ -244,7 +282,7 @@ impl Policy<'_> {
             intent_head_backward(&t, theta, &w.top, &w.dl, grad, &mut w.dz);
             top_hidden_backward(&t, theta, &w.top, &w.dz, grad, None);
         }
-        Term { objective, entropy: h, clipped: out, kl: st.logp - logp }
+        Term { objective, entropy: h, clipped: out, kl: st.logp - logp, clone_kl }
     }
 
     /// The clipped surrogate over `steps` with advantages `adv`; with `grad`, its gradient
@@ -256,24 +294,43 @@ impl Policy<'_> {
         adv: &[f64],
         clip: f64,
         entropy: f64,
+        grad: Option<&mut [f64]>,
+    ) -> Surrogate {
+        self.surrogate_pulled(theta, steps, adv, clip, entropy, None, grad)
+    }
+
+    /// [`Policy::surrogate`] with the pull toward the clone: `− β · mean(KL(π_clone ‖ π))`
+    /// added to the objective, `pull` holding `β` and the clone's probabilities per step.
+    #[allow(clippy::too_many_arguments)]
+    pub fn surrogate_pulled(
+        &self,
+        theta: &[f64],
+        steps: &[&Step],
+        adv: &[f64],
+        clip: f64,
+        entropy: f64,
+        pull: Pull<'_>,
         mut grad: Option<&mut [f64]>,
     ) -> Surrogate {
         assert_eq!(steps.len(), adv.len());
         let n = steps.len().max(1) as f64;
         let mut w = self.work();
         let mut s = Surrogate::default();
-        for (st, &a) in steps.iter().zip(adv) {
-            let t = self.term(theta, st, a, clip, entropy, 1.0 / n, grad.as_deref_mut(), &mut w);
+        for (i, (st, &a)) in steps.iter().zip(adv).enumerate() {
+            let p = pull.map(|(beta, c)| (beta, c[i].as_slice()));
+            let t = self.term(theta, st, a, clip, entropy, p, 1.0 / n, grad.as_deref_mut(), &mut w);
             s.objective += t.objective;
             s.entropy += t.entropy;
             s.clip_fraction += f64::from(u8::from(t.clipped));
             s.approx_kl += t.kl;
+            s.clone_kl += t.clone_kl;
         }
         s.objective /= n;
         s.entropy /= n;
         s.clip_fraction /= n;
         s.approx_kl /= n;
-        s.objective += entropy * s.entropy;
+        s.clone_kl /= n;
+        s.objective += entropy * s.entropy - pull.map_or(0.0, |(beta, _)| beta) * s.clone_kl;
         s
     }
 
@@ -288,6 +345,7 @@ impl Policy<'_> {
         items: &[usize],
         clip: f64,
         entropy: f64,
+        pull: Pull<'_>,
         scale: f64,
         threads: usize,
     ) -> (Vec<f64>, Surrogate) {
@@ -301,11 +359,13 @@ impl Policy<'_> {
                         let mut w = self.work();
                         let mut s = Surrogate::default();
                         for &i in chunk.iter() {
-                            let t = self.term(theta, steps[i], adv[i], clip, entropy, scale, Some(&mut g), &mut w);
+                            let p = pull.map(|(beta, c)| (beta, c[i].as_slice()));
+                            let t = self.term(theta, steps[i], adv[i], clip, entropy, p, scale, Some(&mut g), &mut w);
                             s.objective += t.objective;
                             s.entropy += t.entropy;
                             s.clip_fraction += f64::from(u8::from(t.clipped));
                             s.approx_kl += t.kl;
+                            s.clone_kl += t.clone_kl;
                         }
                         (g, s)
                     })
@@ -323,6 +383,7 @@ impl Policy<'_> {
             s.entropy += ps.entropy;
             s.clip_fraction += ps.clip_fraction;
             s.approx_kl += ps.approx_kl;
+            s.clone_kl += ps.clone_kl;
         }
         (g, s)
     }
@@ -469,7 +530,7 @@ impl PgState {
         let value = ValueNet::new(shape.top_inputs(), knobs.value_hidden, seed);
         let mut value_adam = Adam::new(value.phi.len());
         value_adam.learning_rate = knobs.value_lr;
-        PgState { value, value_adam, last_gradient: Vec::new() }
+        PgState { value, value_adam, last_gradient: Vec::new(), anchor: Vec::new() }
     }
 }
 
@@ -603,7 +664,7 @@ pub fn update(
             let mut g = vec![0.0; theta.len()];
             let mut w = policy.work();
             for i in bounds[b].clone() {
-                policy.term(theta, steps[i], a[i], f64::INFINITY, 0.0, 1.0 / n as f64, Some(&mut g), &mut w);
+                policy.term(theta, steps[i], a[i], f64::INFINITY, 0.0, None, 1.0 / n as f64, Some(&mut g), &mut w);
             }
             g[range.clone()].to_vec()
         })
@@ -649,7 +710,29 @@ pub fn update(
     }
     r.off_argmax = off as f64 / n as f64;
 
-    // 3. The clipped update of the intent head and the baseline's regression.
+    // 3. The clipped update of the intent head and the baseline's regression, pulled toward
+    // the clone's proposal on each decision's input when the lineage has one.
+    let clone_p: Vec<Vec<f64>> = if state.anchor.len() == theta.len() {
+        let anchor = &state.anchor;
+        par_map(n, threads, |i| {
+            let mut p = vec![0.0; shape.intents()];
+            policy.probs(anchor, &steps[i].input, &mut p);
+            p
+        })
+    } else {
+        Vec::new()
+    };
+    if !clone_p.is_empty() {
+        let h: f64 = clone_p
+            .iter()
+            .map(|p| p.iter().filter(|&&q| q > 0.0).map(|&q| -q * q.ln()).sum::<f64>())
+            .sum();
+        r.clone_entropy = h / n as f64;
+    } else {
+        r.clone_entropy = f64::NAN;
+    }
+    let pull: Pull<'_> = (knobs.clone_kl > 0.0 && !clone_p.is_empty()).then_some((knobs.clone_kl, clone_p.as_slice()));
+    r.clone_kl_weight = pull.map_or(0.0, |(beta, _)| beta);
     let before = theta.to_vec();
     adam.learning_rate = knobs.policy_lr;
     state.value_adam.learning_rate = knobs.value_lr;
@@ -663,7 +746,7 @@ pub fn update(
                 continue;
             }
             let scale = 1.0 / items.len() as f64;
-            let (g, _) = policy.gradient_par(theta, &steps, &norm, items, knobs.clip, knobs.entropy, scale, threads);
+            let (g, _) = policy.gradient_par(theta, &steps, &norm, items, knobs.clip, knobs.entropy, pull, scale, threads);
             adam.ascend(theta, &g);
             let us: Vec<&[f64]> = items.iter().map(|&i| feats[i].as_slice()).collect();
             let ys: Vec<f64> = items.iter().map(|&i| targets[i]).collect();
@@ -678,8 +761,11 @@ pub fn update(
 
     // 4. Where it ended.
     let all: Vec<usize> = (0..n).collect();
-    let (_, s) = policy.gradient_par(theta, &steps, &norm, &all, knobs.clip, knobs.entropy, 0.0, threads);
+    // The clone's KL is read whenever there is a clone, pulled or not (weight 0 adds nothing).
+    let read: Pull<'_> = (!clone_p.is_empty()).then_some((r.clone_kl_weight, clone_p.as_slice()));
+    let (_, s) = policy.gradient_par(theta, &steps, &norm, &all, knobs.clip, knobs.entropy, read, 0.0, threads);
     r.entropy = s.entropy / n as f64;
+    r.clone_kl = s.clone_kl / n as f64;
     r.approx_kl = s.approx_kl / n as f64;
     r.clip_fraction = s.clip_fraction / n as f64;
     r.value_loss_after = state.value.loss(&refs, &targets, None);

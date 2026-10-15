@@ -16,6 +16,13 @@
 //! - **Per-mode competence** on the lineage's staged scenes ([`super::scenes::competence`]),
 //!   both arms on identical starts.
 //!
+//! - **The judge** (SCORE-V2, `design/handoffs/score-v2-2026-10-15.md`): beside the energy
+//!   gain, each arm's lineage-level judge: its energy change in body references plus the
+//!   life values of the lineage's own young born and minus those of its bodies that died, at
+//!   the stage each died in ([`crate::es::voxel::pg::judge::LifeTally`], the lineage's
+//!   `[<lineage>.pg.judge]` values). The kin shares are inside the lineage's sum (every
+//!   relative is one of its bodies), so the check reads the sum, not a kin-weighted one.
+//!
 //! Readouts only: nothing here touches a training world, an optimizer or a random stream.
 
 use std::collections::BTreeMap;
@@ -26,6 +33,8 @@ use cubarium_voxel_sim::mode_scenes::{self, ModeScene};
 use serde::Serialize;
 
 use crate::es::voxel::EpisodeDriver;
+use crate::es::voxel::pg::JudgeKnobs;
+use crate::es::voxel::pg::judge::LifeTally;
 
 /// What a check runs (`--check-*` on `voxel-live-train`; the `brain_check` example).
 #[derive(Clone, Debug, PartialEq)]
@@ -51,6 +60,12 @@ pub struct LiveArm {
     pub deaths: u64,
     pub energy_start: f64,
     pub energy_end: f64,
+    /// The judge (SCORE-V2): the energy change in body references plus the life values of
+    /// own young born, minus those of the bodies that died; and those parts.
+    pub judge: f64,
+    pub life_born: f64,
+    pub life_lost: f64,
+    pub births: usize,
     /// The share of the lineage's body-seconds with its eating latch on.
     pub hungry_share: f64,
     /// What the lineage ate over the arm, by food ([`diet`]).
@@ -220,6 +235,11 @@ pub struct CheckReport {
     pub gain_per_body_heuristic: f64,
     pub gain_per_body_brain: f64,
     pub gain_per_body_brain_minus_heuristic: f64,
+    /// The same read on the judge (SCORE-V2, body references per starting body): what
+    /// "beats its heuristic" means from SCORE-V2 on.
+    pub judge_per_body_heuristic: f64,
+    pub judge_per_body_brain: f64,
+    pub judge_per_body_brain_minus_heuristic: f64,
     pub deaths_heuristic: u64,
     pub deaths_brain: u64,
     pub holds_heuristic: Holds,
@@ -308,11 +328,22 @@ impl HoldTally {
 }
 
 /// Run one arm on one founded world: the lineage on `driver` (its heuristic when `None`).
-fn live_arm(mut sim: Sim, seed: u64, f: Founder, driver: Option<&EpisodeDriver>, seconds: u64, holds: &mut HoldTally) -> LiveArm {
+#[allow(clippy::too_many_arguments)]
+fn live_arm(
+    mut sim: Sim,
+    seed: u64,
+    f: Founder,
+    driver: Option<&EpisodeDriver>,
+    seconds: u64,
+    judge: &JudgeKnobs,
+    holds: &mut HoldTally,
+) -> LiveArm {
     if let Some(d) = driver {
         crate::es::voxel::live::install_centres(sim.fauna_mut(), &[(f, d.clone())]);
     }
     let (bodies_start, energy_start, deaths_start) = lineage(&sim, f);
+    let mut life = LifeTally::default();
+    life.observe(&sim, f, judge);
     let ledger_start = *sim.fauna().view().ledger;
     let mut numbers_at_s = vec![0];
     let mut counts = vec![lineage_counts(&sim)];
@@ -321,6 +352,7 @@ fn live_arm(mut sim: Sim, seed: u64, f: Founder, driver: Option<&EpisodeDriver>,
     for t in 0..seconds * hz {
         sim.step();
         holds.observe(&sim, f);
+        life.observe(&sim, f, judge);
         let s = (t + 1) / hz;
         if (t + 1) % hz == 0 && s % 60 == 0 && s < seconds {
             numbers_at_s.push(s);
@@ -349,6 +381,10 @@ fn live_arm(mut sim: Sim, seed: u64, f: Founder, driver: Option<&EpisodeDriver>,
         deaths: deaths_end.saturating_sub(deaths_start),
         energy_start,
         energy_end,
+        judge: (energy_end - energy_start) / f.manifest().body_reference + life.net(),
+        life_born: life.born,
+        life_lost: life.lost,
+        births: life.births,
         hungry_share: if present > 0 { hungry as f64 / present as f64 } else { 0.0 },
         diet: diet(&ledger_start, sim.fauna().view().ledger, f),
         numbers_at_s,
@@ -363,6 +399,7 @@ pub fn check(
     driver: &EpisodeDriver,
     generation: u32,
     spec: &CheckSpec,
+    judge: &JudgeKnobs,
     found: &(dyn Fn(u64) -> Result<Sim, String> + Sync),
 ) -> CheckReport {
     let started = std::time::Instant::now();
@@ -373,7 +410,7 @@ pub fn check(
     let runs: Vec<Result<(LiveArm, HoldTally), String>> = crate::es::voxel::live::trainer::parallel(jobs.clone(), spec.threads, |(seed, brain)| {
         let sim = found(seed)?;
         let mut holds = HoldTally::new(menu.named.len());
-        let arm = live_arm(sim, seed, f, brain.then_some(driver), spec.seconds, &mut holds);
+        let arm = live_arm(sim, seed, f, brain.then_some(driver), spec.seconds, judge, &mut holds);
         Ok((arm, holds))
     });
     let (mut h_arms, mut b_arms) = (Vec::new(), Vec::new());
@@ -395,6 +432,11 @@ pub fn check(
         }
     }
     let gain = |a: &LiveArm| (a.energy_end - a.energy_start) / a.bodies_start.max(1) as f64;
+    let judged = |a: &LiveArm| a.judge / a.bodies_start.max(1) as f64;
+    let judged_pairs: Vec<f64> = b_arms
+        .iter()
+        .filter_map(|b| h_arms.iter().find(|h| h.seed == b.seed).map(|h| judged(b) - judged(h)))
+        .collect();
     let mean = |xs: Vec<f64>| if xs.is_empty() { f64::NAN } else { xs.iter().sum::<f64>() / xs.len() as f64 };
     let paired: Vec<f64> = b_arms
         .iter()
@@ -435,6 +477,9 @@ pub fn check(
         gain_per_body_heuristic: mean(h_arms.iter().map(gain).collect()),
         gain_per_body_brain: mean(b_arms.iter().map(gain).collect()),
         gain_per_body_brain_minus_heuristic: mean(paired),
+        judge_per_body_heuristic: mean(h_arms.iter().map(judged).collect()),
+        judge_per_body_brain: mean(b_arms.iter().map(judged).collect()),
+        judge_per_body_brain_minus_heuristic: mean(judged_pairs),
         deaths_heuristic: h_arms.iter().map(|a| a.deaths).sum(),
         deaths_brain: b_arms.iter().map(|a| a.deaths).sum(),
         diet_heuristic: sum_diets(h_arms.iter().map(|a| a.diet.as_slice())),
@@ -455,12 +500,15 @@ pub fn check(
 pub fn summary_line(r: &CheckReport) -> String {
     let scenes: Vec<String> = r.scenes.iter().map(|s| format!("{} {:.2}/{:.2}", s.intent, s.brain, s.heuristic)).collect();
     format!(
-        "# check {} gen {}: gain/body brain {:+.5} heuristic {:+.5} (paired {:+.5}); deaths {}/{}; hungry {:.2}; switches/body-min {:.2}/{:.2}; scenes brain/rules {}; diet brain [{}] rules [{}]; prey brain [{}] rules [{}]",
+        "# check {} gen {}: gain/body brain {:+.5} heuristic {:+.5} (paired {:+.5}); judge/body brain {:+.4} heuristic {:+.4} (paired {:+.4}); deaths {}/{}; hungry {:.2}; switches/body-min {:.2}/{:.2}; scenes brain/rules {}; diet brain [{}] rules [{}]; prey brain [{}] rules [{}]",
         r.lineage,
         r.generation,
         r.gain_per_body_brain,
         r.gain_per_body_heuristic,
         r.gain_per_body_brain_minus_heuristic,
+        r.judge_per_body_brain,
+        r.judge_per_body_heuristic,
+        r.judge_per_body_brain_minus_heuristic,
         r.deaths_brain,
         r.deaths_heuristic,
         r.brain.iter().map(|a| a.hungry_share).sum::<f64>() / r.brain.len().max(1) as f64,
