@@ -205,6 +205,10 @@ fn founder_rows() -> Vec<Row> {
         r("fruit_bite_half_stock", "org-units at the mouth", nonneg, "fruit-only K override; absent uses core.bite_half_stock, other foods retain core K").optional().prov("derived"),
         r("give_up_fraction", "fraction of the fill rate", nonneg, "lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up").optional().prov("derived"),
         r("give_up_vs_memory", "factor", nonneg, "LS-ROAM: a still-feeding body also gives the patch up when its trailing offer falls under this times its own remembered intake while foraging (1: the marginal value theorem's rule; 0 off)"),
+        r("foliage_handling", "fraction of the gut's full bite", fraction, "LS-BROWSE: share of gut.bite_per_body_s its mouth picks of a stand's foliage (leaves are picked, not gulped): eating takes longer, the gut's k, tau, yield and so the daily offtake stay (1: the gut's own bite; the loftstrider presets set it)")
+            .search(0.1, 1.0),
+        r("strip_exponent", "exponent", nonneg, "LS-BROWSE: a foliage bite x share^this, share = edible foliage of the layers the mouth reaches over their edible foliage when the stand is full (its own alpha x wood): easy leaves first, so a stripped tree's bites shrink and the leave rule moves the body on (0 off; the loftstrider presets set it)")
+            .search(0.0, 4.0),
         // LARVA (design/larva-nuts-plan-2026-10-12.md §3-§4): the larva field's table (the bellwing's).
         r("larva_bite_half_stock", "org-units of visible larvae", nonneg, "larva-only K override for a larva eater's bite; absent uses core.bite_half_stock").optional().prov("decision"),
         r("larva_sight_m", "m", nonneg, "LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae)").prov("decision"),

@@ -52,6 +52,14 @@
 //!   near what a fresh stand offers, so a stand is left once the body has cropped it
 //!   below that; where stands are far apart the walks pull the memory down and it stays
 //!   longer. 0 turns it off (the gut-only rule, as before).
+//!
+//! **LS-BROWSE: a stripped stand offers less** (Wrysk 2026-10-14). For a lineage with
+//! `strip_exponent` above 0 the offer above is scaled, as its bite is, by `share^strip_exponent`
+//! (`share` the edible foliage the mouth reaches over the same layers' when the stand is full),
+//! so stripping a stand takes its offer under what the body remembers and the rule moves it on
+//! long before the stock nears `bite_half_stock`. Its `foliage_handling` (how slowly it picks)
+//! slows its bite but is not in the offer: the offer weighs the stand, and a slow mouth makes
+//! no stand poorer than the ones it remembers.
 
 use crate::controller::Actions;
 use crate::{Fauna, Food, Founder, FounderPhysiology};
@@ -308,3 +316,7 @@ mod forage_tests;
 #[cfg(test)]
 #[path = "ls_roam_tests.rs"]
 mod ls_roam_tests;
+
+#[cfg(test)]
+#[path = "ls_browse_tests.rs"]
+mod ls_browse_tests;
