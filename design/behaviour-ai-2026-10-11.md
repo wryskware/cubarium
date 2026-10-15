@@ -927,6 +927,12 @@ an already isolated prey). The heuristics add local memory:
   it; the **teacher** (the per-decision reward the brain learns from) is the judge per step plus
   extras that must earn their place by raising the judge's score. Hand-set weights now; an outer
   loop tuning the teacher's few weights on the judge once the PG pilot shows it learns.
+- **Score topic 2, what dying costs (Wrysk, 2026-10-14: "i guess do your recommendation for
+  dying but i dont have context rn without reading back all the logs").** Taken on my
+  recommendation, so it is open to revisit: a small per-lineage **life value** lost at death
+  (a serde knob in body_ref units with a registry row, larger for breeding adults and the
+  young), on top of the stored energy, with the learned value baseline underneath to price
+  what follows. It belongs to the judge (death is an outcome).
 - **Checks.** An algebraic check that a perturbation improving only a relative's energy
   survives the whole scorer. Readouts of raw own, relative and combined scores. Missing signs
   are never scored as zero returns.
