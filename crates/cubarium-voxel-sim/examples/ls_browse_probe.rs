@@ -17,6 +17,15 @@
 //! over capacity) at both ends, the eating latch at the end, the leave rule's give-ups in the
 //! lineage meanwhile, its trailing offer and remembered intake at the end. Writes
 //! `OUT/meals.csv`, `OUT/summary.json`, `OUT/DONE`.
+//!
+//! **Latch episodes** (`OUT/latch.csv`): per grown loftstrider, each run of its eating latch
+//! on (a meal, latch on → off at the full event) or off (full, off → on). `complete` is true
+//! when both ends fell inside the run. For each: wall and awake seconds, the stomach's fill
+//! and the reserve's fraction of its cap at both ends, and `swallowed`, the stomach pools'
+//! rises summed tick by tick (what entered the stomach after the spill, net of that tick's
+//! digestion). **Per minute** (`OUT/minutes.csv`): the lineage's foliage eaten (cumulative
+//! ledger), and over grown bodies the count, awake, eating, mean fill and mean reserve
+//! fraction.
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
@@ -65,6 +74,23 @@ fn fill(fauna: &cubarium_voxel_fauna::Fauna, a: &cubarium_voxel_fauna::Animal) -
     if cap > 0.0 { a.stomach.organic() / cap } else { 0.0 }
 }
 
+fn reserve_frac(fauna: &cubarium_voxel_fauna::Fauna, a: &cubarium_voxel_fauna::Animal) -> f64 {
+    let cap = a.founder.map_or(0.0, |f| fauna.config().founder(f).core.reserve_of(a.body));
+    if cap > 0.0 { a.reserve / cap } else { 0.0 }
+}
+
+/// One run of a grown body's eating latch in one state.
+struct Episode {
+    meal: bool,
+    observed_start: bool,
+    start_tick: u64,
+    awake_s: f64,
+    fill_0: f64,
+    reserve_0: f64,
+    swallowed: f64,
+    stomach: f64,
+}
+
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     cubarium_voxel_sim::experiment_args(&args);
@@ -102,6 +128,11 @@ fn main() -> Result<(), String> {
         "body,calf,start_min,dur_s,crops,stands,reach_edible_0,reach_edible_1,reach_full,share_0,share_1,strip_mean,fill_0,fill_1,eating_end,give_ups,offer_end,memory_end"
     )
     .map_err(|e| e.to_string())?;
+    let mut latch = std::fs::File::create(out.join("latch.csv")).map_err(|e| e.to_string())?;
+    writeln!(latch, "body,kind,complete,start_min,end_min,wall_s,awake_s,fill_0,fill_1,reserve_0,reserve_1,swallowed").map_err(|e| e.to_string())?;
+    let mut per_min = std::fs::File::create(out.join("minutes.csv")).map_err(|e| e.to_string())?;
+    writeln!(per_min, "minute,eaten_foliage,grown,awake,eating,fill_mean,reserve_mean").map_err(|e| e.to_string())?;
+    let mut episodes: BTreeMap<u64, Episode> = BTreeMap::new();
     let mut open: BTreeMap<u64, Visit> = BTreeMap::new();
     let mut done: Vec<Visit> = Vec::new();
     let mut time: BTreeMap<String, f64> = BTreeMap::new();
@@ -140,6 +171,25 @@ fn main() -> Result<(), String> {
         done.push(v);
         Ok(())
     };
+    let write_ep = |latch: &mut std::fs::File, body: u64, e: &Episode, complete: bool, end_tick: u64, fill_1: f64, reserve_1: f64| -> Result<(), String> {
+        writeln!(
+            latch,
+            "{},{},{},{:.2},{:.2},{:.1},{:.1},{:.3},{:.3},{:.3},{:.3},{:.3}",
+            body,
+            if e.meal { "meal" } else { "full" },
+            complete,
+            start_min + e.start_tick as f64 / hz / 60.0,
+            start_min + end_tick as f64 / hz / 60.0,
+            (end_tick - e.start_tick) as f64 / hz,
+            e.awake_s,
+            e.fill_0,
+            fill_1,
+            e.reserve_0,
+            reserve_1,
+            e.swallowed,
+        )
+        .map_err(|e| e.to_string())
+    };
     for tick in 1..=limit {
         // Before the step: the stand each eating loftstrider's mouth would bite.
         let mut before: BTreeMap<u64, (BrowseMouth, f64)> = BTreeMap::new();
@@ -160,6 +210,42 @@ fn main() -> Result<(), String> {
         let mut ended = Vec::new();
         for a in fauna.view().animals.iter().filter(|a| a.founder == Some(Founder::Loftstrider)) {
             let calf = roam::young_of_mother(fauna.config(), a);
+            if !calf {
+                let stomach = a.stomach.organic();
+                let (f1, r1) = (fill(fauna, a), reserve_frac(fauna, a));
+                let fresh = |observed_start: bool| Episode {
+                    meal: a.eating,
+                    observed_start,
+                    start_tick: tick,
+                    awake_s: 0.0,
+                    fill_0: f1,
+                    reserve_0: r1,
+                    swallowed: 0.0,
+                    stomach,
+                };
+                match episodes.get_mut(&a.id) {
+                    Some(e) if e.meal == a.eating => {
+                        e.swallowed += (stomach - e.stomach).max(0.0);
+                        e.stomach = stomach;
+                    }
+                    Some(e) => {
+                        write_ep(&mut latch, a.id, e, e.observed_start, tick, f1, r1)?;
+                        let mut n = fresh(true);
+                        if a.eating {
+                            n.swallowed = (stomach - e.stomach).max(0.0);
+                        }
+                        episodes.insert(a.id, n);
+                    }
+                    None => {
+                        episodes.insert(a.id, fresh(false));
+                    }
+                }
+                if a.state != State::Asleep {
+                    if let Some(e) = episodes.get_mut(&a.id) {
+                        e.awake_s += 1.0 / hz;
+                    }
+                }
+            }
             if !calf {
                 if a.state == State::Asleep {
                     asleep_s += 1.0 / hz;
@@ -222,12 +308,34 @@ fn main() -> Result<(), String> {
             cubarium_voxel_sim::saved::save(&out.join("save"), sim.world(), sim.flora(), sim.fauna(), minute)?;
         }
         if tick % (60 * TICK_HZ as u64) == 0 {
+            let fauna = sim.fauna();
+            let grown: Vec<_> = fauna.view().animals.iter().filter(|a| a.founder == Some(Founder::Loftstrider) && !roam::young_of_mother(fauna.config(), a)).collect();
+            let n = grown.len().max(1) as f64;
+            writeln!(
+                per_min,
+                "{:.0},{:.3},{},{},{},{:.3},{:.3}",
+                start_min + tick as f64 / hz / 60.0,
+                fauna.view().ledger.eaten_by_founder_food[Founder::Loftstrider.index()][cubarium_voxel_fauna::Food::Foliage.index()],
+                grown.len(),
+                grown.iter().filter(|a| a.state != State::Asleep).count(),
+                grown.iter().filter(|a| a.eating).count(),
+                grown.iter().map(|a| fill(fauna, a)).sum::<f64>() / n,
+                grown.iter().map(|a| reserve_frac(fauna, a)).sum::<f64>() / n,
+            )
+            .map_err(|e| e.to_string())?;
             std::fs::write(out.join("status"), format!("minute={:.0} wall_s={:.0} visits={}\n", start_min + tick as f64 / hz / 60.0, started.elapsed().as_secs_f64(), done.len()))
                 .map_err(|e| e.to_string())?;
         }
     }
     for v in std::mem::take(&mut open).into_values() {
         close(v, &sim, &mut meals, &mut done)?;
+    }
+    {
+        let fauna = sim.fauna();
+        for (id, e) in &episodes {
+            let (f1, r1) = fauna.view().animals.iter().find(|a| a.id == *id).map_or((f64::NAN, f64::NAN), |a| (fill(fauna, a), reserve_frac(fauna, a)));
+            write_ep(&mut latch, *id, e, false, limit, f1, r1)?;
+        }
     }
     let awake: f64 = time.values().sum();
     let t = sim.fauna().forage_tally()[Founder::Loftstrider.index()];
