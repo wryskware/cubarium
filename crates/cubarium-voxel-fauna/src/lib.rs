@@ -629,6 +629,47 @@ pub fn browser_mouth_foliage(
     body::mouth_foliage_stand(flora, view, &cols, animal.site.y, &geometry, Diet::only(Food::Foliage))
 }
 
+/// **LS-BROWSE's readout**: the stand a foliage bite at `animal`'s mouth would take from, and
+/// how stripped it is. Read-only diagnostic access for probes; nothing reads it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BrowseMouth {
+    /// The stand's id and species.
+    pub stand: u64,
+    pub species: cubarium_voxel_flora::Species,
+    /// Edible foliage of the layers the mouth reaches, and what they hold above their floors
+    /// when the stand is full (`body::reachable_layer_fill`).
+    pub reach_edible: f64,
+    pub reach_full: f64,
+    /// The same over every foliage layer of the stand.
+    pub stand_edible: f64,
+    pub stand_full: f64,
+    /// The bite's factors at this stand: `share^strip_exponent` and the picking rate.
+    pub strip: f64,
+    pub handling: f64,
+}
+
+/// [`BrowseMouth`] for `animal`, if its mouth reaches a stand whose foliage its diet takes.
+pub fn browse_mouth(view: &VoxelView<'_>, flora: &FloraView<'_>, config: &FaunaConfig, animal: &Animal) -> Option<BrowseMouth> {
+    let phys = config.founder(animal.founder?);
+    if !phys.diet.foods().any(|f| f == Food::Foliage) {
+        return None;
+    }
+    let geometry = body_of(config, animal)?;
+    let cols = body::mouth_columns(view, &animal.pose, &geometry);
+    let (root, place, _, _) = body::mouth_foliage_offer(flora, view, &cols, animal.site.y, &geometry, Diet::only(Food::Foliage))?;
+    let stand = flora.stand_in(root, place)?;
+    let layers = body::mouth_crown_layers(animal.site.y, &geometry, view.config.voxel_m);
+    let (reach_edible, reach_full) = body::reachable_layer_fill(flora, view, stand, &cols, &layers);
+    let (mut stand_edible, mut stand_full) = (0.0, 0.0);
+    for l in flora.layers(stand) {
+        stand_edible += l.edible();
+        stand_full += (l.capacity - l.floor).max(0.0);
+    }
+    let meal = body::Meal::Stand { root, place, food: Food::Foliage };
+    let (strip, handling) = step::browse_factors(flora, view, phys, meal, &cols, animal.site.y, &geometry);
+    Some(BrowseMouth { stand: stand.id, species: stand.species, reach_edible, reach_full, stand_edible, stand_full, strip, handling })
+}
+
 /// The physical geometry of one animal right now, from its lineage's physiology and its
 /// structure ([`FounderPhysiology::body_at`]). `None` for a body with no founder marker,
 /// which carries no dimensions.

@@ -355,6 +355,23 @@ pub struct FounderPhysiology {
     /// habitat's average), 0 off (the gut-only threshold, as before).
     #[serde(default)]
     pub give_up_vs_memory: f64,
+    /// **LS-BROWSE, slow picking** (Wrysk 2026-10-14, "yes on loftstriders"): the share of
+    /// the gut's full-effort bite (`gut.bite_per_body_s`) its mouth picks of a stand's foliage
+    /// per second, a fraction. Leaves are picked, not gulped: below 1 the body takes longer to
+    /// fill and spends more of its waking time eating, while what it can hold and digest (the
+    /// gut's `k`, `τ`, yield) and so its daily offtake stay as they were. Foliage only; 1 is
+    /// the gut's own bite (every lineage but the loftstrider).
+    #[serde(default = "one")]
+    pub foliage_handling: f64,
+    /// **LS-BROWSE, easy leaves first**: a foliage bite at a stand is scaled by
+    /// `share^strip_exponent`, where `share` is the edible foliage of the layers its mouth
+    /// reaches over what those layers hold above their grazing floors when the stand is full
+    /// (its own full, `alpha × wood`; not a mass-scaled `bite_half_stock`). The leaves easiest
+    /// to pick go first, so a tree's bites shrink as it is stripped, its offer falls and the
+    /// leave rule moves the body on to the next tree. 0 off (every lineage but the
+    /// loftstrider): the bite does not see how stripped the stand is.
+    #[serde(default)]
+    pub strip_exponent: f64,
     /// The named configurable motor respiration coefficient: organic matter respired
     /// per unit of body per second at **full cruise** (equivalent displacement equal to
     /// `cruise`). Below full cruise the cost scales with the requested equivalent
@@ -2295,6 +2312,8 @@ impl FounderPhysiology {
                 larva_sight_m: 0.0,
                 give_up_fraction: None,
                 give_up_vs_memory: 0.0,
+                foliage_handling: 1.0,
+                strip_exponent: 0.0,
                 // Full cruise at its basal rate (the motor's tie to upkeep).
                 motor_respiration_per_s: DAILY_SHREDDER / DAY_S,
                 cruise_body_lengths_per_s: 1.0,
@@ -2412,6 +2431,8 @@ impl FounderPhysiology {
                 larva_sight_m: 0.0,
                 give_up_fraction: None,
                 give_up_vs_memory: 0.0,
+                foliage_handling: 1.0,
+                strip_exponent: 0.0,
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
                 // stand, including their deliberately mineral-hungry tissue against
                 // foliage. Only the cost settings are new.
@@ -2524,6 +2545,8 @@ impl FounderPhysiology {
                 larva_sight_m: 0.0,
                 give_up_fraction: None,
                 give_up_vs_memory: 0.0,
+                foliage_handling: 1.0,
+                strip_exponent: 0.0,
                 core: SpeciesConfig {
                     maintenance_per_s: DAILY_LANTERNJAW / DAY_S,
                     // The browser's K scaled by body (0.005 × 0.035 / 0.05).
@@ -4789,6 +4812,40 @@ fn each_reachable_layer(
     layers: &std::ops::RangeInclusive<i64>,
     mut f: impl FnMut(usize, f64),
 ) {
+    each_mouth_layer(fv, view, stand, cols, layers, false, |layer| f(layer.foliage_index.unwrap_or(0), layer.edible()));
+}
+
+/// **LS-BROWSE: how stripped the part of a stand a mouth reaches is.** Over the same layers
+/// [`reachable_layer_stock`] reads — but counting a layer cropped to its floor too — the
+/// edible foliage they hold now and what they would hold above their grazing floors were the
+/// stand full (each layer's `capacity − floor`, its share of `alpha × wood`): `(edible,
+/// full)`. The stand's own full, not a world or mass scale.
+pub(crate) fn reachable_layer_fill(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    stand: &cubarium_voxel_flora::Stand,
+    cols: &[(i64, u32)],
+    layers: &std::ops::RangeInclusive<i64>,
+) -> (f64, f64) {
+    let (mut edible, mut full) = (0.0, 0.0);
+    each_mouth_layer(fv, view, stand, cols, layers, true, |layer| {
+        edible += layer.edible();
+        full += (layer.capacity - layer.floor).max(0.0);
+    });
+    (edible, full)
+}
+
+/// The foliage layers of `stand` a mouth over `cols` reaches through the band `layers`, in
+/// profile order: disc cell in range, disc over a mouth column, and — unless `bare` — edible.
+fn each_mouth_layer(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    stand: &cubarium_voxel_flora::Stand,
+    cols: &[(i64, u32)],
+    layers: &std::ops::RangeInclusive<i64>,
+    bare: bool,
+    mut f: impl FnMut(&cubarium_voxel_flora::StandLayer),
+) {
     // A cheap bound before the layers are read at all: every layer of a stand sits
     // between the first cell over its support face and its crown cell, so a mouth whose
     // range misses that span can skip the stand. This scan runs over every stand for
@@ -4824,8 +4881,7 @@ fn each_reachable_layer(
     for layer in every.filter(|l| l.kind.bears_foliage()) {
         // What a mouth could take is what stands above the grazing floor: the flora
         // layer's one reading of food.
-        let edible = layer.edible();
-        if !(edible > 0.0) || !layers.contains(&layer.cell) {
+        if !(bare || layer.edible() > 0.0) || !layers.contains(&layer.cell) {
             continue;
         }
         let span = layer.radius_v.floor() as i64;
@@ -4834,7 +4890,7 @@ fn each_reachable_layer(
             .iter()
             .any(|&(cx, cz)| disc_covers(sx, sz, span, r2, width, depth, cx, cz))
         {
-            f(layer.foliage_index.unwrap_or(0), edible);
+            f(&layer);
         }
     }
 }

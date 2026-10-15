@@ -5132,10 +5132,15 @@ fn founder_feed(
         return false;
     };
     let food = meal.food();
-    // FORAGE-LEAVE: what this patch offers the mouth, for the giving-up rule.
-    forage::note_bite(fauna, i, phys, food, manifest.controller_period_s, effort, stock, None);
+    // LS-BROWSE: how far the stand's reachable foliage is stripped from its own full, and how
+    // slowly this mouth picks leaves (both 1 for a lineage without the knobs).
+    let (strip, handling) = browse_factors(&flora.view(), view, phys, meal, &cols, site_y, geometry);
+    // FORAGE-LEAVE: what this patch offers the mouth, for the giving-up rule. The offer is
+    // the stand's (its stripping counts), not the picking's: a slow mouth does not make a
+    // stand poorer than the one it remembers.
+    forage::note_bite(fauna, i, phys, food, manifest.controller_period_s, effort * strip, stock, None);
     // The bite this body, this stock and this stomach's room allow.
-    let bite = gut_bite(&fauna.animals[i], phys, food, manifest.controller_period_s, effort, stock);
+    let bite = gut_bite(&fauna.animals[i], phys, food, manifest.controller_period_s, effort * strip * handling, stock);
     if !(bite > 0.0) {
         return false;
     }
@@ -5241,6 +5246,43 @@ fn founder_feed(
         }
     }
     true
+}
+
+/// **LS-BROWSE: a browser's bite at a stand** (Wrysk 2026-10-14), as factors on the gut's
+/// full-effort bite: `(strip, handling)`.
+///
+/// - `strip`: `share^strip_exponent`, `share` the edible foliage of the layers the mouth
+///   reaches over what they hold above their floors when the stand is full
+///   ([`body::reachable_layer_fill`]), in `[0, 1]`. Easy leaves go first: a leafy crown gives
+///   full bites, a stripped one small ones, however far its stock still is above
+///   `bite_half_stock`.
+/// - `handling`: [`crate::FounderPhysiology::foliage_handling`], the picking rate.
+///
+/// `(1, 1)` for any meal but a stand's foliage, and for a lineage without the knobs.
+pub(crate) fn browse_factors(
+    fv: &cubarium_voxel_flora::FloraView<'_>,
+    view: &VoxelView<'_>,
+    phys: &crate::FounderPhysiology,
+    meal: body::Meal,
+    cols: &[(i64, u32)],
+    site_y: u32,
+    geometry: &crate::Body,
+) -> (f64, f64) {
+    let body::Meal::Stand { root, place, food: Food::Foliage } = meal else {
+        return (1.0, 1.0);
+    };
+    let handling = if phys.foliage_handling.is_finite() { phys.foliage_handling.clamp(0.0, 1.0) } else { 1.0 };
+    let p = phys.strip_exponent;
+    if !(p > 0.0 && p.is_finite()) {
+        return (1.0, handling);
+    }
+    let Some(stand) = fv.stand_in(root, place) else {
+        return (1.0, handling);
+    };
+    let layers = body::mouth_crown_layers(site_y, geometry, view.config.voxel_m);
+    let (edible, full) = body::reachable_layer_fill(fv, view, stand, cols, &layers);
+    let share = if full > 0.0 { (edible / full).clamp(0.0, 1.0) } else { 1.0 };
+    (share.powf(p), handling)
 }
 
 /// A bite becoming tissue and fuel (N-POOL): the food class's yield of its matter is
