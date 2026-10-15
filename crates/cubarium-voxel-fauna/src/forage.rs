@@ -308,3 +308,7 @@ mod forage_tests;
 #[cfg(test)]
 #[path = "ls_roam_tests.rs"]
 mod ls_roam_tests;
+
+#[cfg(test)]
+#[path = "ls_browse_tests.rs"]
+mod ls_browse_tests;
