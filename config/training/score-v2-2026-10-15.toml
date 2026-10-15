@@ -1,0 +1,47 @@
+# SCORE-V2: the lanternjaw's top by per-decision policy gradient, now on the split score
+# (design/handoffs/score-v2-2026-10-15.md; Wrysk's "Score topic 1/2/3" in
+# design/behaviour-ai-2026-10-11.md §0). `--kin` on voxel-live-train. Same learner as pilot v1
+# (config/training/pg-pilot-2026-10-14.toml) except:
+#
+# - the teacher: the judge per step (own net energy, the life values below, kin shares of
+#   both) plus hunger, wound load and sleep debt as weight x (drive before - drive after);
+# - entropy = 0, and the pull toward the clone instead: clone_kl x KL(clone || policy) per
+#   decision on the normalised-advantage scale, the clone being the starting centre below;
+#   clone_kl_fade_generations = 0 keeps it constant.
+#
+# [lanternjaw.pg.judge] (body references): a death costs the life value of the stage it died
+# in on top of the stored energy it takes; an own young born adds a young's. Breeding is
+# gestating or holding a brood (the lanternjaw lays: grown bodies with a brood earmarked).
+# [lanternjaw.pg.teacher] (body references per unit drive): hunger = 1 - stomach/capacity,
+# wound = the wound stock, sleep = time since the last deep bout / need_s (the lanternjaw's
+# rest is all deep with no ceiling, so its sleep drive is 0).
+
+[lanternjaw]
+comparison = "policy_gradient"
+stage = "top"
+[lanternjaw.shares]
+calf = 0.5
+mother = 0.5
+sibling = 0.5
+packmate = 0.5
+[lanternjaw.pg]
+discount_horizon_s = 300.0
+lambda_horizon_s = 60.0
+clip = 0.2
+entropy = 0.0
+policy_lr = 0.0003
+value_lr = 0.001
+value_hidden = 32
+epochs = 4
+minibatches = 4
+splits = 16
+clone_kl = 0.1
+clone_kl_fade_generations = 0.0
+[lanternjaw.pg.judge]
+life_young = 0.5
+life_adult = 0.25
+life_breeding = 0.5
+[lanternjaw.pg.teacher]
+hunger = 0.05
+wound = 0.1
+sleep = 0.05

@@ -13,8 +13,14 @@ Prints, per run:
   shows as movement collapsing;
 - ES, per generation: the twins' mean d, |d|, zero share, the live movement; its split-half
   cosine comes from `step_noise` (the line to run is printed);
-- both: every check (24 matched seeds): gain per body brain vs rules and paired, deaths,
-  switches per body-minute brain vs rules, scene agreement brain/rules, the diet.
+- both: every check (24 matched seeds): gain per body brain vs rules and paired, the judge
+  per body brain vs rules and paired (SCORE-V2; body references: energy change plus the
+  life values of own young born minus those of the dead), deaths, switches per body-minute
+  brain vs rules, scene agreement brain/rules, the diet.
+
+SCORE-V2 adds to the PG table: `judge`, the mean judge return per body (beside `ret`, the
+teacher's), `Hc` the clone's entropy on the same decisions (`H` should stay near it), and
+`klc` the mean KL from the clone. Runs from before SCORE-V2 print nan there.
 """
 import argparse
 import json
@@ -49,19 +55,21 @@ def mean_se(xs):
 def pg_table(run, every):
     gens = lines(os.path.join(run, "generations.jsonl"))
     print(f"## PG {run}: {len(gens)} generations")
-    print("gen  wall_s  dec    bodies ret      splitW  nullW   splitB  nullB   next    ev     H      kl      clip  off   mov   pace")
+    print("gen  wall_s  dec    bodies ret      judge    splitW  nullW   splitB  nullB   next    ev     H      Hc     klc     kl      clip  off   mov   pace")
     keep = {k: [] for k in ("split_worlds", "split_worlds_null", "split_bodies", "split_bodies_null", "next")}
     for g in gens:
         l = next((x for x in g["lineages"] if x.get("pg")), None)
         if l is None:
             continue
         p = {k: (float("nan") if v is None else v) for k, v in l["pg"].items()}
+        for k in ("judge_return", "clone_entropy", "clone_kl"):
+            p.setdefault(k, float("nan"))
         for k in keep:
             keep[k].append(p[k])
         if g["generation"] % every == 0 or g is gens[-1]:
-            print(f"{g['generation']:<4} {g['wall_s']:6.1f}  {p['decisions']:<6} {p['bodies']:<6} {p['mean_return']:+.4f}  "
+            print(f"{g['generation']:<4} {g['wall_s']:6.1f}  {p['decisions']:<6} {p['bodies']:<6} {p['mean_return']:+.4f}  {p['judge_return']:+.4f}  "
                   f"{p['split_worlds']:+.3f}  {p['split_worlds_null']:+.3f}  {p['split_bodies']:+.3f}  {p['split_bodies_null']:+.3f}  "
-                  f"{p['next']:+.3f}  {p['explained_variance']:+.2f}  {p['entropy']:.3f}  {p['approx_kl']:.4f}  "
+                  f"{p['next']:+.3f}  {p['explained_variance']:+.2f}  {p['entropy']:.3f}  {p['clone_entropy']:.3f}  {p['clone_kl']:.4f}  {p['approx_kl']:.4f}  "
                   f"{p['clip_fraction']:.2f}  {p['off_argmax']:.2f}  {readout(g, 'lanternjaw.moving_share'):.2f}  "
                   f"{readout(g, 'lanternjaw.pace_bl_per_s'):.3f}")
     for k, v in keep.items():
@@ -96,8 +104,11 @@ def checks(run, label):
     print(f"## {label} checks {run}: {len(cs)}")
     for c in cs:
         scenes = ", ".join(f"{s['intent']} {s['brain']:.2f}/{s['heuristic']:.2f}" for s in c.get("scenes", []))
+        nan = float("nan")
         print(f"gen {c['generation']:<4} seeds {len(c['brain'])}: gain/body brain {c['gain_per_body_brain']:+.5f} "
               f"rules {c['gain_per_body_heuristic']:+.5f} paired {c['gain_per_body_brain_minus_heuristic']:+.5f}; "
+              f"judge/body brain {c.get('judge_per_body_brain', nan):+.4f} rules {c.get('judge_per_body_heuristic', nan):+.4f} "
+              f"paired {c.get('judge_per_body_brain_minus_heuristic', nan):+.4f}; "
               f"deaths {c['deaths_brain']}/{c['deaths_heuristic']}; switches/body-min "
               f"{c['holds_brain']['switches_per_body_min']:.2f}/{c['holds_heuristic']['switches_per_body_min']:.2f}; "
               f"scenes {scenes}")

@@ -9,7 +9,9 @@
 //!   from: a decision is stamped with it. [`Recorder::after_step`] reads every body's energy
 //!   ([`super::PgBody::series`]): `(E + E_given)/body_ref`, `E` as the window's own score reads
 //!   it (body, reserve, fuel and escrow; plus the digestible stomach on the stomach-aware
-//!   reward), the given counter from its value at the start, and `E = 0` from a death on.
+//!   reward), the given counter from its value at the start, and `E = 0` from a death on;
+//!   and its drives and life stage ([`super::judge`], SCORE-V2: bookkeeping for the reward
+//!   only, never read by behaviour). A newcomer born to a recorded mother notes her.
 //! - The sampler is seeded per body from the generation's seed, the body's id and where it
 //!   stands when its brain is installed.
 
@@ -20,6 +22,7 @@ use cubarium_voxel_fauna::{Animal, Founder, FounderPhysiology};
 use cubarium_voxel_sim::Sim;
 use rustc_hash::FxHashMap;
 
+use super::judge::{DRIVES, LifeStage, drives, life_stage};
 use super::reward::{PgBody, PgWorld};
 use crate::es::voxel::two_layer::{Explore, IntentArbitration, TopDecision, TwoLayerNet};
 
@@ -38,6 +41,9 @@ struct Body {
     given0: f64,
     given_last: f64,
     series: Vec<f64>,
+    drives: Vec<[f64; DRIVES]>,
+    stage: LifeStage,
+    born_to: Option<u64>,
     alive: bool,
     died: bool,
     seen: u64,
@@ -119,8 +125,25 @@ impl Recorder {
         sim.fauna_mut().set_controller(id, Box::new(brain));
         let given0 = a.reproduction.given;
         let s = self.energy(&a) / self.reference;
+        let now = sim.fauna().tick();
+        // A birth: a native newcomer whose mother is recorded (a body standing at the start,
+        // or introduced, is not one; a hatchling records no mother).
+        let born_to = a.mother.filter(|m| tick > 0 && a.reproduction.native && self.index.contains_key(m));
         self.index.insert(id, self.bodies.len());
-        self.bodies.push(Body { id, start: tick, given0, given_last: given0, series: vec![s], alive: true, died: false, seen: tick, log });
+        self.bodies.push(Body {
+            id,
+            start: tick,
+            given0,
+            given_last: given0,
+            series: vec![s],
+            drives: vec![drives(&a, &self.phys, now)],
+            stage: life_stage(&a, &self.phys),
+            born_to,
+            alive: true,
+            died: false,
+            seen: tick,
+            log,
+        });
     }
 
     /// Before the sim step that runs from window tick `tick`.
@@ -132,14 +155,18 @@ impl Recorder {
     /// newcomer's brain, a death.
     pub fn after_step(&mut self, sim: &mut Sim, tick: u64) {
         let mut newcomers = Vec::new();
+        let now = sim.fauna().tick();
         for a in sim.fauna().view().animals.iter().filter(|a| a.founder == Some(self.founder)) {
             match self.index.get(&a.id) {
                 Some(&k) => {
                     let e = self.energy(a);
+                    let (d, stage) = (drives(a, &self.phys, now), life_stage(a, &self.phys));
                     let b = &mut self.bodies[k];
                     b.seen = tick;
                     b.given_last = a.reproduction.given;
                     b.series.push((e + a.reproduction.given - b.given0) / self.reference);
+                    b.drives.push(d);
+                    b.stage = stage;
                 }
                 None => newcomers.push(a.id),
             }
@@ -150,6 +177,8 @@ impl Recorder {
             b.alive = false;
             b.died = true;
             b.series.push((b.given_last - b.given0) / reference);
+            let last = b.drives.last().copied().unwrap_or([0.0; DRIVES]);
+            b.drives.push(last);
         }
         for id in newcomers {
             self.join(sim, id, tick);
@@ -165,7 +194,16 @@ impl Recorder {
                 .into_iter()
                 .map(|b| {
                     let decisions = std::mem::take(&mut *b.log.lock().expect("decision log"));
-                    PgBody { id: b.id, start: b.start, series: b.series, died: b.died, decisions }
+                    PgBody {
+                        id: b.id,
+                        start: b.start,
+                        series: b.series,
+                        died: b.died,
+                        decisions,
+                        drives: b.drives,
+                        stage: b.stage,
+                        born_to: b.born_to,
+                    }
                 })
                 .collect(),
         }

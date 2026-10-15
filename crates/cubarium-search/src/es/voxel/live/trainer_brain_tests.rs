@@ -251,7 +251,7 @@ fn the_brain_check_reads_both_arms_on_matched_starts() {
     let driver = Lineage::load(&s, f, &path).unwrap().driver(&s).unwrap();
     let c = CheckSpec { every: 1, seeds: vec![1, 2], seconds: 5, scene_seeds: vec![1], threads: 2 };
     let found = |seed: u64| -> Result<Sim, String> { Ok(mode_scenes::found(&mode_scenes::Config::default(), ModeScene::Feed, seed)?.sim) };
-    let r = check(f, &driver, 3, &c, &found);
+    let r = check(f, &driver, 3, &c, &crate::es::voxel::pg::JudgeKnobs::default(), &found);
     assert_eq!((r.heuristic.len(), r.brain.len()), (2, 2), "{:?}", r.skipped);
     for (h, b) in r.heuristic.iter().zip(&r.brain) {
         assert_eq!(h.seed, b.seed);
