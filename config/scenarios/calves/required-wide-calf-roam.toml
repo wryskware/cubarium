@@ -1,8 +1,8 @@
 # The wide terrarium's required roster (a copy of config/training/required-wide.toml) for
 # the CALF-ROAM arms (design/handoffs/calf-roam-2026-10-15.md). `scenario_file` is not read
-# by batch.py: labd stages every `*_file`
-# a `--required` file names beside it ({job}/inputs/required/), which is how the scenario
-# reaches a remote host until labkit stages an arm's `edit=` itself.
+# by batch.py. The arms pass the scenario as a plain `edit=` path, which labkit stages for
+# every host; `{job}/inputs/required/` exists only on a remote host, so a desktop arm that
+# pointed there failed at load (2026-10-15).
 scenario_file = "ls-calf-roam.toml"
 
 [required]

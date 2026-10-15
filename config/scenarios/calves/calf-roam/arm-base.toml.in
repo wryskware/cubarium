@@ -13,7 +13,7 @@ parallel = 2
 est_h = 2.8
 binary = { tree = ".", commit = "368d2eda" }
 args = [
-  "--arm", "base=edit={job}/inputs/required/ls-calf-roam.toml",
+  "--arm", "base=edit=config/scenarios/calves/ls-calf-roam.toml",
   "--starts", "/home/wrysk/wryskware/cubarium/runs/lab/@SAVES@/batch-task/batch/settle/s*/run/ckpt/m000240",
   "--required", "config/scenarios/calves/required-wide-calf-roam.toml",
   "--hours", "4", "--threads", "2",

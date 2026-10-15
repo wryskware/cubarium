@@ -13,7 +13,7 @@ parallel = 2
 est_h = 2.8
 binary = { tree = ".", commit = "368d2eda" }
 args = [
-  "--arm", "b=edit={job}/inputs/required/ls-calf-roam.toml set=fauna.founders.loftstrider.young.lost_s.1=30 set=fauna.founders.loftstrider.young.excursion_per_h.1=8",
+  "--arm", "b=edit=config/scenarios/calves/ls-calf-roam.toml set=fauna.founders.loftstrider.young.lost_s.1=30 set=fauna.founders.loftstrider.young.excursion_per_h.1=8",
   "--starts", "/home/wrysk/wryskware/cubarium/runs/lab/@SAVES@/batch-task/batch/settle/s*/run/ckpt/m000240",
   "--required", "config/scenarios/calves/required-wide-calf-roam.toml",
   "--hours", "4", "--threads", "2",
