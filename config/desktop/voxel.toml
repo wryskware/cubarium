@@ -128,6 +128,10 @@ mass_scale = 60.0
 capgnawer_stay_worth = 0.25
 
 [fauna.founders.loftstrider]
+# LS-BROWSE (Wrysk 2026-10-14, "yes on loftstriders"): leaves are picked, not gulped, and a
+#  stand's bites shrink as it is stripped, so a family eats a few minutes at a tree and moves on.
+foliage_handling = 0.9
+strip_exponent = 0.5
 # LS-TOGETHER, Wrysk 2026-10-11: "those loftstriders can never meet each other to breed".
 founding_together = true
 founding_min_region_faces = 500
